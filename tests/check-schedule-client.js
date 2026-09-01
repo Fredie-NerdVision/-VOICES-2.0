@@ -1,0 +1,63 @@
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const projectRoot = path.resolve(__dirname, '..');
+const html = fs.readFileSync(path.join(projectRoot, 'Index.html'), 'utf8');
+const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const context = {
+  console,
+  document: {
+    addEventListener() {},
+    getElementById() { return null; },
+    querySelectorAll() { return []; }
+  },
+  window: {}
+};
+
+vm.createContext(context);
+vm.runInContext(script, context);
+
+const result = vm.runInContext(`
+(() => {
+  state.scheduleData = {
+    date: '2026-09-01',
+    aides: [{ email: 'aide@example.org', weeklyHours: 29 }],
+    schedule: {
+      periods: [
+        { periodId: 'P1', startTime: '08:00', endTime: '12:00' },
+        { periodId: 'P2', startTime: '12:00', endTime: '14:00' }
+      ],
+      assignments: []
+    },
+    week: {
+      summary: {
+        aides: [{
+          email: 'aide@example.org',
+          assignedHours: 20,
+          byDay: [{ date: '2026-09-01', hours: 4 }]
+        }]
+      }
+    }
+  };
+  const assignments = [
+    { periodId: 'P1', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' },
+    { periodId: 'P2', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' }
+  ];
+  const hours = scheduleLiveHoursForAide_('aide@example.org', assignments);
+  if (hours.dailyHours !== 5.5 || !hours.lunchDeducted) {
+    throw new Error('Six-hour day did not deduct a half-hour lunch.');
+  }
+  if (hours.weeklyHours !== 21.5) {
+    throw new Error('Projected weekly hours did not replace the selected day.');
+  }
+  state.scheduleData.schedule.periods = [{ periodId: 'P1', startTime: '08:00', endTime: '13:00' }];
+  const fiveHours = scheduleLiveHoursForAide_('aide@example.org', [assignments[0]]);
+  if (fiveHours.dailyHours !== 5 || fiveHours.lunchDeducted) {
+    throw new Error('A five-hour day incorrectly deducted lunch.');
+  }
+  return hours;
+})()
+`, context);
+
+console.log('Schedule client hours passed:', JSON.stringify(result));

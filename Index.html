@@ -1,0 +1,2657 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08090b;
+      --panel: rgba(25, 27, 31, .84);
+      --panel-strong: #1a1c20;
+      --panel-soft: #111318;
+      --border: rgba(255, 255, 255, .09);
+      --text: #f7f7f8;
+      --muted: #a6a8ad;
+      --red: #e10600;
+      --red-soft: rgba(225, 6, 0, .14);
+      --green: #48c78e;
+      --amber: #f4b942;
+      --radius: 22px;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .32);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(225, 6, 0, .12), transparent 30%),
+        radial-gradient(circle at 90% 15%, rgba(255, 255, 255, .04), transparent 28%),
+        var(--bg);
+      color: var(--text);
+      font: 15px/1.45 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .hidden { display: none !important; }
+    .loading {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      display: grid;
+      place-items: center;
+      background: #050607;
+      transition: opacity .4s ease, visibility .4s ease;
+    }
+    .loading.done { opacity: 0; visibility: hidden; }
+    .loading-inner { text-align: center; }
+    .loading-logo {
+      width: 150px;
+      height: 110px;
+      object-fit: contain;
+      filter: drop-shadow(0 0 12px rgba(225, 6, 0, .25));
+      animation: pulse 2.6s ease-in-out infinite;
+    }
+    .loading-title {
+      margin-top: 22px;
+      font-size: 14px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      color: #d5d6d8;
+    }
+    .loading-dots::after {
+      content: "";
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(.97); filter: drop-shadow(0 0 7px rgba(225, 6, 0, .22)); }
+      50% { transform: scale(1.035); filter: drop-shadow(0 0 26px rgba(225, 6, 0, .72)); }
+    }
+    @keyframes dots {
+      0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; }
+    }
+    .shell { max-width: 1500px; margin: 0 auto; padding: 22px; }
+    .topbar {
+      position: sticky;
+      top: 12px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 22px;
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: rgba(13, 14, 17, .78);
+      backdrop-filter: blur(24px);
+      box-shadow: var(--shadow);
+    }
+    .brand, .user-block, .toolbar, .row { display: flex; align-items: center; gap: 12px; }
+    .brand img { width: 58px; height: 42px; object-fit: contain; }
+    .brand strong { font-size: 17px; letter-spacing: .08em; }
+    .eyebrow {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .welcome { font-size: 14px; text-align: right; }
+    .role-chip, .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(255,255,255,.03);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .chip.critical { color: #ffb4b0; border-color: rgba(225,6,0,.35); background: var(--red-soft); }
+    .tabs {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      margin-bottom: 18px;
+      padding: 5px;
+      width: max-content;
+      max-width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(255,255,255,.025);
+    }
+    .tab {
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      padding: 9px 14px;
+    }
+    .tab.active { background: #2a2c32; color: white; }
+    .grid { display: grid; gap: 18px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .span-2 { grid-column: span 2; }
+    .card {
+      min-width: 0;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: linear-gradient(145deg, rgba(31,33,38,.9), rgba(18,20,24,.9));
+      box-shadow: var(--shadow);
+    }
+    .card.red-tint { background: linear-gradient(145deg, rgba(73,14,15,.65), rgba(21,19,23,.92)); }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .card h2, .card h3, .card p { margin-top: 0; }
+    .card h2 { margin-bottom: 4px; font-size: 18px; }
+    .card h3 { margin-bottom: 6px; font-size: 15px; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .hero-value { margin: 8px 0 3px; font-size: clamp(24px, 4vw, 40px); font-weight: 750; letter-spacing: -.035em; }
+    .assignment-title { font-size: 24px; font-weight: 750; }
+    .message {
+      margin: 0 0 10px;
+      padding: 14px;
+      border-left: 3px solid var(--red);
+      border-radius: 5px 14px 14px 5px;
+      background: rgba(255,255,255,.035);
+    }
+    .message-meta { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .list { display: grid; gap: 10px; }
+    .list-item {
+      padding: 13px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(255,255,255,.025);
+    }
+    .list-item.urgent { border-color: rgba(225,6,0,.5); background: var(--red-soft); }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .field { display: grid; gap: 6px; min-width: 0; }
+    .field.full { grid-column: 1 / -1; }
+    label { color: #d8d9dc; font-size: 12px; font-weight: 650; }
+    input, select, textarea {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      outline: 0;
+      background: #111318;
+      color: var(--text);
+      padding: 10px 12px;
+    }
+    input:focus, select:focus, textarea:focus { border-color: rgba(225,6,0,.75); box-shadow: 0 0 0 3px rgba(225,6,0,.12); }
+    textarea { min-height: 90px; resize: vertical; }
+    input[type="checkbox"], input[type="radio"] { width: auto; min-height: auto; accent-color: var(--red); }
+    .checks { display: flex; flex-wrap: wrap; gap: 8px; }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #111318;
+    }
+    .btn {
+      min-height: 40px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #25272d;
+      color: white;
+      padding: 9px 14px;
+      font-weight: 700;
+    }
+    .btn:hover { transform: translateY(-1px); background: #30323a; }
+    .btn.primary { border-color: #ff2b25; background: var(--red); }
+    .btn.ghost { background: transparent; }
+    .btn.danger { color: #ffaaa7; background: var(--red-soft); border-color: rgba(225,6,0,.35); }
+    .btn.small-btn { min-height: 32px; padding: 6px 10px; font-size: 12px; }
+    .btn:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .55; }
+    .busy-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      display: grid;
+      place-items: center;
+      background: rgba(5, 6, 7, .66);
+      backdrop-filter: blur(4px);
+    }
+    .busy-card {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: min(360px, calc(100vw - 32px));
+      padding: 17px 20px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: #1a1c20;
+      box-shadow: var(--shadow);
+    }
+    .spinner {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 auto;
+      border: 3px solid rgba(255,255,255,.18);
+      border-top-color: var(--red);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .benchmark-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 18px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(255,255,255,.025);
+    }
+    .benchmark-card + .benchmark-card { margin-top: 12px; }
+    .score-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .schedule-strip { display: grid; gap: 8px; }
+    .schedule-row {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .schedule-row:last-child { border-bottom: 0; }
+    .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 16px; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 800px; }
+    th, td { min-width: 190px; padding: 10px; vertical-align: top; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    th { position: sticky; top: 0; z-index: 2; background: #202228; text-align: left; font-size: 12px; }
+    th:first-child, td:first-child { position: sticky; left: 0; z-index: 3; min-width: 160px; background: #17191e; }
+    .schedule-scroll-tools {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .schedule-x-scroll {
+      height: 18px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: #111318;
+    }
+    .schedule-x-scroll-track { height: 1px; }
+    .schedule-table-wrap {
+      max-height: min(68vh, 760px);
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+    }
+    .schedule-table-wrap table { width: max-content; min-width: 100%; }
+    .schedule-table-wrap thead th {
+      top: 0;
+      z-index: 5;
+      box-shadow: 0 2px 0 rgba(255,255,255,.12);
+      white-space: nowrap;
+    }
+    .schedule-table-wrap thead th:first-child { z-index: 7; }
+    .schedule-table-wrap tbody td:first-child { z-index: 4; }
+    .schedule-assignment-cell.blocked { background: rgba(225, 6, 0, .1); }
+    .schedule-assignment-cell.warning { background: rgba(244, 185, 66, .08); }
+    .schedule-cell-alert {
+      padding: 7px 8px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 9px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .schedule-cell-alert.blocked { color: #ffb4b0; border-color: rgba(225,6,0,.4); background: rgba(225,6,0,.13); }
+    .schedule-cell-alert.warning { color: #ffd887; border-color: rgba(244,185,66,.4); background: rgba(244,185,66,.1); }
+    .schedule-header-hours { margin-top: 5px; color: #fff; font-size: 11px; font-weight: 750; }
+    .schedule-aide-off { margin-top: 7px; }
+    .coverage-assistant { display: grid; gap: 10px; }
+    .coverage-assistant-item {
+      display: grid;
+      gap: 8px;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255,255,255,.025);
+    }
+    .coverage-assistant-item.blocked { border-color: rgba(225,6,0,.42); background: rgba(225,6,0,.08); }
+    .replacement-options { display: flex; flex-wrap: wrap; gap: 7px; }
+    .schedule-cell { display: grid; gap: 7px; }
+    .schedule-cell input, .schedule-cell select { min-height: 34px; padding: 6px 8px; font-size: 12px; }
+    .period-editor { display: grid; gap: 8px; }
+    .period-editor input { min-height: 34px; padding: 6px 8px; }
+    .week-bar { display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); gap: 8px; overflow-x: auto; }
+    .week-day {
+      display: grid;
+      gap: 4px;
+      min-width: 110px;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: rgba(255,255,255,.025);
+      color: var(--text);
+      text-align: left;
+    }
+    .week-day.active { border-color: rgba(225,6,0,.8); background: var(--red-soft); }
+    .week-day strong { font-size: 13px; }
+    .week-day span { color: var(--muted); font-size: 11px; }
+    .capacity-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 9px; }
+    .capacity-item { padding: 12px; border: 1px solid var(--border); border-radius: 13px; background: rgba(255,255,255,.025); }
+    .capacity-item.over { border-color: rgba(225,6,0,.55); background: var(--red-soft); }
+    .capacity-item .hours { font-size: 19px; font-weight: 750; }
+    .week-day-schedule { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .week-day-schedule summary { cursor: pointer; padding: 13px; background: rgba(255,255,255,.035); font-weight: 700; }
+    .week-day-schedule[open] summary { border-bottom: 1px solid var(--border); }
+    .week-day-schedule .schedule-strip { padding: 0 13px; }
+    .chart {
+      min-height: 270px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: #0f1115;
+      overflow: hidden;
+    }
+    .chart svg { width: 100%; height: 270px; }
+    .metric { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+    .metric:last-child { border-bottom: 0; }
+    .section-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .master-detail { display: grid; grid-template-columns: minmax(300px, .85fr) minmax(0, 1.4fr); gap: 18px; }
+    .scroll-list { max-height: 720px; overflow: auto; padding-right: 4px; }
+    .objective-preview, .goal-card { display: grid; gap: 12px; }
+    .objective-preview { padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: rgba(255,255,255,.025); }
+    .goal-card { padding: 16px; border: 1px solid var(--border); border-radius: 16px; background: rgba(255,255,255,.025); }
+    .benchmark-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #111318;
+    }
+    .benchmark-row.active { border-color: rgba(72,199,142,.45); }
+    .goal-legend { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
+    .goal-legend-item { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .goal-legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .mobile-cm-note { display: none; }
+    .status-approved { color: #9ef0c7; border-color: rgba(72,199,142,.35); }
+    .status-denied { color: #ffaaa7; border-color: rgba(225,6,0,.35); }
+    .status-pending { color: #ffd887; border-color: rgba(244,185,66,.35); }
+    .toast {
+      position: fixed;
+      right: 22px;
+      bottom: 22px;
+      z-index: 1200;
+      max-width: 420px;
+      padding: 13px 16px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #25272d;
+      box-shadow: var(--shadow);
+      transform: translateY(30px);
+      opacity: 0;
+      pointer-events: none;
+      transition: .25s ease;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.error { border-color: rgba(225,6,0,.6); background: #461719; }
+    dialog {
+      width: min(680px, calc(100vw - 30px));
+      max-height: 90vh;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: #15171b;
+      color: var(--text);
+      padding: 22px;
+      box-shadow: 0 30px 90px #000;
+    }
+    dialog.wide-dialog { width: min(1000px, calc(100vw - 30px)); }
+    dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+    .empty { padding: 24px; text-align: center; color: var(--muted); }
+    @media (max-width: 900px) {
+      .grid.two, .grid.three, .form-grid.three { grid-template-columns: 1fr; }
+      .master-detail { grid-template-columns: 1fr; }
+      .span-2 { grid-column: auto; }
+      .benchmark-card { grid-template-columns: 1fr; }
+      .topbar { align-items: flex-start; }
+      .desktop-cm-only { display: none !important; }
+      .mobile-cm-note { display: block; }
+    }
+    @media (max-width: 620px) {
+      .shell { padding: 12px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .topbar .brand strong { display: none; }
+      .welcome { max-width: 190px; }
+      .card { padding: 16px; border-radius: 18px; }
+      .toolbar { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">
+    <div class="loading-inner">
+      <img id="loadingLogo" class="loading-logo" src="<?!= defaultLogo ?>" alt="V.O.I.C.E.S logo">
+      <div class="loading-title">V.O.I.C.E.S 2.0 Initializing<span class="loading-dots"></span></div>
+    </div>
+  </div>
+
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <img id="brandLogo" src="<?!= defaultLogo ?>" alt="">
+        <div>
+          <strong>V.O.I.C.E.S 2.0</strong>
+          <div class="eyebrow">Westminster High School</div>
+        </div>
+      </div>
+      <div class="user-block">
+        <button id="globalRefresh" class="btn ghost small-btn" type="button">Refresh</button>
+        <div class="welcome">
+          <div id="welcomeName">Welcome</div>
+          <span id="roleChip" class="role-chip"></span>
+        </div>
+      </div>
+    </header>
+
+    <div id="fatalError" class="card red-tint hidden"></div>
+    <section id="aideView" class="hidden"></section>
+    <section id="caseManagerView" class="hidden"></section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <div id="busyOverlay" class="busy-overlay hidden" role="status" aria-live="polite">
+    <div class="busy-card"><span class="spinner"></span><div><strong id="busyMessage">Working…</strong><div class="muted small">Please wait. Controls are temporarily locked.</div></div></div>
+  </div>
+
+  <dialog id="callOffDialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Staff absence</div><h2>Call off</h2></div>
+      <button class="btn ghost small-btn" onclick="closeDialog('callOffDialog')">Close</button>
+    </div>
+    <form id="callOffForm" class="form-grid">
+      <div class="field"><label>First date</label><input name="startDate" type="date" required></div>
+      <div class="field"><label>Last date</label><input name="endDate" type="date" required></div>
+      <div class="field">
+        <label>Call-off type</label>
+        <select name="type" required>
+          <option value="">Choose type</option><option>Sick</option><option>Personal business</option>
+          <option>Family emergency</option><option>Bereavement</option><option>Other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Do you have enough hours?</label>
+        <div class="checks">
+          <label class="check"><input type="radio" name="hasHours" value="true" required> Yes</label>
+          <label class="check"><input type="radio" name="hasHours" value="false"> No</label>
+        </div>
+      </div>
+      <div class="field full"><label>Specific reason</label><textarea name="reason" required></textarea></div>
+      <div class="field full"><button class="btn primary" type="submit">Submit call-off and check coverage</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="timeOffDialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Hours</div><h2>Request time off</h2></div>
+      <button class="btn ghost small-btn" onclick="closeDialog('timeOffDialog')">Close</button>
+    </div>
+    <form id="timeOffForm" class="form-grid">
+      <div class="field"><label>First date</label><input name="startDate" type="date" required></div>
+      <div class="field"><label>Last date</label><input name="endDate" type="date" required></div>
+      <div class="field">
+        <label>Hours type</label>
+        <select name="type" required><option>Sick</option><option>Personal business</option><option>Holiday</option><option>Unpaid</option><option>Other</option></select>
+      </div>
+      <div class="field"><label class="check"><input type="checkbox" name="hasHours"> I have enough hours</label></div>
+      <div class="field full"><label>Reason</label><textarea name="reason" required></textarea></div>
+      <div class="field full"><button class="btn primary" type="submit">Send request</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="availabilityDialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Weekly schedule</div><h2>Update availability</h2></div>
+      <button class="btn ghost small-btn" onclick="closeDialog('availabilityDialog')">Close</button>
+    </div>
+    <form id="availabilityForm">
+      <div id="availabilityDays" class="list"></div>
+      <div class="dialog-actions"><button class="btn primary" type="submit">Send availability</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="fullScheduleDialog" class="wide-dialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Weekly coverage</div><h2 id="fullScheduleTitle">Weekly View</h2></div>
+      <div class="toolbar"><button id="refreshFullSchedule" class="btn ghost small-btn" type="button">Refresh</button><button class="btn ghost small-btn" onclick="closeDialog('fullScheduleDialog')">Close</button></div>
+    </div>
+    <div id="fullScheduleContent"></div>
+  </dialog>
+
+  <dialog id="benchmarkHistoryDialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Benchmark history</div><h2 id="benchmarkHistoryTitle">Entries</h2></div>
+      <button class="btn ghost small-btn" onclick="closeDialog('benchmarkHistoryDialog')">Close</button>
+    </div>
+    <div id="benchmarkHistoryContent"></div>
+  </dialog>
+
+  <script>
+    const state = {
+      data: null,
+      selectedTab: 'overview',
+      benchmarkResults: [],
+      scheduleData: null,
+      editingBenchmarkId: null,
+      benchmarkStudentId: '',
+      goalStudentId: '',
+      goalWorkspaceCache: {},
+      benchmarkEntryCache: {},
+      parsedObjectives: [],
+      editingMessageId: '',
+      editingStaffEmail: '',
+      editingStudentId: '',
+      lookupClassId: '',
+      aideWeekDate: '',
+      fullScheduleDate: '',
+      pendingOperations: 0
+    };
+
+    document.addEventListener('DOMContentLoaded', init);
+
+    async function init() {
+      bindStaticForms();
+      renderAvailabilityDays();
+      document.getElementById('globalRefresh').addEventListener('click', async () => {
+        try {
+          await refreshBootstrap(state.selectedTab);
+          toast('Data refreshed.');
+        } catch (error) { toast(safeErrorMessage(error), true); }
+      });
+      try {
+        state.data = normalizeBootstrap(await server('getAppBootstrap'));
+        document.getElementById('loadingLogo').src = state.data.logo;
+        document.getElementById('brandLogo').src = state.data.logo;
+        document.getElementById('welcomeName').textContent = 'Welcome ' + state.data.user.firstName;
+        document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
+        if (state.data.view === 'CASE_MANAGER') renderCaseManager();
+        else renderAide();
+      } catch (error) {
+        showFatal(error);
+      } finally {
+        window.setTimeout(() => document.getElementById('loading').classList.add('done'), 650);
+      }
+    }
+
+    function renderAide() {
+      const root = document.getElementById('aideView');
+      root.classList.remove('hidden');
+      const messages = state.data.dailyMessages.length
+        ? state.data.dailyMessages.map(item => `
+          <div class="message">
+            ${escapeHtml(item.message)}
+            <div class="message-meta"><span class="chip">By ${escapeHtml(item.creatorLastName || 'Staff')}</span></div>
+          </div>`).join('')
+        : '<div class="empty">No daily messages today.</div>';
+      const current = state.data.currentAssignment;
+      const assignment = current && current.assignment;
+      const critical = renderCriticalList(state.data.criticalBenchmarks);
+      const pay = state.data.aide.currentPayPeriod;
+      root.innerHTML = `
+        <div class="grid two">
+          <article class="card span-2">
+            <div class="card-header"><div><div class="eyebrow">Today</div><h2>Daily message board</h2></div><span class="chip">${escapeHtml(state.data.today)}</span></div>
+            ${messages}
+          </article>
+          <article class="card red-tint">
+            <div class="eyebrow">Current assignment</div>
+            ${current ? `
+              <div class="hero-value">${escapeHtml(current.periodLabel)}</div>
+              <div class="assignment-title">${escapeHtml(assignment ? assignment.duty || assignment.className || 'Assignment' : 'No assignment')}</div>
+              <p class="muted">${escapeHtml(current.startTime)}–${escapeHtml(current.endTime)}${assignment && assignment.studentName ? ' · ' + escapeHtml(assignment.studentName) : ''}</p>
+              ${assignment && assignment.note ? `<div class="message">${escapeHtml(assignment.note)}</div>` : ''}
+            ` : '<div class="empty">There is no active period right now.</div>'}
+          </article>
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Needs data</div><h2>Critical benchmarks</h2></div><span class="chip critical">${state.data.criticalBenchmarks.length}</span></div>
+            ${critical}
+          </article>
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Today</div><h2>My schedule</h2></div><button id="fullScheduleButton" class="btn ghost small-btn">Weekly View</button></div>
+            <div class="schedule-strip">${state.data.aide.schedule.periods.map(period => `
+              <div class="schedule-row">
+                <div><strong>${escapeHtml(period.label)}</strong><div class="muted small">${escapeHtml(period.startTime)}–${escapeHtml(period.endTime)}</div></div>
+                <div>${period.assignment ? `<strong>${escapeHtml(period.assignment.duty || period.assignment.className || 'Assignment')}</strong>${period.assignment.studentName ? `<div class="muted small">${escapeHtml(period.assignment.studentName)}</div>` : ''}` : '<span class="muted">No assignment</span>'}</div>
+              </div>`).join('')}</div>
+          </article>
+          <article class="card ${state.data.user.role === 'AIDE' ? '' : 'hidden'}">
+            <div class="card-header"><div><div class="eyebrow">Approved coverage</div><h2>My trained 1:1 students</h2></div><span class="chip">${state.data.aide.trainedStudents.length}</span></div>
+            <div class="checks">${state.data.aide.trainedStudents.length ? state.data.aide.trainedStudents.map(item => `<span class="chip">${escapeHtml(item.name)}</span>`).join('') : '<span class="muted">No trained 1:1 assignments are listed.</span>'}</div>
+          </article>
+          <article class="card span-2">
+            ${benchmarkLookupMarkup()}
+            <div id="benchmarkResults" style="margin-top:18px"></div>
+          </article>
+          <article class="card span-2 ${state.data.user.role === 'AIDE' ? '' : 'hidden'}">
+            <div class="card-header">
+              <div><div class="eyebrow">Personal records</div><h2>Hours</h2><p class="muted">${escapeHtml(pay.notice || '')}</p></div>
+              <div class="toolbar">
+                <button id="clockButton" class="btn primary">${state.data.aide.openTimeEntry ? 'Clock out' : 'Clock in'}</button>
+                <button class="btn" onclick="openDialog('callOffDialog')">Call off</button>
+              </div>
+            </div>
+            <div class="grid three">
+              <div class="list-item"><div class="eyebrow">Pay period</div><div class="hero-value">${escapeHtml(String(pay.totalHours))}</div><div class="muted">tracked hours · ${escapeHtml(pay.startDate)}–${escapeHtml(pay.endDate)}</div></div>
+              <div class="list-item"><div class="eyebrow">Days worked</div><div class="hero-value">${pay.entries.filter(item => item.clockOut).length}</div><div class="muted">completed entries</div></div>
+              <div class="list-item"><div class="eyebrow">Approved days off</div><div class="hero-value">${pay.daysOff.length}</div><div class="muted">within this pay period</div></div>
+            </div>
+            <div class="toolbar" style="margin-top:16px">
+              <button class="btn" onclick="openDialog('timeOffDialog')">Request time off</button>
+              <button class="btn" onclick="openDialog('availabilityDialog')">Availability</button>
+            </div>
+            <div class="message" style="margin-top:16px">${escapeHtml(pay.instructions || '')}</div>
+            ${renderTimeEntries(pay)}
+          </article>
+        </div>`;
+      bindAideEvents();
+    }
+
+    function renderCaseManager() {
+      const root = document.getElementById('caseManagerView');
+      if (!state.data.caseManager) {
+        root.classList.remove('hidden');
+        root.innerHTML = '<article class="card red-tint">Case-manager data was unavailable. Refresh and try again.</article>';
+        return;
+      }
+      root.classList.remove('hidden');
+      root.innerHTML = `
+        <nav class="tabs">
+          <button class="tab ${state.selectedTab === 'overview' ? 'active' : ''}" data-tab="overview">Overview</button>
+          <button class="tab ${state.selectedTab === 'entry' ? 'active' : ''}" data-tab="entry">Benchmark entry</button>
+          <button class="tab ${state.selectedTab === 'schedule' ? 'active' : ''}" data-tab="schedule">Schedule builder</button>
+          <button class="tab desktop-cm-only ${state.selectedTab === 'benchmarks' ? 'active' : ''}" data-tab="benchmarks">Goals</button>
+          <button class="tab ${state.selectedTab === 'people' ? 'active' : ''}" data-tab="people">People</button>
+          <button class="tab ${state.selectedTab === 'ieps' ? 'active' : ''}" data-tab="ieps">IEPs</button>
+          <button class="tab ${state.selectedTab === 'requests' ? 'active' : ''}" data-tab="requests">Requests</button>
+          <button class="tab ${state.selectedTab === 'admin' ? 'active' : ''}" data-tab="admin">Messages & branding</button>
+        </nav>
+        <div id="cmContent"></div>`;
+      root.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => {
+        state.selectedTab = button.dataset.tab;
+        root.querySelectorAll('.tab').forEach(item => item.classList.toggle('active', item === button));
+        renderCaseManagerTab();
+      }));
+      renderCaseManagerTab();
+    }
+
+    function renderCaseManagerTab() {
+      const content = document.getElementById('cmContent');
+      if (state.selectedTab === 'overview') renderOverview(content);
+      if (state.selectedTab === 'entry') renderDataEntry(content);
+      if (state.selectedTab === 'schedule') renderScheduleShell(content);
+      if (state.selectedTab === 'benchmarks') renderBenchmarkManager(content);
+      if (state.selectedTab === 'people') renderPeople(content);
+      if (state.selectedTab === 'ieps') renderIeps(content);
+      if (state.selectedTab === 'requests') renderRequests(content);
+      if (state.selectedTab === 'admin') renderAdmin(content);
+    }
+
+    function renderDataEntry(root) {
+      root.innerHTML = `
+        <article class="card">
+          ${benchmarkLookupMarkup()}
+          <div id="benchmarkResults" style="margin-top:18px"></div>
+        </article>`;
+      bindBenchmarkLookup();
+    }
+
+    function renderOverview(root) {
+      const cm = state.data.caseManager;
+      const messages = safeArray(state.data.dailyMessages);
+      if (!state.goalStudentId && cm.students[0]) state.goalStudentId = cm.students[0].id;
+      root.innerHTML = `
+        <div class="section-tools" style="margin-bottom:14px"><div><div class="eyebrow">Case manager dashboard</div><h2>Overview</h2></div><button class="btn ghost small-btn" type="button" data-refresh="overview">Refresh</button></div>
+        <article class="card mobile-cm-note">
+          <div class="eyebrow">Desktop workspace</div>
+          <h2>Student goal analytics are available on desktop</h2>
+          <p class="muted">The mobile dashboard stays streamlined for fast benchmark entry and daily tasks.</p>
+        </article>
+        <div class="grid two">
+          <article class="card span-2">
+            <div class="card-header"><div><div class="eyebrow">Today</div><h2>Global messages</h2></div><span class="chip">${escapeHtml(state.data.today)}</span></div>
+            ${messages.length ? messages.map(item => `
+              <div class="message">
+                ${escapeHtml(item.message)}
+                <div class="message-meta"><span class="chip">By ${escapeHtml(item.creatorLastName || 'Staff')}</span></div>
+              </div>`).join('') : '<div class="empty">No global messages today.</div>'}
+          </article>
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Action center</div><h2>To-do list</h2></div><span class="chip">${cm.toDos.length}</span></div>
+            <div class="list">${cm.toDos.length ? cm.toDos.map(item => `
+              <div class="list-item ${item.urgent ? 'urgent' : ''}">
+                <div class="row"><span class="chip ${item.urgent ? 'critical' : ''}">${escapeHtml(item.type)}</span><strong>${escapeHtml(item.title)}</strong></div>
+                <div class="muted small" style="margin-top:7px">${escapeHtml(item.detail)}</div>
+              </div>`).join('') : '<div class="empty">Nothing needs attention.</div>'}</div>
+          </article>
+          <article class="card desktop-cm-only">
+            <div class="card-header"><div><div class="eyebrow">Student workspace</div><h2>Goal progress</h2></div></div>
+            <div class="field"><label>Student</label><select id="goalStudent"><option value="">Choose student</option>${options(cm.students, 'id', 'name', state.goalStudentId)}</select></div>
+            <p class="muted small" style="margin:12px 0 0">Each colored line combines chronological entries from that annual goal’s three benchmarks.</p>
+          </article>
+          <article class="card span-2 desktop-cm-only">
+            <div class="card-header"><div><div class="eyebrow">Annual goals</div><h2>Progress over time</h2></div></div>
+            <div id="goalProgressChart" class="chart"><div class="empty">Choose a student to load goal progress.</div></div>
+            <div id="goalLegend" class="goal-legend"></div>
+          </article>
+          <article class="card span-2 desktop-cm-only">
+            <div class="card-header"><div><div class="eyebrow">Selected student</div><h2>Goals and benchmarks</h2></div></div>
+            <div id="goalWorkspace"><div class="empty">Choose a student to view goals.</div></div>
+          </article>
+        </div>`;
+      bindRefreshButtons(root);
+      const studentSelect = document.getElementById('goalStudent');
+      if (!studentSelect) return;
+      studentSelect.addEventListener('change', () => {
+        state.goalStudentId = studentSelect.value;
+        loadGoalWorkspace(state.goalStudentId);
+      });
+      if (state.goalStudentId) loadGoalWorkspace(state.goalStudentId);
+    }
+
+    function renderScheduleShell(root) {
+      root.innerHTML = `
+        <article class="card">
+          <div class="card-header">
+            <div><div class="eyebrow">Case manager tools</div><h2>Schedule builder</h2><p class="muted">Edit one day at a time while reviewing Monday–Sunday capacity. Warnings do not prevent scheduling.</p></div>
+            <button class="btn ghost small-btn" type="button" data-refresh="schedule">Refresh</button>
+          </div>
+          <div class="toolbar" style="justify-content:space-between">
+            <div class="toolbar">
+              <button id="previousScheduleWeek" class="btn ghost small-btn" type="button">Previous week</button>
+              <button id="nextScheduleWeek" class="btn ghost small-btn" type="button">Next week</button>
+            </div>
+            <div class="toolbar">
+            <div class="field"><label>Date</label><input id="scheduleDate" type="date" value="${escapeAttr(state.data.today)}"></div>
+            <div class="field"><label>Start from template</label><select id="scheduleTemplate"><option value="">Current day</option>${options(state.data.caseManager.scheduleTypes, 'id', 'name')}</select></div>
+            <button id="loadSchedule" class="btn primary">Load schedule</button>
+            </div>
+          </div>
+        </article>
+        <div id="scheduleWorkspace" style="margin-top:18px"><div class="card empty">Choose a date and load its schedule.</div></div>`;
+      document.getElementById('loadSchedule').addEventListener('click', loadScheduleBuilder);
+      document.getElementById('previousScheduleWeek').addEventListener('click', () => shiftScheduleDate(-7));
+      document.getElementById('nextScheduleWeek').addEventListener('click', () => shiftScheduleDate(7));
+      bindRefreshButtons(root);
+      loadScheduleBuilder();
+    }
+
+    function shiftScheduleDate(days) {
+      const input = document.getElementById('scheduleDate');
+      const date = new Date((input.value || state.data.today) + 'T12:00:00');
+      date.setDate(date.getDate() + days);
+      input.value = date.toISOString().slice(0, 10);
+      document.getElementById('scheduleTemplate').value = '';
+      loadScheduleBuilder();
+    }
+
+    async function loadScheduleBuilder() {
+      const date = document.getElementById('scheduleDate').value;
+      if (!date) return toast('Choose a date.', true);
+      try {
+        state.scheduleData = await server('getScheduleBuilderData', date);
+        if (!state.scheduleData || !state.scheduleData.schedule) throw new Error('The schedule response was incomplete.');
+        state.scheduleData.aides = safeArray(state.scheduleData.aides);
+        state.scheduleData.classes = safeArray(state.scheduleData.classes);
+        state.scheduleData.oneToOneStudents = safeArray(state.scheduleData.oneToOneStudents);
+        state.scheduleData.scheduleTypes = safeArray(state.scheduleData.scheduleTypes);
+        state.scheduleData.training = safeArray(state.scheduleData.training);
+        state.scheduleData.staffingStatus = safeArray(state.scheduleData.staffingStatus);
+        state.scheduleData.unassignedOneToOnes = safeArray(state.scheduleData.unassignedOneToOnes);
+        state.scheduleData.unavailable = safeArray(state.scheduleData.unavailable);
+        state.scheduleData.schedule.periods = safeArray(state.scheduleData.schedule.periods);
+        state.scheduleData.schedule.assignments = safeArray(state.scheduleData.schedule.assignments);
+        state.scheduleData.week = normalizeWeekData(state.scheduleData.week);
+        const templateId = document.getElementById('scheduleTemplate').value;
+        if (templateId) {
+          const template = state.scheduleData.scheduleTypes.find(item => String(item.id) === templateId);
+          if (template) {
+            state.scheduleData.schedule.periods = safeArray(template.periods).map(item => ({...item}));
+            state.scheduleData.schedule.assignments = safeArray(template.assignments).map(item => ({...item, id: '', date}));
+            state.scheduleData.schedule.baseScheduleTypeId = template.id;
+            state.scheduleData.schedule.name = template.name + ' · ' + date;
+          }
+        }
+        renderScheduleWorkspace();
+        if (templateId) scheduleDraftChanged();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function renderScheduleWorkspace() {
+      const data = state.scheduleData;
+      const workspace = document.getElementById('scheduleWorkspace');
+      workspace.innerHTML = `
+        <article class="card">
+          <div class="card-header">
+            <div><div class="eyebrow">Weekly View</div><h2>${escapeHtml(formatDateRange(data.week.weekStart, data.week.weekEnd))}</h2><p class="muted">Select a day to open it in the daily editor. Weekly warnings change only when you submit the draft for recalculation.</p></div>
+          </div>
+          <div id="scheduleWeekBar">${renderScheduleWeekBar(data.week, data.date)}</div>
+          <div id="scheduleCapacitySummary" style="margin-top:16px">${renderCapacitySummary(data.week.summary)}</div>
+        </article>
+        <div class="grid two">
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Schedule details</div><h2>${escapeHtml(data.schedule.name)}</h2></div><span class="chip">${escapeHtml(data.date)}</span></div>
+            <div class="form-grid">
+              <div class="field"><label>Schedule name</label><input id="scheduleName" value="${escapeAttr(data.schedule.name)}"></div>
+              <div class="field"><label>Base type</label><select id="scheduleBase"><option value="">Custom</option>${options(data.scheduleTypes, 'id', 'name', data.schedule.baseScheduleTypeId)}</select></div>
+            </div>
+          </article>
+          <article class="card ${data.unassignedOneToOnes.length ? 'red-tint' : ''}">
+            <div class="card-header"><div><div class="eyebrow">Coverage check</div><h2>Staffing assistant</h2></div><span id="scheduleCoverageCount" class="chip">0</span></div>
+            <div id="scheduleCoverageAssistant" class="coverage-assistant"></div>
+          </article>
+        </div>
+        <article class="card" style="margin-top:18px">
+          <div class="card-header">
+            <div><div class="eyebrow">Rows are periods · columns are aides</div><h2>Assignments</h2></div>
+            <div class="toolbar"><button id="addPeriod" class="btn">Add period</button><button id="submitScheduleChanges" class="btn">Submit changes to recalculate</button><button id="saveScheduleType" class="btn">Save as schedule type</button><button id="saveSchedule" class="btn primary">Save temporary schedule</button></div>
+          </div>
+          <p class="muted small">Header hours update instantly. Recalculation updates weekly warnings but does not save the schedule.</p>
+          <div class="schedule-scroll-tools">
+            <span class="muted small">Scroll across aide columns</span>
+            <div class="toolbar">
+              <button id="scheduleScrollLeft" class="btn ghost small-btn" type="button">Earlier aides</button>
+              <button id="scheduleScrollRight" class="btn ghost small-btn" type="button">Later aides</button>
+            </div>
+          </div>
+          <div id="scheduleTopScroll" class="schedule-x-scroll" aria-label="Scroll across aide columns"><div id="scheduleTopScrollTrack" class="schedule-x-scroll-track"></div></div>
+          <div id="scheduleTableWrap" class="table-wrap schedule-table-wrap"><table id="scheduleTable"></table></div>
+        </article>`;
+      renderScheduleTable();
+      renderScheduleCoverageAssistant();
+      bindScheduleWeekDays();
+      document.getElementById('addPeriod').addEventListener('click', () => {
+        const number = data.schedule.periods.length + 1;
+        data.schedule.periods.push({ periodId: 'CUSTOM_' + Date.now(), label: 'Period ' + number, startTime: '08:00', endTime: '08:50', sortOrder: number });
+        renderScheduleTable();
+        scheduleDraftChanged();
+      });
+      document.getElementById('submitScheduleChanges').addEventListener('click', submitScheduleChanges_);
+      document.getElementById('saveSchedule').addEventListener('click', saveScheduleFromGrid);
+      document.getElementById('saveScheduleType').addEventListener('click', saveCurrentAsScheduleType);
+    }
+
+    function normalizeWeekData(value) {
+      value = value && typeof value === 'object' ? value : {};
+      value.days = safeArray(value.days).map(day => Object.assign({}, day || {}, {
+        periods: safeArray(day && day.periods),
+        assignments: safeArray(day && day.assignments),
+        conflicts: safeArray(day && day.conflicts)
+      }));
+      value.aides = safeArray(value.aides);
+      value.summary = value.summary || {};
+      value.summary.aides = safeArray(value.summary.aides).map(item => Object.assign({}, item || {}, {
+        byDay: safeArray(item && item.byDay)
+      }));
+      value.summary.overCapacity = safeArray(value.summary.overCapacity);
+      value.summary.totals = value.summary.totals || {};
+      return value;
+    }
+
+    function renderScheduleWeekBar(week, activeDate) {
+      return `<div class="week-bar">${safeArray(week.days).map(day => {
+        const totalHours = safeArray(week.summary.aides).reduce((total, aide) => {
+          const record = safeArray(aide.byDay).find(item => item.date === day.date);
+          return total + Number(record && record.hours || 0);
+        }, 0);
+        return `<button class="week-day ${day.date === activeDate ? 'active' : ''}" type="button" data-schedule-day="${escapeAttr(day.date)}">
+          <strong>${escapeHtml(titleCase(day.dayName || ''))}</strong>
+          <span>${escapeHtml(formatShortDate(day.date))}</span>
+          <span>${escapeHtml(scheduleSourceLabel(day.source))} · ${escapeHtml(String(roundClientHours(totalHours)))} staff hrs</span>
+          ${safeArray(day.conflicts).length ? `<span class="status-denied">${day.conflicts.length} conflict${day.conflicts.length === 1 ? '' : 's'}</span>` : ''}
+        </button>`;
+      }).join('')}</div>`;
+    }
+
+    function bindScheduleWeekDays() {
+      document.querySelectorAll('[data-schedule-day]').forEach(button => button.addEventListener('click', () => {
+        document.getElementById('scheduleDate').value = button.dataset.scheduleDay;
+        document.getElementById('scheduleTemplate').value = '';
+        loadScheduleBuilder();
+      }));
+    }
+
+    function renderCapacitySummary(summary) {
+      summary = summary || {};
+      const aides = safeArray(summary.aides);
+      return `
+        ${safeArray(summary.overCapacity).length ? `<div class="message"><strong>${summary.overCapacity.length} aide${summary.overCapacity.length === 1 ? '' : 's'} above weekly capacity.</strong> Review the highlighted totals before saving.</div>` : ''}
+        <div class="capacity-rail">${aides.map(item => {
+          const capacity = item.capacityHours == null ? 'Not set' : item.capacityHours + ' hrs';
+          const difference = item.deltaHours == null
+            ? 'Add weekly hours in People'
+            : (item.deltaHours > 0 ? item.deltaHours + ' over' : Math.abs(item.deltaHours) + ' remaining');
+          return `<div class="capacity-item ${item.status === 'OVER' ? 'over' : ''}">
+            <div class="row" style="justify-content:space-between"><strong>${escapeHtml(item.displayName || item.email)}</strong><span class="chip ${item.status === 'OVER' ? 'critical' : ''}">${escapeHtml(item.status || 'UNSET')}</span></div>
+            <div class="hours">${escapeHtml(String(item.assignedHours || 0))} / ${escapeHtml(capacity)}</div>
+            <div class="muted small">${escapeHtml(difference)}</div>
+          </div>`;
+        }).join('')}</div>`;
+    }
+
+    function scheduleSourceLabel(value) {
+      return value === 'DAY' ? 'Saved day' : value === 'TEMPLATE' ? 'Template' : value === 'DRAFT' ? 'Unsaved' : 'No schedule';
+    }
+
+    function formatShortDate(value) {
+      const date = new Date(String(value || '') + 'T12:00:00');
+      return Number.isNaN(date.getTime())
+        ? String(value || '')
+        : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function formatDateRange(start, end) {
+      return `${formatShortDate(start)}–${formatShortDate(end)}`;
+    }
+
+    function roundClientHours(value) {
+      return Math.round(Number(value || 0) * 100) / 100;
+    }
+
+    function scheduleDraftChanged() {
+      if (!state.scheduleData || !document.getElementById('scheduleTable')) return;
+      state.scheduleData.schedule.assignments = collectScheduleAssignments();
+      refreshScheduleCellStatusIndicators_();
+      updateScheduleHeaderHours_();
+      renderScheduleCoverageAssistant();
+      const button = document.getElementById('submitScheduleChanges');
+      if (button) {
+        button.classList.add('primary');
+        button.textContent = 'Submit changes to recalculate';
+      }
+    }
+
+    async function submitScheduleChanges_() {
+      const summary = await previewScheduleWeek();
+      if (!summary) return;
+      const button = document.getElementById('submitScheduleChanges');
+      if (button) {
+        button.classList.remove('primary');
+        button.textContent = 'Recalculate submitted draft';
+      }
+      toast('Draft recalculated. The schedule has not been saved.');
+    }
+
+    async function previewScheduleWeek() {
+      if (!state.scheduleData || !document.getElementById('scheduleTable')) return null;
+      const payload = currentSchedulePayload();
+      try {
+        const summary = await server('previewWeeklyHours', payload);
+        state.scheduleData.week.summary = summary || {};
+        const day = state.scheduleData.week.days.find(item => item.date === state.scheduleData.date);
+        if (day) day.source = 'DRAFT';
+        document.getElementById('scheduleCapacitySummary').innerHTML = renderCapacitySummary(summary);
+        document.getElementById('scheduleWeekBar').innerHTML = renderScheduleWeekBar(state.scheduleData.week, state.scheduleData.date);
+        bindScheduleWeekDays();
+        renderScheduleCoverageAssistant();
+        updateScheduleHeaderHours_();
+        return summary;
+      } catch (error) {
+        toast(error.message, true);
+        return null;
+      }
+    }
+
+    function renderScheduleTable() {
+      const data = state.scheduleData;
+      const table = document.getElementById('scheduleTable');
+      const tableWrap = document.getElementById('scheduleTableWrap');
+      const previousScrollLeft = tableWrap ? tableWrap.scrollLeft : 0;
+      table.innerHTML = `
+        <thead><tr><th>Period</th>${data.aides.map(renderScheduleAideHeader).join('')}</tr></thead>
+        <tbody>${data.schedule.periods.map((period, periodIndex) => `
+          <tr data-period="${escapeAttr(period.periodId)}">
+            <td>
+              <div class="period-editor">
+                <input data-period-field="label" data-index="${periodIndex}" value="${escapeAttr(period.label)}" aria-label="Period label">
+                <input data-period-field="startTime" data-index="${periodIndex}" type="time" value="${escapeAttr(period.startTime)}">
+                <input data-period-field="endTime" data-index="${periodIndex}" type="time" value="${escapeAttr(period.endTime)}">
+                <button class="btn danger small-btn" data-remove-period="${periodIndex}">Remove</button>
+              </div>
+            </td>
+            ${data.aides.map(aide => renderScheduleCell(period, aide)).join('')}
+          </tr>`).join('')}</tbody>`;
+      table.querySelectorAll('[data-period-field]').forEach(input => input.addEventListener('input', () => {
+        state.scheduleData.schedule.periods[Number(input.dataset.index)][input.dataset.periodField] = input.value;
+        scheduleDraftChanged();
+      }));
+      table.querySelectorAll('[data-remove-period]').forEach(button => button.addEventListener('click', () => {
+        const removed = state.scheduleData.schedule.periods.splice(Number(button.dataset.removePeriod), 1)[0];
+        state.scheduleData.schedule.assignments = state.scheduleData.schedule.assignments
+          .filter(item => String(item.periodId) !== String(removed.periodId));
+        renderScheduleTable();
+        scheduleDraftChanged();
+      }));
+      table.querySelectorAll('.schedule-cell [data-field]').forEach(input => input.addEventListener('change', () => {
+        scheduleDraftChanged();
+      }));
+      table.querySelectorAll('[data-mark-aide-off]').forEach(button =>
+        button.addEventListener('click', () => markScheduleAideOff_(button.dataset.markAideOff))
+      );
+      requestAnimationFrame(() => setupScheduleGridNavigation(previousScrollLeft));
+      renderScheduleCoverageAssistant();
+      updateScheduleHeaderHours_();
+    }
+
+    function setupScheduleGridNavigation(scrollLeft) {
+      const table = document.getElementById('scheduleTable');
+      const tableWrap = document.getElementById('scheduleTableWrap');
+      const topScroll = document.getElementById('scheduleTopScroll');
+      const topTrack = document.getElementById('scheduleTopScrollTrack');
+      const leftButton = document.getElementById('scheduleScrollLeft');
+      const rightButton = document.getElementById('scheduleScrollRight');
+      if (!table || !tableWrap || !topScroll || !topTrack) return;
+
+      topTrack.style.width = table.scrollWidth + 'px';
+      tableWrap.scrollLeft = Number(scrollLeft || 0);
+      topScroll.scrollLeft = tableWrap.scrollLeft;
+
+      let syncing = false;
+      topScroll.onscroll = () => {
+        if (syncing) return;
+        syncing = true;
+        tableWrap.scrollLeft = topScroll.scrollLeft;
+        syncing = false;
+      };
+      tableWrap.onscroll = () => {
+        if (syncing) return;
+        syncing = true;
+        topScroll.scrollLeft = tableWrap.scrollLeft;
+        syncing = false;
+      };
+
+      const scrollDistance = () => Math.max(320, Math.round(tableWrap.clientWidth * .7));
+      if (leftButton) leftButton.onclick = () => tableWrap.scrollBy({ left: -scrollDistance(), behavior: 'smooth' });
+      if (rightButton) rightButton.onclick = () => tableWrap.scrollBy({ left: scrollDistance(), behavior: 'smooth' });
+    }
+
+    function renderScheduleCell(period, aide) {
+      const assignment = state.scheduleData.schedule.assignments.find(item =>
+        String(item.periodId) === String(period.periodId) && normalizeEmail(item.aideEmail) === normalizeEmail(aide.email)
+      ) || {};
+      const status = scheduleCellStatus(aide.email, period);
+      const key = encodeURIComponent(period.periodId + '|' + aide.email);
+      return `<td class="schedule-assignment-cell ${escapeAttr(status.level)}">
+        <div class="schedule-cell" data-cell="${key}" data-period-id="${escapeAttr(period.periodId)}" data-aide-email="${escapeAttr(aide.email)}">
+          ${status.blockingReason ? `<div class="schedule-cell-alert blocked">${escapeHtml(status.blockingReason)}</div>` : ''}
+          ${!status.blockingReason && status.warningReason ? `<div class="schedule-cell-alert warning">${escapeHtml(status.warningReason)}</div>` : ''}
+          <select data-field="classId"><option value="">No class</option>${options(state.scheduleData.classes, 'id', 'name', assignment.classId)}</select>
+          <select data-field="studentId"><option value="">No 1:1</option>${options(state.scheduleData.oneToOneStudents, 'id', 'name', assignment.studentId)}</select>
+          <input data-field="duty" placeholder="Duty / OFF" value="${escapeAttr(assignment.duty || '')}">
+          <input data-field="note" placeholder="Note" value="${escapeAttr(assignment.note || '')}">
+        </div>
+      </td>`;
+    }
+
+    function renderScheduleAideHeader(aide) {
+      const status = scheduleCellStatus(aide.email, null);
+      const hours = scheduleLiveHoursForAide_(aide.email, safeArray(state.scheduleData.schedule.assignments));
+      const availability = status.availabilityLabel
+        ? `<div class="muted">${escapeHtml(status.availabilityLabel)}</div>`
+        : '';
+      const badge = status.blockingReason
+        ? `<span class="chip status-denied">${escapeHtml(status.shortLabel)}</span>`
+        : (status.warningReason ? `<span class="chip status-pending">Pending request</span>` : '');
+      return `<th>${escapeHtml(aide.displayName)}<div class="muted">${escapeHtml(aide.email)}</div><div class="schedule-header-hours" data-aide-hours="${escapeAttr(aide.email)}">${scheduleHeaderHoursMarkup_(hours)}</div>${availability}${badge}<button class="btn danger small-btn schedule-aide-off" type="button" data-mark-aide-off="${escapeAttr(aide.email)}" aria-label="Mark ${escapeAttr(aide.displayName)} off for all periods">Mark off</button></th>`;
+    }
+
+    function markScheduleAideOff_(email) {
+      const aide = safeArray(state.scheduleData && state.scheduleData.aides)
+        .find(item => normalizeEmail(item.email) === normalizeEmail(email));
+      const displayName = aide ? aide.displayName : email;
+      if (!confirm(`Mark ${displayName} OFF for every period? Their class, 1:1, duty, and note assignments will be cleared from this draft.`)) return;
+      document.querySelectorAll('.schedule-cell').forEach(cell => {
+        if (normalizeEmail(cell.dataset.aideEmail) !== normalizeEmail(email)) return;
+        cell.querySelectorAll('[data-field]').forEach(input => {
+          input.value = input.dataset.field === 'duty' ? 'OFF' : '';
+        });
+      });
+      scheduleDraftChanged();
+      toast(`${displayName} is marked OFF for every period in this draft.`);
+    }
+
+    function refreshScheduleCellStatusIndicators_() {
+      document.querySelectorAll('.schedule-cell').forEach(cell => {
+        const period = safeArray(state.scheduleData.schedule.periods)
+          .find(item => String(item.periodId) === String(cell.dataset.periodId));
+        const status = scheduleCellStatus(cell.dataset.aideEmail, period);
+        const tableCell = cell.closest('td');
+        if (tableCell) {
+          tableCell.classList.remove('blocked', 'warning', 'available');
+          tableCell.classList.add(status.level);
+        }
+        cell.querySelectorAll(':scope > .schedule-cell-alert').forEach(alert => alert.remove());
+        if (status.blockingReason) {
+          cell.insertAdjacentHTML('afterbegin', `<div class="schedule-cell-alert blocked">${escapeHtml(status.blockingReason)}</div>`);
+        } else if (status.warningReason) {
+          cell.insertAdjacentHTML('afterbegin', `<div class="schedule-cell-alert warning">${escapeHtml(status.warningReason)}</div>`);
+        }
+      });
+    }
+
+    function updateScheduleHeaderHours_() {
+      if (!state.scheduleData) return;
+      const assignments = document.getElementById('scheduleTable')
+        ? collectScheduleAssignments()
+        : safeArray(state.scheduleData.schedule.assignments);
+      document.querySelectorAll('[data-aide-hours]').forEach(element => {
+        element.innerHTML = scheduleHeaderHoursMarkup_(
+          scheduleLiveHoursForAide_(element.dataset.aideHours, assignments)
+        );
+      });
+    }
+
+    function scheduleHeaderHoursMarkup_(hours) {
+      const capacity = hours.capacityHours == null ? '' : `/${roundClientHours(hours.capacityHours)}`;
+      return `Day ${roundClientHours(hours.dailyHours)} hrs · Week ${roundClientHours(hours.weeklyHours)}${capacity} hrs${hours.lunchDeducted ? '<div class="muted">0.5 hr lunch deducted</div>' : ''}`;
+    }
+
+    function scheduleLiveHoursForAide_(email, assignments) {
+      const intervals = safeArray(assignments)
+        .filter(item => normalizeEmail(item.aideEmail) === normalizeEmail(email))
+        .filter(item => {
+          if (String(item.type || '').toUpperCase() === 'OFF') return false;
+          if (String(item.duty || '').trim().toUpperCase() === 'OFF') return false;
+          return Boolean(item.classId || item.studentId || String(item.duty || '').trim() || String(item.note || '').trim());
+        })
+        .map(item => {
+          const period = safeArray(state.scheduleData.schedule.periods)
+            .find(row => String(row.periodId) === String(item.periodId));
+          return period ? [scheduleTimeToMinutes_(period.startTime), scheduleTimeToMinutes_(period.endTime)] : null;
+        })
+        .filter(item => item && item[0] >= 0 && item[1] > item[0])
+        .sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      intervals.forEach(interval => {
+        const current = merged[merged.length - 1];
+        if (current && interval[0] <= current[1]) current[1] = Math.max(current[1], interval[1]);
+        else merged.push(interval.slice());
+      });
+      const grossHours = roundClientHours(
+        merged.reduce((total, interval) => total + interval[1] - interval[0], 0) / 60
+      );
+      const lunchDeducted = grossHours > 5;
+      const dailyHours = roundClientHours(grossHours - (lunchDeducted ? .5 : 0));
+      const summary = safeArray(state.scheduleData.week && state.scheduleData.week.summary && state.scheduleData.week.summary.aides)
+        .find(item => normalizeEmail(item.email) === normalizeEmail(email)) || {};
+      const priorDay = safeArray(summary.byDay)
+        .find(item => String(item.date) === String(state.scheduleData.date));
+      const weeklyHours = roundClientHours(
+        Number(summary.assignedHours || 0) - Number(priorDay && priorDay.hours || 0) + dailyHours
+      );
+      const aide = safeArray(state.scheduleData.aides)
+        .find(item => normalizeEmail(item.email) === normalizeEmail(email)) || {};
+      return {
+        dailyHours: dailyHours,
+        weeklyHours: weeklyHours,
+        capacityHours: aide.weeklyHours == null ? null : Number(aide.weeklyHours),
+        lunchDeducted: lunchDeducted
+      };
+    }
+
+    function scheduleTimeToMinutes_(value) {
+      const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+      if (!match) return -1;
+      const hours = Number(match[1]);
+      const minutes = Number(match[2]);
+      return hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60
+        ? hours * 60 + minutes
+        : -1;
+    }
+
+    function scheduleCellStatus(email, period) {
+      const staffing = safeArray(state.scheduleData && state.scheduleData.staffingStatus)
+        .find(item => normalizeEmail(item.email) === normalizeEmail(email)) || {};
+      const approvedAvailability = staffing.approvedAvailability || null;
+      let blockingReason = '';
+      let warningReason = '';
+      let shortLabel = '';
+      if (staffing.approvedTimeOff) {
+        blockingReason = 'Approved time off: ' + (staffing.approvedTimeOff.type || 'Time off');
+        shortLabel = 'Time off';
+      } else if (approvedAvailability && !approvedAvailability.available) {
+        blockingReason = 'Not available';
+        shortLabel = 'Unavailable';
+      } else if (period && approvedAvailability && approvedAvailability.available &&
+          (approvedAvailability.startTime > period.startTime || approvedAvailability.endTime < period.endTime)) {
+        blockingReason = `Outside approved hours (${approvedAvailability.startTime}–${approvedAvailability.endTime})`;
+        shortLabel = 'Outside hours';
+      }
+      if (staffing.pendingTimeOff) {
+        warningReason = 'Pending time off: ' + (staffing.pendingTimeOff.type || 'Time off');
+      } else if (staffing.pendingAvailability) {
+        warningReason = 'Pending availability change';
+      }
+      return {
+        level: blockingReason ? 'blocked' : (warningReason ? 'warning' : 'available'),
+        blockingReason: blockingReason,
+        warningReason: warningReason,
+        shortLabel: shortLabel,
+        availabilityLabel: approvedAvailability && approvedAvailability.available
+          ? `Available ${approvedAvailability.startTime}–${approvedAvailability.endTime}`
+          : ''
+      };
+    }
+
+    function renderScheduleCoverageAssistant() {
+      const root = document.getElementById('scheduleCoverageAssistant');
+      const count = document.getElementById('scheduleCoverageCount');
+      if (!root || !state.scheduleData) return;
+      const assignments = document.getElementById('scheduleTable')
+        ? collectScheduleAssignments()
+        : safeArray(state.scheduleData.schedule.assignments);
+      const conflicts = assignments
+        .map(assignment => {
+          const period = safeArray(state.scheduleData.schedule.periods)
+            .find(item => String(item.periodId) === String(assignment.periodId));
+          const status = scheduleCellStatus(assignment.aideEmail, period);
+          return status.blockingReason ? { assignment, period, status } : null;
+        })
+        .filter(Boolean);
+      const pending = assignments
+        .map(assignment => {
+          const period = safeArray(state.scheduleData.schedule.periods)
+            .find(item => String(item.periodId) === String(assignment.periodId));
+          const status = scheduleCellStatus(assignment.aideEmail, period);
+          return !status.blockingReason && status.warningReason ? { assignment, period, status } : null;
+        })
+        .filter(Boolean);
+      const gaps = safeArray(state.scheduleData.unassignedOneToOnes).filter(gap =>
+        !assignments.some(item =>
+          String(item.periodId) === String(gap.periodId) &&
+          String(item.studentId) === String(gap.studentId) &&
+          String(item.type || '').toUpperCase() !== 'OFF'
+        )
+      );
+      const issues = conflicts.length + gaps.length;
+      count.textContent = String(issues);
+      count.className = 'chip' + (issues ? ' critical' : '');
+      const items = [];
+      gaps.forEach(gap => items.push(renderScheduleCoverageIssue_({
+        label: gap.name,
+        reason: 'No aide assigned',
+        studentId: gap.studentId,
+        periodId: gap.periodId,
+        sourceEmail: ''
+      }, assignments)));
+      conflicts.forEach(item => {
+        const aide = safeArray(state.scheduleData.aides)
+          .find(row => normalizeEmail(row.email) === normalizeEmail(item.assignment.aideEmail));
+        items.push(renderScheduleCoverageIssue_({
+          label: `${aide ? aide.displayName : item.assignment.aideEmail} · ${item.period ? item.period.label : item.assignment.periodId}`,
+          reason: item.status.blockingReason,
+          studentId: item.assignment.studentId || '',
+          periodId: item.assignment.periodId,
+          sourceEmail: item.assignment.aideEmail
+        }, assignments));
+      });
+      if (pending.length) {
+        items.push(`<div class="coverage-assistant-item">
+          <strong>Pending requests to monitor</strong>
+          <div class="muted small">${pending.map(item => {
+            const aide = safeArray(state.scheduleData.aides)
+              .find(row => normalizeEmail(row.email) === normalizeEmail(item.assignment.aideEmail));
+            return escapeHtml(`${aide ? aide.displayName : item.assignment.aideEmail} · ${item.period ? item.period.label : item.assignment.periodId} — ${item.status.warningReason}`);
+          }).join('<br>')}</div>
+        </div>`);
+      }
+      root.innerHTML = items.length
+        ? items.join('')
+        : '<span class="muted">No availability conflicts or 1:1 coverage gaps are detected.</span>';
+      root.querySelectorAll('[data-apply-replacement]').forEach(button =>
+        button.addEventListener('click', () => applyScheduleReplacement_(button))
+      );
+    }
+
+    function renderScheduleCoverageIssue_(issue, assignments) {
+      const candidates = scheduleReplacementCandidates_(issue, assignments).slice(0, 3);
+      return `<div class="coverage-assistant-item blocked">
+        <div><strong>${escapeHtml(issue.label)}</strong><div class="muted small">${escapeHtml(issue.reason)}</div></div>
+        <div class="replacement-options">${candidates.length ? candidates.map(candidate => `
+          <button class="btn ghost small-btn" type="button" data-apply-replacement
+            data-period-id="${escapeAttr(issue.periodId)}"
+            data-student-id="${escapeAttr(issue.studentId)}"
+            data-source-email="${escapeAttr(issue.sourceEmail)}"
+            data-target-email="${escapeAttr(candidate.email)}">
+            Use ${escapeHtml(candidate.displayName)} · ${escapeHtml(candidate.remainingLabel)}
+          </button>`).join('') : `<span class="muted small">No available ${issue.studentId ? 'trained ' : ''}replacement is currently open for this period.</span>`}</div>
+      </div>`;
+    }
+
+    function scheduleReplacementCandidates_(issue, assignments) {
+      const training = safeArray(state.scheduleData.training);
+      const period = safeArray(state.scheduleData.schedule.periods)
+        .find(item => String(item.periodId) === String(issue.periodId));
+      return safeArray(state.scheduleData.aides)
+        .filter(aide => normalizeEmail(aide.email) !== normalizeEmail(issue.sourceEmail))
+        .filter(aide => !assignments.some(item =>
+          String(item.periodId) === String(issue.periodId) &&
+          normalizeEmail(item.aideEmail) === normalizeEmail(aide.email)
+        ))
+        .filter(aide => !issue.studentId || training.some(item =>
+          normalizeEmail(item.aideEmail) === normalizeEmail(aide.email) &&
+          String(item.studentId) === String(issue.studentId)
+        ))
+        .map(aide => {
+          const status = scheduleCellStatus(aide.email, period);
+          const liveHours = scheduleLiveHoursForAide_(aide.email, assignments);
+          const remaining = liveHours.capacityHours == null
+            ? null
+            : liveHours.capacityHours - liveHours.weeklyHours;
+          return {
+            email: aide.email,
+            displayName: aide.displayName,
+            blocked: Boolean(status.blockingReason),
+            warning: Boolean(status.warningReason),
+            remaining: remaining,
+            remainingLabel: remaining == null
+              ? 'hours not set'
+              : `${Math.round(remaining * 100) / 100} hrs remaining${status.warningReason ? ' · pending request' : ''}`
+          };
+        })
+        .filter(item => !item.blocked)
+        .sort((a, b) =>
+          Number(a.warning) - Number(b.warning) ||
+          (b.remaining == null ? -Infinity : b.remaining) - (a.remaining == null ? -Infinity : a.remaining) ||
+          a.displayName.localeCompare(b.displayName)
+        );
+    }
+
+    function applyScheduleReplacement_(button) {
+      const periodId = button.dataset.periodId;
+      const sourceEmail = button.dataset.sourceEmail;
+      const targetEmail = button.dataset.targetEmail;
+      const cells = Array.from(document.querySelectorAll('.schedule-cell'));
+      const target = cells.find(cell =>
+        String(cell.dataset.periodId) === String(periodId) &&
+        normalizeEmail(cell.dataset.aideEmail) === normalizeEmail(targetEmail)
+      );
+      if (!target) return toast('The replacement cell was not found.', true);
+      const source = sourceEmail ? cells.find(cell =>
+        String(cell.dataset.periodId) === String(periodId) &&
+        normalizeEmail(cell.dataset.aideEmail) === normalizeEmail(sourceEmail)
+      ) : null;
+      if (source) {
+        source.querySelectorAll('[data-field]').forEach(input => {
+          const targetInput = target.querySelector(`[data-field="${input.dataset.field}"]`);
+          if (targetInput) targetInput.value = input.value;
+          input.value = '';
+        });
+      } else {
+        const student = target.querySelector('[data-field="studentId"]');
+        if (student) student.value = button.dataset.studentId;
+      }
+      state.scheduleData.schedule.assignments = collectScheduleAssignments();
+      scheduleDraftChanged();
+    }
+
+    async function saveScheduleFromGrid() {
+      const payload = currentSchedulePayload();
+      try {
+        const summary = await server('previewWeeklyHours', payload);
+        const overCapacity = safeArray(summary && summary.overCapacity);
+        if (overCapacity.length) {
+          const details = overCapacity.map(item =>
+            `${item.displayName}: ${item.assignedHours}/${item.capacityHours} hours`
+          ).join('\n');
+          if (!confirm('This schedule places staff above weekly capacity:\n\n' + details + '\n\nSave anyway?')) return;
+        }
+        const result = await server('saveSchedule', payload);
+        const warnings = safeArray(result.warnings);
+        toast(warnings.length ? 'Saved with warnings: ' + warnings.join(' ') : 'Schedule saved.');
+        await loadScheduleBuilder();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function currentSchedulePayload() {
+      return {
+        id: state.scheduleData.schedule.id,
+        date: state.scheduleData.date,
+        name: document.getElementById('scheduleName').value,
+        baseScheduleTypeId: document.getElementById('scheduleBase').value,
+        temporary: true,
+        periods: state.scheduleData.schedule.periods,
+        assignments: collectScheduleAssignments()
+      };
+    }
+
+    async function saveCurrentAsScheduleType() {
+      const name = prompt('Name this reusable schedule type:');
+      if (!name) return;
+      try {
+        await server('saveScheduleType', {
+          name,
+          isDefault: confirm('Make this the default schedule when no daily schedule exists?'),
+          periods: state.scheduleData.schedule.periods,
+          assignments: collectScheduleAssignments()
+        });
+        state.data = normalizeBootstrap(await server('getAppBootstrap'));
+        state.scheduleData.scheduleTypes = state.data.caseManager.scheduleTypes;
+        toast('Schedule type saved.');
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function collectScheduleAssignments() {
+      return Array.from(document.querySelectorAll('.schedule-cell')).map(cell => {
+        const values = {};
+        cell.querySelectorAll('[data-field]').forEach(input => values[input.dataset.field] = input.value);
+        if (!values.classId && !values.studentId && !values.duty && !values.note) return null;
+        return {
+          periodId: cell.dataset.periodId,
+          aideEmail: cell.dataset.aideEmail,
+          classId: values.classId,
+          studentId: values.studentId,
+          duty: values.duty,
+          note: values.note,
+          type: String(values.duty || '').toUpperCase() === 'OFF' ? 'OFF' : (values.studentId ? 'ONE_TO_ONE' : 'STANDARD')
+        };
+      }).filter(Boolean);
+    }
+
+    function renderBenchmarkManager(root) {
+      const cm = state.data.caseManager;
+      const students = safeArray(cm.students);
+      const goals = safeArray(cm.goals);
+      const benchmarks = safeArray(cm.benchmarks);
+      if (!students.some(item => String(item.id) === String(state.benchmarkStudentId))) {
+        state.benchmarkStudentId = students[0] ? students[0].id : '';
+      }
+      const selectedStudent = students.find(item => String(item.id) === String(state.benchmarkStudentId));
+      const selectedGoals = goals.filter(item =>
+        String(item.studentId) === String(state.benchmarkStudentId)
+      );
+      root.innerHTML = `
+        <article class="card mobile-cm-note">
+          <div class="eyebrow">Desktop workspace</div>
+          <h2>Goal creation is available on desktop</h2>
+          <p class="muted">Use a desktop browser to parse benchmarks and assign goal relevance tags.</p>
+        </article>
+        <div class="master-detail">
+          <article class="card desktop-cm-only">
+            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste the three benchmarks together. V.O.I.C.E.S detects each “Short-Term Objective” and its ratio.</p></div><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div>
+            <form id="goalForm" class="form-grid">
+              <div class="field full"><label>Student</label><select name="studentId" required><option value="">Choose student</option>${options(students, 'id', 'name', state.benchmarkStudentId)}</select></div>
+              <div class="field full"><label>Annual IEP goal</label><textarea name="goal" placeholder="Describe the overall challenge the student should meet during the IEP year." required></textarea></div>
+              <div class="field full"><label>Three short-term benchmarks</label><textarea name="objectivesText" style="min-height:220px" placeholder="Short-Term Objective 1: Given ..., the student will ... in 4 out of 5 opportunities.&#10;&#10;Short-Term Objective 2: Given ..., the student will ... with 4/5 accuracy.&#10;&#10;Short-Term Objective 3: Given ..., the student will ... in 5 out of 5 trials." required></textarea></div>
+              <div class="field full">
+                <label>Relevant classes / subjects</label>
+                <div class="checks" style="margin-top:7px">${safeArray(state.data.subjects).map(subject => `
+                  <label class="check">
+                    <input type="checkbox" value="${escapeAttr(subject.Id)}" data-goal-subject>
+                    ${escapeHtml(subject.Name)}
+                  </label>`).join('')}</div>
+              </div>
+              <div class="field"><label>Start date</label><input name="startDate" type="date" value="${escapeAttr(state.data.today)}"></div>
+              <div class="field"><label>Due date</label><input name="dueDate" type="date"><span class="muted small">Blank uses one calendar year.</span></div>
+              <div class="field full"><div class="eyebrow">Parsed benchmark preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste three objectives to preview the benchmarks.</div></div></div>
+              <div class="field full"><button class="btn primary" type="submit">Create goal</button></div>
+            </form>
+          </article>
+          <article class="card desktop-cm-only">
+            <div class="card-header"><div><div class="eyebrow">Student goal workspace</div><h2>${escapeHtml(selectedStudent ? selectedStudent.name : 'Annual goals')}</h2><p class="muted">Active benchmarks are selected from the Overview workspace.</p></div><span class="chip">${selectedGoals.length} goals</span></div>
+            <div class="field"><label>Student filter</label><select id="benchmarkStudentFilter"><option value="">Choose student</option>${options(students, 'id', 'name', state.benchmarkStudentId)}</select></div>
+            <div class="list scroll-list" style="margin-top:14px">${selectedGoals.length ? selectedGoals.map(goal => {
+              const items = benchmarks.filter(item => String(item.goalId) === String(goal.id));
+              return `
+                <div class="goal-card">
+                  <div class="row" style="justify-content:space-between"><strong>${escapeHtml(goal.goal)}</strong>${goal.critical ? '<span class="chip critical">Critical</span>' : ''}</div>
+                  <div class="muted small">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</div>
+                  <div class="checks">${safeArray(goal.subjectNames).map(name => `<span class="chip">${escapeHtml(name)}</span>`).join('')}</div>
+                  <div class="checks">${items.map(item => `<span class="chip ${item.active ? 'status-approved' : ''}">${escapeHtml(item.category)}${item.active ? ' · Active' : ''}</span>`).join('')}</div>
+                  <button class="btn danger small-btn" data-deactivate-goal="${escapeAttr(goal.id)}">Deactivate goal</button>
+                </div>`;
+            }).join('') : '<div class="empty">This student has no active goals.</div>'}</div>
+          </article>
+        </div>`;
+      const form = document.getElementById('goalForm');
+      if (!form) return;
+      form.addEventListener('submit', saveGoalForm);
+      form.elements.objectivesText.addEventListener('input', () => renderGoalObjectivePreview(form));
+      form.elements.studentId.addEventListener('change', event => {
+        state.benchmarkStudentId = event.currentTarget.value;
+      });
+      document.getElementById('benchmarkStudentFilter').addEventListener('change', event => {
+        state.benchmarkStudentId = event.currentTarget.value;
+        renderBenchmarkManager(root);
+      });
+      bindRefreshButtons(root);
+      root.querySelectorAll('[data-deactivate-goal]').forEach(button => button.addEventListener('click', async () => {
+        if (!confirm('Deactivate this goal and all three benchmarks? Existing entries will remain.')) return;
+        try {
+          await server('deactivateGoal', button.dataset.deactivateGoal);
+          await refreshGoalManagerData();
+          toast('Goal deactivated.');
+        } catch (error) { toast(error.message, true); }
+      }));
+    }
+
+    async function saveGoalForm(event) {
+      event.preventDefault();
+      const payload = formObject(event.currentTarget);
+      try {
+        state.parsedObjectives = parseGoalObjectivesClient(payload.objectivesText);
+      } catch (error) {
+        return toast(error.message, true);
+      }
+      payload.subjectIds = Array.from(
+        event.currentTarget.querySelectorAll('[data-goal-subject]:checked')
+      ).map(input => input.value);
+      payload.objectiveOverrides = state.parsedObjectives.map(item => ({
+        index: item.index,
+        text: event.currentTarget.querySelector(
+          `[data-objective-text="${item.index}"]`
+        ).value
+      }));
+      if (!payload.subjectIds.length) {
+        return toast('Choose at least one relevant class or subject for the goal.', true);
+      }
+      try {
+        const result = await server('createGoal', payload);
+        state.goalWorkspaceCache = {};
+        event.currentTarget.reset();
+        state.parsedObjectives = [];
+        await refreshGoalManagerData();
+        toast(result.message || 'Goal created.');
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function parseGoalObjectivesClient(value) {
+      const text = String(value || '').trim();
+      const marker = /short\s*[-–—]?\s*term\s+objective\b\s*[:\-–—]?\s*/gi;
+      const matches = [];
+      let match;
+      while ((match = marker.exec(text)) !== null) {
+        matches.push({ index: match.index, end: marker.lastIndex });
+      }
+      if (!matches.length) throw new Error('Add three “Short-Term Objective” headings.');
+      if (matches.length !== 3) {
+        throw new Error('Each goal must contain exactly three short-term objectives.');
+      }
+      return matches.map((item, index) => {
+        const end = matches[index + 1] ? matches[index + 1].index : text.length;
+        const objective = text.slice(item.end, end).replace(/^[\s:;#\d.)\]-]+/, '').trim();
+        if (!objective) throw new Error(`Short-Term Objective ${index + 1} has no text.`);
+        const ratios = [];
+        const ratioPattern = /(\d+)\s*(?:\/|out\s+of)\s*(\d+)/gi;
+        let ratio;
+        while ((ratio = ratioPattern.exec(objective)) !== null) {
+          const numerator = Number(ratio[1]);
+          const denominator = Number(ratio[2]);
+          if (denominator <= 0 || numerator < 0 || numerator > denominator) {
+            throw new Error(`Short-Term Objective ${index + 1} has an invalid ratio.`);
+          }
+          ratios.push({ numerator, denominator });
+        }
+        if (!ratios.length) {
+          throw new Error(`Short-Term Objective ${index + 1} needs a ratio such as 4/5 or 4 out of 5.`);
+        }
+        return {
+          index,
+          text: objective,
+          metric: `${ratios[0].numerator}/${ratios[0].denominator}` +
+            (ratios[1] ? ` in ${ratios[1].numerator}/${ratios[1].denominator} trials` : '')
+        };
+      });
+    }
+
+    function renderGoalObjectivePreview(form) {
+      const root = document.getElementById('objectivePreview');
+      if (!root) return;
+      try {
+        state.parsedObjectives = parseGoalObjectivesClient(form.elements.objectivesText.value);
+        root.innerHTML = state.parsedObjectives.map(item => `
+          <div class="objective-preview">
+            <div class="row" style="justify-content:space-between">
+              <strong>Short-Term Objective ${item.index + 1}</strong>
+              <span class="chip">${escapeHtml(item.metric)}</span>
+            </div>
+            <div class="field">
+              <label>Benchmark text</label>
+              <textarea data-objective-text="${item.index}" style="min-height:120px">${escapeHtml(item.text)}</textarea>
+            </div>
+          </div>`).join('');
+      } catch (error) {
+        state.parsedObjectives = [];
+        root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function refreshGoalManagerData() {
+      const data = await server('getGoalManagerData');
+      state.data.caseManager.students = safeArray(data.students);
+      state.data.caseManager.goals = safeArray(data.goals);
+      state.data.caseManager.benchmarks = safeArray(data.benchmarks);
+      state.goalWorkspaceCache = {};
+      renderBenchmarkManager(document.getElementById('cmContent'));
+    }
+
+    async function renderIeps(root) {
+      root.innerHTML = '<article class="card empty">Loading IEPs…</article>';
+      try {
+        const ieps = safeArray(await server('getIepsForCurrentCaseManager'));
+        root.innerHTML = `
+          <div class="grid two">
+            <article class="card">
+              <div class="card-header"><div><div class="eyebrow">Google Workspace document</div><h2>Generate IEP</h2><p class="muted">Creates a restricted Google Doc containing the student’s active benchmarks.</p></div><button class="btn ghost small-btn" type="button" data-refresh="ieps">Refresh</button></div>
+              <form id="iepForm" class="form-grid">
+                <div class="field full"><label>Student</label><select name="studentId" required><option value="">Choose student</option>${options(state.data.caseManager.students, 'id', 'name')}</select></div>
+                <div class="field"><label>Start date</label><input name="startDate" type="date" required></div>
+                <div class="field"><label>End date</label><input name="endDate" type="date" required></div>
+                <div class="field full"><button class="btn primary">Generate Google Doc</button></div>
+              </form>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><div class="eyebrow">Case-manager access only</div><h2>IEP documents</h2></div><span class="chip">${ieps.length}</span></div>
+              <div class="list">${ieps.length ? ieps.map(item => `
+                <div class="list-item">
+                  <div class="row" style="justify-content:space-between"><strong>${escapeHtml(item.studentName)}</strong><span class="chip">${escapeHtml(item.status)}</span></div>
+                  <div class="muted small">${escapeHtml(item.startDate)}–${escapeHtml(item.endDate)}</div>
+                  <a class="btn small-btn" style="display:inline-flex;text-decoration:none;margin-top:10px" href="${escapeAttr(item.fileUrl)}" target="_blank" rel="noopener">Open IEP</a>
+                </div>`).join('') : '<div class="empty">No IEP documents have been generated.</div>'}</div>
+            </article>
+          </div>`;
+        bindRefreshButtons(root);
+        document.getElementById('iepForm').addEventListener('submit', async event => {
+          event.preventDefault();
+          try {
+            const result = await server('generateIep', formObject(event.currentTarget));
+            if (!result.fileUrl) throw new Error('The IEP was created without a document link.');
+            toast('IEP generated.');
+            window.open(result.fileUrl, '_blank', 'noopener');
+            renderIeps(root);
+          } catch (error) { toast(error.message, true); }
+        });
+      } catch (error) {
+        root.innerHTML = `<article class="card red-tint">${escapeHtml(error.message)}</article>`;
+      }
+    }
+
+    function renderPeople(root) {
+      const cm = state.data.caseManager;
+      const staff = safeArray(cm.staff);
+      const students = safeArray(cm.students);
+      const editingStaff = staff.find(item => normalizeEmail(item.email) === normalizeEmail(state.editingStaffEmail)) || {};
+      const editingStudent = students.find(item => String(item.id) === String(state.editingStudentId)) || {};
+      const managerOptions = safeArray(cm.caseManagers);
+      root.innerHTML = `
+        <div class="grid two">
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">${editingStaff.email ? 'Edit' : 'Add'}</div><h2>Staff member</h2></div><div class="toolbar"><button class="btn ghost small-btn" type="button" data-refresh="people">Refresh</button>${editingStaff.email ? '<button id="cancelStaffEdit" class="btn ghost small-btn" type="button">Cancel</button>' : ''}</div></div>
+            <form id="staffForm" class="form-grid">
+              <div class="field full"><label>Email</label><input name="email" type="email" value="${escapeAttr(editingStaff.email || '')}" ${editingStaff.email ? 'readonly' : ''} required></div>
+              <div class="field"><label>First name</label><input name="firstName" value="${escapeAttr(editingStaff.firstName || '')}" required></div>
+              <div class="field"><label>Last name</label><input name="lastName" value="${escapeAttr(editingStaff.lastName || '')}"></div>
+              <div class="field"><label>Role</label><select name="role" required>${options([{id:'AIDE',name:'Aide'},{id:'TEACHER',name:'Teacher'},{id:'CASE_MANAGER',name:'Case manager'}], 'id', 'name', editingStaff.role || 'AIDE')}</select></div>
+              <div class="field"><label>Weekly hours (aides)</label><input name="weeklyHours" type="number" min="0" max="80" step="0.25" value="${escapeAttr(editingStaff.weeklyHours == null ? '' : editingStaff.weeklyHours)}"></div>
+              <div class="field"><label class="check"><input name="isAdmin" type="checkbox" ${editingStaff.isAdmin ? 'checked' : ''} ${state.data.user.isAdmin ? '' : 'disabled'}> Administrator</label></div>
+              <div class="field full"><button class="btn primary">Save staff member</button></div>
+            </form>
+          </article>
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Active whitelist</div><h2>Staff</h2><p class="muted">Delete removes access but retains linked records.</p></div><span class="chip">${staff.length}</span></div>
+            <div class="list scroll-list">${staff.map(item => `
+              <div class="list-item">
+                <div class="row" style="justify-content:space-between"><strong>${escapeHtml(item.displayName)}</strong><span class="chip">${escapeHtml(roleLabel(item.role))}</span></div>
+                <div class="muted small">${escapeHtml(item.email)}${item.isAdmin ? ' · Administrator' : ''}${item.role === 'AIDE' && item.weeklyHours != null ? ' · ' + escapeHtml(String(item.weeklyHours)) + ' hours/week' : ''}</div>
+                <div class="toolbar" style="margin-top:10px"><button class="btn small-btn" data-edit-staff="${escapeAttr(item.email)}">Edit</button>${normalizeEmail(item.email) !== normalizeEmail(state.data.user.email) ? `<button class="btn danger small-btn" data-delete-staff="${escapeAttr(item.email)}">Delete</button>` : ''}</div>
+              </div>`).join('')}</div>
+          </article>
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">${editingStudent.id ? 'Edit' : 'Add'}</div><h2>Student</h2></div>${editingStudent.id ? '<button id="cancelStudentEdit" class="btn ghost small-btn" type="button">Cancel</button>' : ''}</div>
+            <form id="studentForm" class="form-grid">
+              <input type="hidden" name="id" value="${escapeAttr(editingStudent.id || '')}">
+              <div class="field full"><label>Name</label><input name="name" value="${escapeAttr(editingStudent.name || '')}" required></div>
+              <div class="field full"><label>Case manager</label><select name="caseManagerEmail" required><option value="">Choose case manager</option>${options(managerOptions, 'email', 'displayName', editingStudent.caseManagerEmail || state.data.user.email)}</select></div>
+              <div class="field"><label class="check"><input name="isOneToOne" type="checkbox" ${editingStudent.isOneToOne ? 'checked' : ''}> Requires 1:1 coverage</label></div>
+              <div class="field full"><button class="btn primary">Save student</button></div>
+            </form>
+          </article>
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Assigned caseload</div><h2>Students</h2></div><span class="chip">${students.length}</span></div>
+            <div class="list scroll-list">${students.length ? students.map(item => `
+              <div class="list-item">
+                <div class="row" style="justify-content:space-between"><strong>${escapeHtml(item.name)}</strong>${item.isOneToOne ? '<span class="chip critical">1:1</span>' : ''}</div>
+                <div class="muted small">${escapeHtml(item.caseManagerEmail)}</div>
+                <div class="toolbar" style="margin-top:10px"><button class="btn small-btn" data-edit-student="${escapeAttr(item.id)}">Edit</button><button class="btn danger small-btn" data-delete-student="${escapeAttr(item.id)}">Delete</button></div>
+              </div>`).join('') : '<div class="empty">No students assigned.</div>'}</div>
+          </article>
+        </div>`;
+      bindRefreshButtons(root);
+      document.getElementById('cancelStaffEdit')?.addEventListener('click', () => { state.editingStaffEmail = ''; renderPeople(root); });
+      document.getElementById('cancelStudentEdit')?.addEventListener('click', () => { state.editingStudentId = ''; renderPeople(root); });
+      document.getElementById('staffForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const payload = formObject(event.currentTarget);
+        payload.isAdmin = state.data.user.isAdmin && event.currentTarget.elements.isAdmin.checked;
+        try {
+          await server('upsertStaff', payload);
+          state.editingStaffEmail = '';
+          await refreshBootstrap('people');
+          toast('Staff member saved.');
+        } catch (error) { toast(error.message, true); }
+      });
+      document.getElementById('studentForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const payload = formObject(event.currentTarget);
+        payload.isOneToOne = event.currentTarget.elements.isOneToOne.checked;
+        try {
+          await server('upsertStudent', payload);
+          state.editingStudentId = '';
+          await refreshBootstrap('people');
+          toast('Student saved.');
+        } catch (error) { toast(error.message, true); }
+      });
+      root.querySelectorAll('[data-edit-staff]').forEach(button => button.addEventListener('click', () => { state.editingStaffEmail = button.dataset.editStaff; renderPeople(root); }));
+      root.querySelectorAll('[data-edit-student]').forEach(button => button.addEventListener('click', () => { state.editingStudentId = button.dataset.editStudent; renderPeople(root); }));
+      root.querySelectorAll('[data-delete-staff]').forEach(button => button.addEventListener('click', async () => {
+        if (!confirm('Delete this staff member from the active whitelist?')) return;
+        try {
+          await server('deleteStaff', button.dataset.deleteStaff);
+          await refreshBootstrap('people');
+          toast('Staff access removed.');
+        } catch (error) { toast(error.message, true); }
+      }));
+      root.querySelectorAll('[data-delete-student]').forEach(button => button.addEventListener('click', async () => {
+        if (!confirm('Deactivate this student? Benchmarks and history will remain.')) return;
+        try {
+          await server('deleteStudent', button.dataset.deleteStudent);
+          await refreshBootstrap('people');
+          toast('Student deactivated.');
+        } catch (error) { toast(error.message, true); }
+      }));
+    }
+
+    function renderRequests(root) {
+      const data = state.data.caseManager.requests || {};
+      const pending = safeArray(data.pending);
+      const history = safeArray(data.timeOffHistory).filter(item => item.status === 'APPROVED' || item.status === 'DENIED');
+      const availability = safeArray(data.currentAvailability);
+      root.innerHTML = `
+        <div class="section-tools" style="margin-bottom:14px"><div><div class="eyebrow">Staff records</div><h2>Requests and availability</h2></div><button class="btn ghost small-btn" type="button" data-refresh="requests">Refresh</button></div>
+        <div class="grid two">
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Approvals</div><h2>Waiting for review</h2></div><span class="chip">${pending.length}</span></div>
+            <div class="list">${pending.length ? pending.map(item => `
+              <div class="list-item">
+                <div class="row" style="justify-content:space-between"><strong>${escapeHtml(item.aideName)}</strong><span class="chip status-pending">${escapeHtml(item.requestType.replace('_', ' '))}</span></div>
+                <div>${escapeHtml(item.summary)}</div>${item.reason ? `<div class="muted small">${escapeHtml(item.reason)}</div>` : ''}
+                <div class="toolbar" style="margin-top:10px">
+                  <button class="btn primary small-btn" data-review="${escapeAttr(item.id)}" data-type="${escapeAttr(item.requestType)}" data-decision="APPROVED">Approve</button>
+                  <button class="btn danger small-btn" data-review="${escapeAttr(item.id)}" data-type="${escapeAttr(item.requestType)}" data-decision="DENIED">Deny</button>
+                </div>
+              </div>`).join('') : '<div class="empty">No requests are waiting.</div>'}</div>
+          </article>
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Approved schedules</div><h2>Current availability</h2></div><span class="chip">${availability.length}</span></div>
+            <div class="list scroll-list">${availability.length ? availability.map(item => `
+              <div class="list-item">
+                <div class="row" style="justify-content:space-between"><strong>${escapeHtml(item.aideName)}</strong><span class="chip status-approved">Approved</span></div>
+                <div>${escapeHtml(titleCase(item.dayOfWeek))} · ${item.available ? escapeHtml(item.startTime + '–' + item.endTime) : 'Not available'}</div>
+              </div>`).join('') : '<div class="empty">No approved availability records.</div>'}</div>
+          </article>
+          <article class="card span-2">
+            <div class="card-header"><div><div class="eyebrow">Decision history</div><h2>Approved and denied time off</h2></div><span class="chip">${history.length}</span></div>
+            <div class="list">${history.length ? history.map(item => `
+              <div class="list-item">
+                <div class="row" style="justify-content:space-between"><strong>${escapeHtml(item.aideName)}</strong><span class="chip ${item.status === 'APPROVED' ? 'status-approved' : 'status-denied'}">${escapeHtml(titleCase(item.status))}</span></div>
+                <div>${escapeHtml(item.summary)} · ${item.hasHours ? 'Hours available' : 'Hours unavailable'}</div>
+                ${item.reason ? `<div class="muted small">${escapeHtml(item.reason)}</div>` : ''}
+              </div>`).join('') : '<div class="empty">No approved or denied time-off requests.</div>'}</div>
+          </article>
+        </div>`;
+      bindRefreshButtons(root);
+      root.querySelectorAll('[data-review]').forEach(button => button.addEventListener('click', async () => {
+        try {
+          await server('reviewStaffRequest', { id: button.dataset.review, requestType: button.dataset.type, decision: button.dataset.decision });
+          await refreshBootstrap('requests');
+          toast('Request reviewed.');
+        } catch (error) { toast(error.message, true); }
+      }));
+    }
+
+    function renderAdmin(root) {
+      const management = state.data.caseManager.messages || { messages: [], activeToday: [] };
+      const messages = safeArray(management.messages);
+      const editing = messages.find(item => String(item.id) === String(state.editingMessageId)) || {};
+      root.innerHTML = `
+        <div class="grid two">
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Broadcast</div><h2>${editing.id ? 'Edit message' : 'Create message'}</h2></div><div class="toolbar"><button class="btn ghost small-btn" type="button" data-refresh="admin">Refresh</button>${editing.id ? '<button id="cancelMessageEdit" class="btn ghost small-btn" type="button">Cancel</button>' : ''}</div></div>
+            <form id="messageForm" class="form-grid">
+              <input type="hidden" name="id" value="${escapeAttr(editing.id || '')}">
+              <div class="field"><label>Start date</label><input name="startDate" type="date" value="${escapeAttr(editing.startDate || state.data.today)}" required></div>
+              <div class="field"><label>End date</label><input name="endDate" type="date" value="${escapeAttr(editing.endDate || state.data.today)}" required></div>
+              <div class="field full"><label>Message</label><textarea name="message" required>${escapeHtml(editing.message || '')}</textarea></div>
+              <div class="field full"><label class="check"><input name="active" type="checkbox" ${editing.id ? (editing.active ? 'checked' : '') : 'checked'}> Active</label></div>
+              <div class="field full"><button class="btn primary">${editing.id ? 'Save changes' : 'Publish message'}</button></div>
+            </form>
+          </article>
+          <article class="card">
+            <div class="card-header"><div><div class="eyebrow">Appearance</div><h2>App logo</h2></div></div>
+            <div class="row"><img src="${escapeAttr(state.data.logo)}" alt="" style="width:150px;height:105px;object-fit:contain"><div class="muted">PNG, JPEG, or WebP. Maximum 2 MB.</div></div>
+            <form id="logoForm" style="margin-top:16px">
+              <input name="logo" type="file" accept="image/png,image/jpeg,image/webp" required>
+              <button class="btn primary" style="margin-top:10px">Upload logo</button>
+            </form>
+          </article>
+          <article class="card span-2">
+            <div class="card-header"><div><div class="eyebrow">Message management</div><h2>All global messages</h2><p class="muted">Multiple active messages can run at the same time.</p></div><span class="chip">${messages.length}</span></div>
+            <div class="list">${messages.length ? messages.map(item => `
+              <div class="list-item">
+                <div class="row" style="justify-content:space-between;align-items:flex-start">
+                  <div>
+                    <div>${escapeHtml(item.message)}</div>
+                    <div class="message-meta">
+                      <span class="chip">By ${escapeHtml(item.creatorLastName || 'Staff')}</span>
+                      <span class="chip">${escapeHtml(item.startDate)}–${escapeHtml(item.endDate)}</span>
+                      <span class="chip ${item.active ? 'status-approved' : 'status-denied'}">${item.active ? 'Active' : 'Inactive'}</span>
+                    </div>
+                  </div>
+                  <div class="toolbar">
+                    <button class="btn small-btn" data-edit-message="${escapeAttr(item.id)}">Edit</button>
+                    <button class="btn ${item.active ? 'danger' : 'ghost'} small-btn" data-toggle-message="${escapeAttr(item.id)}" data-message-active="${item.active ? 'false' : 'true'}">${item.active ? 'Deactivate' : 'Reactivate'}</button>
+                  </div>
+                </div>
+              </div>`).join('') : '<div class="empty">No global messages have been created.</div>'}</div>
+          </article>
+        </div>`;
+      bindRefreshButtons(root);
+      document.getElementById('messageForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        try {
+          const payload = formObject(event.currentTarget);
+          payload.active = event.currentTarget.elements.active.checked;
+          await server('saveDailyMessage', payload);
+          state.editingMessageId = '';
+          await refreshMessageManagementData();
+          toast(editing.id ? 'Message updated.' : 'Message published.');
+        } catch (error) { toast(error.message, true); }
+      });
+      document.getElementById('cancelMessageEdit')?.addEventListener('click', () => {
+        state.editingMessageId = '';
+        renderAdmin(root);
+      });
+      root.querySelectorAll('[data-edit-message]').forEach(button => button.addEventListener('click', () => {
+        state.editingMessageId = button.dataset.editMessage;
+        renderAdmin(root);
+      }));
+      root.querySelectorAll('[data-toggle-message]').forEach(button => button.addEventListener('click', async () => {
+        try {
+          await server('setDailyMessageActive', {
+            id: button.dataset.toggleMessage,
+            active: button.dataset.messageActive === 'true'
+          });
+          await refreshMessageManagementData();
+          toast('Message status updated.');
+        } catch (error) { toast(error.message, true); }
+      }));
+      document.getElementById('logoForm').addEventListener('submit', uploadLogo);
+    }
+
+    async function refreshMessageManagementData() {
+      const data = await server('getMessageManagementData');
+      state.data.caseManager.messages = data;
+      state.data.dailyMessages = safeArray(data.activeToday);
+      renderAdmin(document.getElementById('cmContent'));
+    }
+
+    async function uploadLogo(event) {
+      event.preventDefault();
+      const file = event.currentTarget.elements.logo.files[0];
+      if (!file) return;
+      try {
+        const dataUrl = await fileAsDataUrl(file);
+        const result = await server('saveBrandingLogo', { dataUrl, fileName: file.name });
+        if (!result.logo) throw new Error('The logo upload completed without a usable image.');
+        state.data.logo = result.logo;
+        document.getElementById('brandLogo').src = result.logo;
+        document.getElementById('loadingLogo').src = result.logo;
+        renderAdmin(document.getElementById('cmContent'));
+        toast('Logo updated.');
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function bindAideEvents() {
+      bindBenchmarkLookup();
+      document.getElementById('clockButton').addEventListener('click', toggleClock);
+      document.getElementById('fullScheduleButton').addEventListener('click', showWeeklySchedule);
+    }
+
+    function benchmarkLookupMarkup() {
+      const context = state.data && state.data.benchmarkLookup ? state.data.benchmarkLookup : {};
+      const classes = Array.isArray(context.classes) ? context.classes : [];
+      const teachers = Array.isArray(context.teachers) ? context.teachers : [];
+      const currentClass = classes.find(item => String(item.id) === String(context.currentClassId)) ||
+        classes.find(item => normalizeEmail(item.teacherEmail) === normalizeEmail(state.data.user.email));
+      const selectedTeacher = currentClass ? currentClass.teacherEmail : (teachers[0] ? teachers[0].email : '');
+      state.lookupClassId = currentClass ? currentClass.id : '';
+      return `
+        <div class="card-header">
+          <div><div class="eyebrow">Primary workflow</div><h2>Benchmark lookup and input</h2><p class="muted">Your current assignment is selected when available. Choose another teacher and period to override it.</p></div>
+          <button class="btn ghost small-btn" type="button" data-refresh="${escapeAttr(state.selectedTab)}">Refresh</button>
+        </div>
+        <div class="form-grid three">
+          <div class="field"><label>Teacher</label><select id="lookupTeacher"><option value="">Select a teacher</option>${options(teachers, 'email', 'displayName', selectedTeacher)}</select></div>
+          <div class="field"><label>Period</label><select id="lookupPeriod"><option value="">Select a period</option></select></div>
+          <div class="field"><label>Subject</label><div id="lookupSubject" class="check muted">Select a teacher and period.</div></div>
+          <div class="field full"><label>Students</label><div id="lookupStudents" class="checks"><span class="muted small">Select a teacher and period first.</span></div></div>
+          <div class="field full section-tools"><div id="lookupAssignmentNote" class="muted small"></div><button id="lookupButton" class="btn primary" type="button">Find relevant benchmarks</button></div>
+        </div>`;
+    }
+
+    function bindBenchmarkLookup() {
+      const teacher = document.getElementById('lookupTeacher');
+      const period = document.getElementById('lookupPeriod');
+      const button = document.getElementById('lookupButton');
+      if (!teacher || !period || !button) return;
+      teacher.addEventListener('change', () => populateLookupPeriods(''));
+      period.addEventListener('change', renderLookupStudents);
+      button.addEventListener('click', lookupBenchmarks);
+      bindRefreshButtons(document);
+      populateLookupPeriods(state.lookupClassId);
+    }
+
+    function populateLookupPeriods(preferredClassId) {
+      const context = state.data.benchmarkLookup || {};
+      const teacher = document.getElementById('lookupTeacher');
+      const period = document.getElementById('lookupPeriod');
+      if (!teacher || !period) return;
+      const classes = safeArray(context.classes).filter(item => normalizeEmail(item.teacherEmail) === normalizeEmail(teacher.value));
+      period.innerHTML = '<option value="">Select a period</option>' + classes.map(item =>
+        `<option value="${escapeAttr(item.id)}" ${String(item.id) === String(preferredClassId) ? 'selected' : ''}>${escapeHtml(String(item.periodId) + ' · ' + item.name + ' · ' + item.subjectName)}</option>`
+      ).join('');
+      if (!period.value && classes.length === 1) period.value = classes[0].id;
+      renderLookupStudents();
+    }
+
+    function renderLookupStudents() {
+      const context = state.data.benchmarkLookup || {};
+      const classId = document.getElementById('lookupPeriod')?.value || '';
+      const root = document.getElementById('lookupStudents');
+      const subject = document.getElementById('lookupSubject');
+      const note = document.getElementById('lookupAssignmentNote');
+      if (!root || !subject || !note) return;
+      state.lookupClassId = classId;
+      const selectedClass = safeArray(context.classes).find(item => String(item.id) === String(classId));
+      if (!selectedClass) {
+        subject.textContent = 'Select a teacher and period.';
+        root.innerHTML = '<span class="muted small">Select a teacher and period first.</span>';
+        note.textContent = '';
+        return;
+      }
+      subject.textContent = selectedClass.subjectName || 'No subject assigned';
+      const currentStudentId = String(classId) === String(context.currentClassId) ? context.currentStudentId : '';
+      const students = safeArray(selectedClass.students);
+      root.innerHTML = students.length ? students.map(item => `
+        <label class="check"><input type="checkbox" value="${escapeAttr(item.id)}" ${String(item.id) === String(currentStudentId) ? 'checked' : ''}> ${escapeHtml(item.name)}</label>`).join('')
+        : '<span class="muted small">No students are enrolled in this class.</span>';
+      note.textContent = String(classId) === String(context.currentClassId)
+        ? 'Using your current assignment.'
+        : (context.currentClassId ? 'Manual override from your current assignment.' : 'No current assignment was found; choose a class manually.');
+    }
+
+    async function lookupBenchmarks() {
+      const classId = document.getElementById('lookupPeriod')?.value || '';
+      const studentIds = Array.from(document.querySelectorAll('#lookupStudents input:checked')).map(input => input.value);
+      if (!classId || !studentIds.length) return toast('Choose a teacher, period, and at least one student.', true);
+      try {
+        state.benchmarkResults = await server('lookupBenchmarks', { classId, studentIds });
+        renderBenchmarkResults();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function renderBenchmarkResults() {
+      const root = document.getElementById('benchmarkResults');
+      if (!root) return;
+      const results = safeArray(state.benchmarkResults);
+      root.innerHTML = results.length ? results.map(item => `
+        <div class="benchmark-card" data-benchmark-card="${escapeAttr(item.id)}">
+          <div>
+            <div class="row">${item.critical ? '<span class="chip critical">Critical</span>' : ''}<span class="chip">${escapeHtml(item.subjectName)}</span></div>
+            <h3 style="margin-top:12px">${escapeHtml(item.studentName)}</h3>
+            <div>${escapeHtml(item.display)}</div>
+            ${item.description ? `<p class="muted" style="margin-top:8px">${escapeHtml(item.description)}</p>` : ''}
+            <div class="small muted">${item.entryCount} inputs${item.lastEntry ? ' · Last ' + escapeHtml(String(item.lastEntry.percent)) + '%' : ''}</div>
+          </div>
+          <form class="benchmark-entry-form">
+            <input type="hidden" name="benchmarkId" value="${escapeAttr(item.id)}">
+            <input type="hidden" name="classId" value="${escapeAttr(state.lookupClassId)}">
+            <div class="score-grid">
+              <div class="field"><label>Correct</label><input name="correct" type="number" min="0" required></div>
+              <div class="field"><label>Questions</label><input name="attempts" type="number" min="1" required></div>
+            </div>
+            <div class="field" style="margin-top:8px"><label>Notes</label><input name="notes"></div>
+            <button class="btn primary" style="margin-top:10px;width:100%">Save input</button>
+          </form>
+        </div>`).join('') : '<div class="empty">No active benchmarks match this class subject and student selection.</div>';
+      root.querySelectorAll('.benchmark-entry-form').forEach(form => form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const payload = formObject(event.currentTarget);
+        payload.correct = Number(payload.correct);
+        payload.attempts = Number(payload.attempts);
+        try {
+          const result = await server('saveBenchmarkEntry', payload);
+          event.currentTarget.reset();
+          toast('Saved: ' + result.percent + '%');
+          const selectedClass = document.getElementById('lookupPeriod')?.value || '';
+          const selectedStudents = Array.from(document.querySelectorAll('#lookupStudents input:checked')).map(input => input.value);
+          if (selectedClass && selectedStudents.length) {
+            state.benchmarkResults = await server('lookupBenchmarks', { classId: selectedClass, studentIds: selectedStudents });
+            renderBenchmarkResults();
+          }
+        } catch (error) { toast(error.message, true); }
+      }));
+    }
+
+    async function toggleClock() {
+      const isClockedIn = Boolean(state.data.aide.openTimeEntry);
+      try {
+        await server(isClockedIn ? 'clockOut' : 'clockIn', '');
+        await refreshBootstrap();
+        toast(isClockedIn ? 'Clocked out.' : 'Clocked in.');
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function showWeeklySchedule() {
+      try {
+        state.aideWeekDate = state.aideWeekDate || state.data.today;
+        state.fullScheduleDate = state.fullScheduleDate || state.data.today;
+        const week = await server('getAideWeek', state.aideWeekDate);
+        if (!week || typeof week !== 'object') throw new Error('The weekly schedule response was incomplete.');
+        week.days = safeArray(week.days).map(day => Object.assign({}, day || {}, {
+          periods: safeArray(day && day.periods),
+          conflicts: safeArray(day && day.conflicts)
+        }));
+        document.getElementById('fullScheduleTitle').textContent =
+          'Weekly View · ' + formatDateRange(week.weekStart, week.weekEnd);
+        document.getElementById('fullScheduleContent').innerHTML = `
+          <div class="toolbar" style="justify-content:space-between;margin-bottom:16px">
+            <div class="toolbar">
+              <button id="previousAideWeek" class="btn ghost small-btn" type="button">Previous week</button>
+              <button id="nextAideWeek" class="btn ghost small-btn" type="button">Next week</button>
+            </div>
+            <div class="list-item">
+              <div class="eyebrow">Assigned capacity</div>
+              <strong>${escapeHtml(String(week.assignedHours || 0))} / ${week.capacityHours == null ? 'Not set' : escapeHtml(String(week.capacityHours)) + ' hours'}</strong>
+              ${week.status === 'OVER' ? `<div class="status-denied small">${escapeHtml(String(week.deltaHours))} hours over capacity</div>` : ''}
+            </div>
+          </div>
+          <div class="list">${week.days.map(day => `
+            <details class="week-day-schedule" ${day.date === state.data.today ? 'open' : ''}>
+              <summary>${escapeHtml(titleCase(day.dayName))} · ${escapeHtml(formatShortDate(day.date))} · ${escapeHtml(String(day.hours || 0))} hours · ${escapeHtml(scheduleSourceLabel(day.source))}</summary>
+              <div class="schedule-strip">${day.periods.length ? day.periods.map(period => `
+                <div class="schedule-row">
+                  <div><strong>${escapeHtml(period.label)}</strong><div class="muted small">${escapeHtml(period.startTime)}–${escapeHtml(period.endTime)}</div></div>
+                  <div>${period.assignment ? `<strong>${escapeHtml(period.assignment.duty || period.assignment.className || 'Assignment')}</strong>${period.assignment.studentName ? `<div class="muted small">${escapeHtml(period.assignment.studentName)}</div>` : ''}` : '<span class="muted">No assignment</span>'}</div>
+                </div>`).join('') : '<div class="empty">No schedule for this day.</div>'}</div>
+            </details>`).join('')}</div>
+          <article class="card" style="margin-top:18px">
+            <div class="card-header">
+              <div><div class="eyebrow">All aides</div><h2>Full daily schedule</h2></div>
+              <div class="toolbar"><input id="allAidesScheduleDate" type="date" value="${escapeAttr(state.fullScheduleDate)}"><button id="loadAllAidesSchedule" class="btn small-btn" type="button">Load day</button></div>
+            </div>
+            <div id="allAidesScheduleContent"><div class="empty">Loading daily coverage…</div></div>
+          </article>`;
+        document.getElementById('previousAideWeek').addEventListener('click', () => shiftAideWeek(-7));
+        document.getElementById('nextAideWeek').addEventListener('click', () => shiftAideWeek(7));
+        document.getElementById('loadAllAidesSchedule').addEventListener('click', loadAllAidesSchedule);
+        const dialog = document.getElementById('fullScheduleDialog');
+        if (!dialog.open) openDialog('fullScheduleDialog');
+        await loadAllAidesSchedule();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function shiftAideWeek(days) {
+      const date = new Date((state.aideWeekDate || state.data.today) + 'T12:00:00');
+      date.setDate(date.getDate() + days);
+      state.aideWeekDate = date.toISOString().slice(0, 10);
+      showWeeklySchedule();
+    }
+
+    async function loadAllAidesSchedule() {
+      const input = document.getElementById('allAidesScheduleDate');
+      if (!input || !input.value) return;
+      state.fullScheduleDate = input.value;
+      try {
+        const schedule = await server('getFullSchedule', state.fullScheduleDate);
+        schedule.periods = safeArray(schedule && schedule.periods);
+        schedule.assignments = safeArray(schedule && schedule.assignments);
+        const root = document.getElementById('allAidesScheduleContent');
+        if (!root) return;
+        root.innerHTML = schedule.periods.length ? schedule.periods.map(period => {
+          const assignments = schedule.assignments.filter(item => String(item.periodId) === String(period.periodId));
+          return `<div class="list-item" style="margin-bottom:10px">
+            <div class="row" style="justify-content:space-between"><strong>${escapeHtml(period.label)}</strong><span class="muted small">${escapeHtml(period.startTime)}–${escapeHtml(period.endTime)}</span></div>
+            <div class="list" style="margin-top:10px">${assignments.length ? assignments.map(item => `
+              <div><strong>${escapeHtml(item.aideName)}</strong> · ${escapeHtml(item.duty || item.className || 'Assignment')}${item.studentName ? ' · ' + escapeHtml(item.studentName) : ''}</div>`).join('') : '<span class="muted">No assignments</span>'}</div>
+          </div>`;
+        }).join('') : '<div class="empty">No schedule for this day.</div>';
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function bindStaticForms() {
+      document.getElementById('refreshFullSchedule').addEventListener('click', showWeeklySchedule);
+      document.getElementById('callOffForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const payload = formObject(event.currentTarget);
+        payload.hasHours = payload.hasHours === 'true';
+        try {
+          const result = await server('callOff', payload);
+          closeDialog('callOffDialog');
+          event.currentTarget.reset();
+          await refreshBootstrap();
+          toast(safeArray(result.reconciliation).map(item => item.message).filter(Boolean).join(' ') || 'Call-off submitted.');
+        } catch (error) { toast(error.message, true); }
+      });
+      document.getElementById('timeOffForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const payload = formObject(event.currentTarget);
+        payload.hasHours = event.currentTarget.elements.hasHours.checked;
+        try {
+          await server('submitTimeOffRequest', payload);
+          closeDialog('timeOffDialog');
+          event.currentTarget.reset();
+          toast('Time-off request sent.');
+        } catch (error) { toast(error.message, true); }
+      });
+      document.getElementById('availabilityForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const days = Array.from(document.querySelectorAll('.availability-day')).map(row => {
+          const available = row.querySelector('[data-available]').checked;
+          return {
+            dayOfWeek: row.dataset.day,
+            available,
+            startTime: row.querySelector('[data-start]').value,
+            endTime: row.querySelector('[data-end]').value
+          };
+        });
+        try {
+          await server('submitAvailability', { days });
+          closeDialog('availabilityDialog');
+          toast('Availability request sent.');
+        } catch (error) { toast(error.message, true); }
+      });
+    }
+
+    function renderAvailabilityDays() {
+      const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+      document.getElementById('availabilityDays').innerHTML = days.map(day => `
+        <div class="list-item availability-day" data-day="${day}">
+          <div class="row" style="justify-content:space-between"><strong>${titleCase(day)}</strong><label class="check"><input data-available type="checkbox" checked> Available</label></div>
+          <div class="form-grid" style="margin-top:10px"><div class="field"><label>Start</label><input data-start type="time" value="07:30"></div><div class="field"><label>End</label><input data-end type="time" value="15:30"></div></div>
+        </div>`).join('');
+      document.querySelectorAll('[data-available]').forEach(check => check.addEventListener('change', () => {
+        check.closest('.availability-day').querySelectorAll('input[type="time"]').forEach(input => input.disabled = !check.checked);
+      }));
+    }
+
+    function renderCriticalList(items) {
+      items = safeArray(items);
+      return `<div class="list">${items.length ? items.map(item => `
+        <div class="list-item urgent"><strong>${escapeHtml(item.studentName)}</strong><div>${escapeHtml(item.category + ' – ' + item.skill)}</div><div class="muted small">${escapeHtml(item.subjectName)}</div></div>`).join('')
+        : '<div class="empty">No benchmarks are marked critical.</div>'}</div>`;
+    }
+
+    function renderTimeEntries(pay) {
+      pay = pay || { entries: [], daysOff: [] };
+      pay.entries = safeArray(pay.entries);
+      pay.daysOff = safeArray(pay.daysOff);
+      if (!pay.entries.length && !pay.daysOff.length) return '<div class="empty">No tracked records in this pay period.</div>';
+      return `<div class="list" style="margin-top:16px">
+        ${pay.entries.map(item => `<div class="metric"><span>${escapeHtml(item.clockIn)}</span><strong>${item.hours == null ? 'Open' : escapeHtml(String(item.hours)) + ' hrs'}</strong></div>`).join('')}
+        ${pay.daysOff.map(item => `<div class="metric"><span>${escapeHtml(item.startDate)}–${escapeHtml(item.endDate)} · ${escapeHtml(item.type)}</span><strong>Off</strong></div>`).join('')}
+      </div>`;
+    }
+
+    function renderProgressChart(progress, rootId) {
+      const root = document.getElementById(rootId || 'progressChart');
+      if (!root) return;
+      const points = safeArray(progress && progress.points);
+      if (!points.length) {
+        root.innerHTML = '<div class="empty">No entries have been recorded for this benchmark.</div>';
+        return;
+      }
+      const width = 760, height = 310, left = 46, right = 20, top = 20, bottom = 62;
+      const plotBottom = height - bottom;
+      const x = index => points.length === 1 ? (left + width - right) / 2 : left + index * ((width - left - right) / (points.length - 1));
+      const y = value => plotBottom - (Number(value || 0) / 100) * (plotBottom - top);
+      const line = points.map((point, index) => `${x(index)},${y(point.percent)}`).join(' ');
+      const labelEvery = Math.max(1, Math.ceil(points.length / 7));
+      const grid = [0, 25, 50, 75, 100].map(value => `
+        <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
+        <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}%</text>`).join('');
+      root.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Benchmark progress line chart">
+        ${grid}<polyline points="${line}" fill="none" stroke="#e10600" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        ${points.map((point, index) => `<circle cx="${x(index)}" cy="${y(point.percent)}" r="5" fill="#fff" stroke="#e10600" stroke-width="3"><title>${escapeHtml(formatChartDate(point.timestamp))}: ${escapeHtml(String(point.percent))}% (${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))})</title></circle>`).join('')}
+        ${points.map((point, index) => (index % labelEvery === 0 || index === points.length - 1)
+          ? `<text x="${x(index)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="middle">${escapeHtml(formatChartDate(point.timestamp))}</text>`
+          : '').join('')}
+      </svg>`;
+    }
+
+    async function loadGoalWorkspace(studentId, force) {
+      const workspace = document.getElementById('goalWorkspace');
+      if (!workspace || !studentId) return;
+      try {
+        workspace.innerHTML = '<div class="empty">Loading student goals…</div>';
+        const data = !force && state.goalWorkspaceCache[studentId]
+          ? state.goalWorkspaceCache[studentId]
+          : await server('getStudentGoalWorkspace', studentId);
+        state.goalWorkspaceCache[studentId] = data;
+        renderGoalWorkspaceData(data);
+      } catch (error) {
+        workspace.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    function renderGoalWorkspaceData(data) {
+      const goals = safeArray(data && data.goals);
+      const workspace = document.getElementById('goalWorkspace');
+      const chart = document.getElementById('goalProgressChart');
+      const legend = document.getElementById('goalLegend');
+      if (!workspace || !chart || !legend) return;
+      renderGoalProgressChart(goals, chart, legend);
+      workspace.innerHTML = goals.length ? goals.map((goal, goalIndex) => {
+        const metrics = goal.metrics || {};
+        const benchmarks = safeArray(goal.benchmarks);
+        return `
+          <div class="goal-card">
+            <div class="row" style="justify-content:space-between;align-items:flex-start">
+              <div><div class="eyebrow">Goal ${goalIndex + 1}</div><h3>${escapeHtml(goal.goal)}</h3></div>
+              <div class="row">
+                ${goal.critical ? '<span class="chip critical">Critical</span>' : ''}
+                <span class="chip">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</span>
+              </div>
+            </div>
+            <div class="checks">${safeArray(goal.subjectNames).map(name => `<span class="chip">${escapeHtml(name)}</span>`).join('')}</div>
+            <div class="checks">
+              <span class="chip">Latest ${metrics.latestPercent == null ? '—' : escapeHtml(String(metrics.latestPercent)) + '%'}</span>
+              <span class="chip">Average ${metrics.averagePercent == null ? '—' : escapeHtml(String(metrics.averagePercent)) + '%'}</span>
+              <span class="chip">${escapeHtml(String(metrics.entryCount || 0))} entries</span>
+              <span class="chip">Trend ${metrics.trend == null ? '—' : (metrics.trend > 0 ? '+' : '') + escapeHtml(String(metrics.trend)) + '%'}</span>
+            </div>
+            <div class="toolbar">
+              <button class="btn ${goal.critical ? 'ghost' : 'danger'} small-btn" data-goal-critical="${escapeAttr(goal.id)}" data-critical="${goal.critical ? 'false' : 'true'}">${goal.critical ? 'Remove critical status' : 'Mark goal critical'}</button>
+            </div>
+            <div class="list">${benchmarks.length ? benchmarks.map(benchmark => `
+              <div class="benchmark-row ${benchmark.active ? 'active' : ''}">
+                <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(benchmark.id)}">
+                  <strong>${escapeHtml(benchmark.category)}</strong>
+                  <div class="muted small">${escapeHtml(benchmark.skill)}</div>
+                </button>
+                ${benchmark.active
+                  ? '<span class="chip status-approved">Active</span>'
+                  : `<button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Make active</button>`}
+              </div>`).join('') : '<div class="empty">No benchmarks are assigned to this goal.</div>'}</div>
+          </div>`;
+      }).join('') : '<div class="empty">This student has no active annual goals.</div>';
+      workspace.querySelectorAll('[data-set-active]').forEach(button => button.addEventListener('click', async () => {
+        try {
+          await server('setActiveGoalBenchmark', {
+            goalId: button.dataset.goalId,
+            benchmarkId: button.dataset.setActive
+          });
+          state.goalWorkspaceCache[state.goalStudentId] = null;
+          await loadGoalWorkspace(state.goalStudentId, true);
+          const benchmark = state.data.caseManager.benchmarks.find(item =>
+            String(item.id) === String(button.dataset.setActive)
+          );
+          state.data.caseManager.benchmarks
+            .filter(item => String(item.goalId) === String(button.dataset.goalId))
+            .forEach(item => { item.active = benchmark ? item.id === benchmark.id : false; });
+          toast('Active objective updated.');
+        } catch (error) { toast(error.message, true); }
+      }));
+      workspace.querySelectorAll('[data-benchmark-history]').forEach(button =>
+        button.addEventListener('click', () => showBenchmarkHistory(button.dataset.benchmarkHistory))
+      );
+      workspace.querySelectorAll('[data-goal-critical]').forEach(button => button.addEventListener('click', async () => {
+        try {
+          const critical = button.dataset.critical === 'true';
+          await server('setGoalCritical', {
+            goalId: button.dataset.goalCritical,
+            critical
+          });
+          const managedGoal = state.data.caseManager.goals.find(goal =>
+            String(goal.id) === String(button.dataset.goalCritical)
+          );
+          if (managedGoal) managedGoal.critical = critical;
+          state.data.caseManager.benchmarks
+            .filter(benchmark => String(benchmark.goalId) === String(button.dataset.goalCritical))
+            .forEach(benchmark => { benchmark.critical = critical; });
+          state.goalWorkspaceCache[state.goalStudentId] = null;
+          await loadGoalWorkspace(state.goalStudentId, true);
+          toast(critical ? 'Goal marked critical.' : 'Critical status removed.');
+        } catch (error) { toast(error.message, true); }
+      }));
+    }
+
+    function renderGoalProgressChart(goals, chart, legend) {
+      const colors = ['#ff453a', '#64d2ff', '#ffd60a', '#bf5af2', '#30d158', '#ff9f0a', '#5e5ce6', '#ff375f'];
+      const series = goals.map((goal, index) => ({
+        goal,
+        color: colors[index % colors.length],
+        points: safeArray(goal.points).map(point => ({
+          ...point,
+          time: new Date(point.timestamp).getTime()
+        })).filter(point => Number.isFinite(point.time))
+      }));
+      const allPoints = series.flatMap(item => item.points);
+      legend.innerHTML = series.map((item, index) => `
+        <span class="goal-legend-item">
+          <span class="goal-legend-dot" style="background:${item.color}"></span>
+          Goal ${index + 1}: ${escapeHtml(item.goal.goal)}
+        </span>`).join('');
+      if (!allPoints.length) {
+        chart.innerHTML = '<div class="empty">No entries have been recorded for this student’s goals.</div>';
+        return;
+      }
+      const width = 980, height = 340, left = 48, right = 24, top = 24, bottom = 62;
+      const plotBottom = height - bottom;
+      const minTime = Math.min(...allPoints.map(point => point.time));
+      const maxTime = Math.max(...allPoints.map(point => point.time));
+      const x = time => minTime === maxTime
+        ? (left + width - right) / 2
+        : left + ((time - minTime) / (maxTime - minTime)) * (width - left - right);
+      const y = value => plotBottom - (Number(value || 0) / 100) * (plotBottom - top);
+      const grid = [0, 25, 50, 75, 100].map(value => `
+        <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
+        <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}%</text>`).join('');
+      const dateTicks = Array.from({ length: 5 }, (_, index) =>
+        minTime + (maxTime - minTime) * (index / 4)
+      );
+      chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Annual goal progress line chart">
+        ${grid}
+        ${series.map(item => {
+          const line = item.points.map(point => `${x(point.time)},${y(point.percent)}`).join(' ');
+          return `<polyline points="${line}" fill="none" stroke="${item.color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            ${item.points.map(point => `<circle cx="${x(point.time)}" cy="${y(point.percent)}" r="4" fill="#111318" stroke="${item.color}" stroke-width="3"><title>${escapeHtml(formatChartDate(point.timestamp))}: ${escapeHtml(String(point.percent))}%</title></circle>`).join('')}`;
+        }).join('')}
+        ${dateTicks.map((time, index) => `<text x="${x(time)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="${index === 0 ? 'start' : index === 4 ? 'end' : 'middle'}">${escapeHtml(formatChartDate(new Date(time).toISOString()))}</text>`).join('')}
+      </svg>`;
+    }
+
+    async function showBenchmarkHistory(benchmarkId) {
+      const dialog = document.getElementById('benchmarkHistoryDialog');
+      const content = document.getElementById('benchmarkHistoryContent');
+      content.innerHTML = '<div class="empty">Loading entries…</div>';
+      dialog.showModal();
+      try {
+        const data = state.benchmarkEntryCache[benchmarkId] ||
+          await server('getBenchmarkEntryDetails', benchmarkId);
+        state.benchmarkEntryCache[benchmarkId] = data;
+        document.getElementById('benchmarkHistoryTitle').textContent =
+          data.benchmark.category + ' · ' + data.benchmark.studentName;
+        const entries = safeArray(data.entries);
+        content.innerHTML = entries.length ? `<div class="list">${entries.map(entry => `
+          <div class="list-item">
+            <div class="row" style="justify-content:space-between">
+              <strong>${escapeHtml(String(entry.correct))}/${escapeHtml(String(entry.attempts))}</strong>
+              <span class="chip">${escapeHtml(String(entry.percent))}%</span>
+            </div>
+            <div class="muted small">${escapeHtml(formatEntryDateTime(entry.timestamp))} · ${escapeHtml(entry.staffName)}</div>
+            <div style="margin-top:8px">${entry.notes ? escapeHtml(entry.notes) : '<span class="muted">No notes entered.</span>'}</div>
+          </div>`).join('')}</div>` : '<div class="empty">No entries have been recorded for this benchmark.</div>';
+      } catch (error) {
+        content.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function refreshBootstrap(tab) {
+      const nextData = normalizeBootstrap(await server('getAppBootstrap'));
+      state.data = nextData;
+      state.goalWorkspaceCache = {};
+      state.benchmarkEntryCache = {};
+      document.getElementById('brandLogo').src = state.data.logo || '';
+      document.getElementById('welcomeName').textContent = 'Welcome ' + (state.data.user.firstName || '');
+      document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
+      if (state.data.view === 'CASE_MANAGER') {
+        if (tab) state.selectedTab = tab;
+        document.getElementById('aideView').classList.add('hidden');
+        renderCaseManager();
+      } else {
+        document.getElementById('caseManagerView').classList.add('hidden');
+        document.getElementById('aideView').innerHTML = '';
+        renderAide();
+      }
+    }
+
+    function bindRefreshButtons(root) {
+      (root || document).querySelectorAll('[data-refresh]').forEach(button => {
+        if (button.dataset.refreshBound) return;
+        button.dataset.refreshBound = 'true';
+        button.addEventListener('click', async () => {
+          try {
+            const section = button.dataset.refresh || state.selectedTab;
+            if (section === 'benchmarks') {
+              await refreshGoalManagerData();
+            } else if (section === 'admin') {
+              await refreshMessageManagementData();
+            } else if (section === 'overview') {
+              await refreshBootstrap('overview');
+            } else {
+              await refreshBootstrap(section);
+            }
+            toast('Data refreshed.');
+          } catch (error) { toast(safeErrorMessage(error), true); }
+        });
+      });
+    }
+
+    function formObject(form) {
+      return Object.fromEntries(new FormData(form).entries());
+    }
+
+    function server(functionName, ...args) {
+      beginBusy(operationLabel(functionName));
+      return new Promise((resolve, reject) => {
+        try {
+          google.script.run
+            .withSuccessHandler(result => {
+              endBusy();
+              if (result === null || result === undefined) {
+                reject(new Error('No response was returned. Refresh this view and try again.'));
+                return;
+              }
+              resolve(result);
+            })
+            .withFailureHandler(error => {
+              endBusy();
+              reject(new Error(safeErrorMessage(error)));
+            })
+            [functionName](...args);
+        } catch (error) {
+          endBusy();
+          reject(new Error(safeErrorMessage(error)));
+        }
+      });
+    }
+
+    function beginBusy(message) {
+      state.pendingOperations += 1;
+      const overlay = document.getElementById('busyOverlay');
+      document.getElementById('busyMessage').textContent = message || 'Working…';
+      if (state.data || document.getElementById('loading').classList.contains('done')) {
+        overlay.classList.remove('hidden');
+      }
+      document.querySelector('main').inert = true;
+      document.querySelectorAll('dialog').forEach(dialog => { dialog.inert = true; });
+      document.body.setAttribute('aria-busy', 'true');
+    }
+
+    function endBusy() {
+      state.pendingOperations = Math.max(0, state.pendingOperations - 1);
+      if (state.pendingOperations) return;
+      document.getElementById('busyOverlay').classList.add('hidden');
+      document.querySelector('main').inert = false;
+      document.querySelectorAll('dialog').forEach(dialog => { dialog.inert = false; });
+      document.body.removeAttribute('aria-busy');
+    }
+
+    function operationLabel(functionName) {
+      const labels = {
+        getAppBootstrap: 'Refreshing app data…',
+        lookupBenchmarks: 'Finding benchmarks…',
+        saveBenchmarkEntry: 'Saving benchmark input…',
+        getBenchmarkProgress: 'Loading progress history…',
+        getStudentGoalWorkspace: 'Loading student goals…',
+        getBenchmarkEntryDetails: 'Loading benchmark entries…',
+        createGoal: 'Creating annual goal…',
+        setActiveGoalBenchmark: 'Updating active benchmark…',
+        setGoalCritical: 'Updating goal priority…',
+        deactivateGoal: 'Deactivating goal…',
+        getGoalManagerData: 'Refreshing goals…',
+        saveDailyMessage: 'Saving global message…',
+        setDailyMessageActive: 'Updating global message…',
+        getMessageManagementData: 'Refreshing messages…',
+        getScheduleBuilderData: 'Loading schedule…',
+        getWeeklyScheduleData: 'Loading weekly schedule…',
+        getAideWeek: 'Loading Weekly View…',
+        previewWeeklyHours: 'Calculating weekly hours…',
+        saveSchedule: 'Saving schedule…',
+        saveScheduleType: 'Saving schedule type…',
+        upsertStaff: 'Saving staff member…',
+        deleteStaff: 'Removing staff access…',
+        upsertStudent: 'Saving student…',
+        deleteStudent: 'Deactivating student…',
+        reviewStaffRequest: 'Updating request…',
+        generateIep: 'Generating IEP document…',
+        saveBrandingLogo: 'Uploading logo…'
+      };
+      return labels[functionName] || 'Working with the database…';
+    }
+
+    function options(items, valueKey, labelKey, selected) {
+      return safeArray(items).map(item => `<option value="${escapeAttr(item && item[valueKey])}" ${String(item && item[valueKey]) === String(selected || '') ? 'selected' : ''}>${escapeHtml(item && item[labelKey])}</option>`).join('');
+    }
+
+    function toast(message, isError) {
+      const element = document.getElementById('toast');
+      element.textContent = safeErrorMessage(message);
+      element.className = 'toast show' + (isError ? ' error' : '');
+      window.clearTimeout(toast.timer);
+      toast.timer = window.setTimeout(() => element.className = 'toast', 5000);
+    }
+
+    function showFatal(error) {
+      const root = document.getElementById('fatalError');
+      root.classList.remove('hidden');
+      root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p><p class="muted">Ask a case manager or the Apps Script owner to confirm database setup, deployment access, and the Staff whitelist.</p>`;
+    }
+
+    function safeArray(value) { return Array.isArray(value) ? value : []; }
+    function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
+    function normalizeBootstrap(value) {
+      if (!value || typeof value !== 'object' || !value.user || !value.view) {
+        throw new Error('The database returned an incomplete response.');
+      }
+      value.dailyMessages = safeArray(value.dailyMessages);
+      value.criticalBenchmarks = safeArray(value.criticalBenchmarks);
+      value.classes = safeArray(value.classes);
+      value.students = safeArray(value.students);
+      value.subjects = safeArray(value.subjects);
+      value.benchmarkLookup = value.benchmarkLookup || {};
+      value.benchmarkLookup.teachers = safeArray(value.benchmarkLookup.teachers);
+      value.benchmarkLookup.classes = safeArray(value.benchmarkLookup.classes).map(item =>
+        Object.assign({}, item || {}, { students: safeArray(item && item.students) })
+      );
+      if (value.aide) {
+        value.aide.schedule = value.aide.schedule || {};
+        value.aide.schedule.periods = safeArray(value.aide.schedule.periods);
+        value.aide.schedule.assignments = safeArray(value.aide.schedule.assignments);
+        value.aide.trainedStudents = safeArray(value.aide.trainedStudents);
+        value.aide.currentPayPeriod = value.aide.currentPayPeriod || {};
+        value.aide.currentPayPeriod.entries = safeArray(value.aide.currentPayPeriod.entries);
+        value.aide.currentPayPeriod.daysOff = safeArray(value.aide.currentPayPeriod.daysOff);
+      } else if (value.view !== 'CASE_MANAGER') {
+        value.aide = {
+          schedule: { periods: [], assignments: [] },
+          trainedStudents: [],
+          openTimeEntry: null,
+          currentPayPeriod: { entries: [], daysOff: [], totalHours: 0 }
+        };
+      }
+      if (value.caseManager) {
+        ['students', 'goals', 'benchmarks', 'iepReminders', 'toDos', 'staff', 'caseManagers', 'aides', 'scheduleTypes']
+          .forEach(key => { value.caseManager[key] = safeArray(value.caseManager[key]); });
+        value.caseManager.messages = value.caseManager.messages || {};
+        value.caseManager.messages.messages = safeArray(value.caseManager.messages.messages);
+        value.caseManager.messages.activeToday = safeArray(value.caseManager.messages.activeToday);
+        value.caseManager.requests = value.caseManager.requests || {};
+        value.caseManager.requests.pending = safeArray(value.caseManager.requests.pending);
+        value.caseManager.requests.timeOffHistory = safeArray(value.caseManager.requests.timeOffHistory);
+        value.caseManager.requests.currentAvailability = safeArray(value.caseManager.requests.currentAvailability);
+      }
+      return value;
+    }
+    function safeErrorMessage(value) {
+      if (value && typeof value === 'object' && value.message) return String(value.message);
+      const text = String(value == null ? '' : value).trim();
+      return text && text !== '[object Object]' ? text : 'Something went wrong. Refresh this view and try again.';
+    }
+    function formatChartDate(value) {
+      const text = String(value || '');
+      const date = new Date(text);
+      if (Number.isNaN(date.getTime())) return text.slice(0, 10);
+      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+    function formatEntryDateTime(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value || '');
+      return date.toLocaleString(undefined, {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit'
+      });
+    }
+
+    function openDialog(id) {
+      const dialog = document.getElementById(id);
+      const today = state.data ? state.data.today : '';
+      dialog.querySelectorAll('input[type="date"]').forEach(input => { if (!input.value) input.value = today; });
+      dialog.showModal();
+    }
+    function closeDialog(id) { document.getElementById(id).close(); }
+    function fileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+    function roleLabel(role) { return titleCase(String(role).replace('_', ' ')); }
+    function titleCase(value) { return String(value).toLowerCase().replace(/\b\w/g, char => char.toUpperCase()); }
+    function escapeHtml(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+    function escapeAttr(value) { return escapeHtml(value); }
+  </script>
+</body>
+</html>

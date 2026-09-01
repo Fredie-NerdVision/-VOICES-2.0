@@ -1,0 +1,12 @@
+.clasp.json
+.env
+.env.*
+!.env.example
+node_modules/
+*.zip
+*.log
+.DS_Store
+.idea/
+.vscode/
+coverage/
+dist/

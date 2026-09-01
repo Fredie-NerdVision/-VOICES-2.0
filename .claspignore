@@ -1,0 +1,8 @@
+assets/**
+tests/**
+PROJECT_GUIDE.md
+README.md
+DATA_MODEL.md
+package.json
+package-lock.json
+node_modules/**
