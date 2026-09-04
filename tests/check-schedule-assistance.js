@@ -10,6 +10,7 @@ const tables = {
     { Email: 'pending@example.org', FirstName: 'Pending', LastName: 'Off', Role: 'AIDE', Active: true },
     { Email: 'partial@example.org', FirstName: 'Partial', LastName: 'Hours', Role: 'AIDE', Active: true },
     { Email: 'override@example.org', FirstName: 'Daily', LastName: 'Override', Role: 'AIDE', Active: true },
+    { Email: 'calledoff@example.org', FirstName: 'Called', LastName: 'Off', Role: 'AIDE', Active: true },
     { Email: 'availability@example.org', FirstName: 'Pending', LastName: 'Availability', Role: 'AIDE', Active: true }
   ],
   TimeOffRequests: [
@@ -22,7 +23,11 @@ const tables = {
     { AideEmail: 'availability@example.org', DayOfWeek: 'TUESDAY', Available: false, Status: 'PENDING' }
   ],
   AideDailyHours: [
-    { AideEmail: 'override@example.org', Date: '2026-09-01', StartTime: '08:45', EndTime: '12:00' }
+    { AideEmail: 'override@example.org', Date: '2026-09-01', StartTime: '08:45', EndTime: '12:00' },
+    { AideEmail: 'calledoff@example.org', Date: '2026-09-01', StartTime: '08:00', EndTime: '12:00' }
+  ],
+  Assignments: [
+    { AideEmail: 'calledoff@example.org', Date: '2026-09-01', PeriodId: 'P1', Duty: 'OFF', Type: 'OFF' }
   ]
 };
 
@@ -91,11 +96,17 @@ const result = vm.runInContext(`
   if (isAideAvailableForPeriod_('approved@example.org', date, 'P1')) {
     throw new Error('Approved time off should exclude call-off replacements.');
   }
+  if (isAideAvailableForPeriod_('pending@example.org', date, 'P1')) {
+    throw new Error('Pending call-off/time-off requests should exclude automatic replacements.');
+  }
   if (!isAideAvailableForPeriod_('partial@example.org', date, 'P1')) {
     throw new Error('Partial recurring shift overlap should allow call-off replacement.');
   }
   if (!isAideAvailableForPeriod_('override@example.org', date, 'P1')) {
     throw new Error('A date-specific partial shift should override recurring unavailability.');
+  }
+  if (isAideAvailableForPeriod_('calledoff@example.org', date, 'P1')) {
+    throw new Error('An OFF assignment should exclude a call-off replacement.');
   }
   return { unavailable: unavailable.length, approved, pending, partial, pendingAvailability };
 })()

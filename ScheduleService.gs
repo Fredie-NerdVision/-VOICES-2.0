@@ -1123,12 +1123,21 @@ function matchOneToOneCoverage_(requirements, candidateAides) {
 }
 
 function isAideAvailableForPeriod_(email, dateText, periodId) {
-  const approvedTimeOff = rows_('TimeOffRequests').some(row =>
-    normalizeEmail_(row.AideEmail) === normalizeEmail_(email) &&
-    String(row.Status).toUpperCase() === 'APPROVED' &&
+  const normalizedEmail = normalizeEmail_(email);
+  const blockingTimeOff = rows_('TimeOffRequests').some(row =>
+    normalizeEmail_(row.AideEmail) === normalizedEmail &&
+    ['APPROVED', 'PENDING'].includes(String(row.Status).toUpperCase()) &&
     dateInRange_(dateText, row.StartDate, row.EndDate)
   );
-  if (approvedTimeOff) return false;
+  if (blockingTimeOff) return false;
+  const markedOff = rows_('Assignments').some(row =>
+    normalizeEmail_(row.AideEmail) === normalizedEmail &&
+    formatDate_(row.Date) === dateText &&
+    String(row.PeriodId) === String(periodId) &&
+    (String(row.Type).toUpperCase() === 'OFF' ||
+      String(row.Duty).toUpperCase() === 'OFF')
+  );
+  if (markedOff) return false;
   const schedule = getDaySchedule_(dateText);
   const period = schedule.periods.find(item => String(item.periodId) === String(periodId));
   if (!period) return false;

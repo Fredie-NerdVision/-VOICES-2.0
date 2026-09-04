@@ -78,6 +78,10 @@ if (!html.includes('Goal saving is busy. Your form is still intact') ||
     !html.includes('form.reset()')) {
   throw new Error('Client retry state is not preserved for goals or observations.');
 }
+if (/await server\('callOff'[\s\S]{0,300}event\.currentTarget/.test(html) ||
+    /await server\('submitTimeOffRequest'[\s\S]{0,300}event\.currentTarget/.test(html)) {
+  throw new Error('A submit handler reads event.currentTarget after an async server call.');
+}
 if (!html.includes('[hidden] { display: none !important; }') ||
     !html.includes('benchmarks.find(benchmark => benchmark.active)') ||
     !html.includes('Manage other Short-Term Objectives') ||

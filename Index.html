@@ -2743,24 +2743,26 @@
       document.getElementById('saveBulkGoals').addEventListener('click', saveBulkGoals_);
       document.getElementById('callOffForm').addEventListener('submit', async event => {
         event.preventDefault();
-        const payload = formObject(event.currentTarget);
+        const form = event.currentTarget;
+        const payload = formObject(form);
         payload.hasHours = payload.hasHours === 'true';
         try {
           const result = await server('callOff', payload);
           closeDialog('callOffDialog');
-          event.currentTarget.reset();
+          form.reset();
           await refreshBootstrap();
           toast(safeArray(result.reconciliation).map(item => item.message).filter(Boolean).join(' ') || 'Call-off submitted.');
         } catch (error) { toast(error.message, true); }
       });
       document.getElementById('timeOffForm').addEventListener('submit', async event => {
         event.preventDefault();
-        const payload = formObject(event.currentTarget);
-        payload.hasHours = event.currentTarget.elements.hasHours.checked;
+        const form = event.currentTarget;
+        const payload = formObject(form);
+        payload.hasHours = form.elements.hasHours.checked;
         try {
           await server('submitTimeOffRequest', payload);
           closeDialog('timeOffDialog');
-          event.currentTarget.reset();
+          form.reset();
           toast('Time-off request sent.');
         } catch (error) { toast(error.message, true); }
       });
