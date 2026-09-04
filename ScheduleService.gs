@@ -974,6 +974,15 @@ function reconcileCallOffDay_(absentEmail, dateText) {
       .filter(row => row.StudentId && isOneToOneStudent_(row.StudentId))
       .map(row => ({ studentId: String(row.StudentId), assignment: row }));
     const uniqueRequirements = uniqueBy_(requirements, item => item.studentId);
+    periodAssignments
+      .filter(row => normalizeEmail_(row.AideEmail) === absentEmail)
+      .forEach(assignment => {
+        assignment.ClassId = '';
+        assignment.StudentId = '';
+        assignment.Duty = 'OFF';
+        assignment.Note = 'Call-off';
+        assignment.Type = 'OFF';
+      });
     const candidateAides = activeRows_('Staff')
       .filter(row => row.Role === VOICES.ROLES.AIDE)
       .map(row => normalizeEmail_(row.Email))
@@ -1024,6 +1033,7 @@ function reconcileCallOffDay_(absentEmail, dateText) {
   });
 
   if (failures.length) {
+    replaceRows_('Assignments', row => formatDate_(row.Date) === dateText, proposed);
     const message = dateText + ' could not reconcile 1:1 coverage (' + failures.join('; ') + ').';
     appendRow_('Notifications', {
       Id: uuid_(),
@@ -1034,7 +1044,11 @@ function reconcileCallOffDay_(absentEmail, dateText) {
       CreatedAt: new Date()
     });
     sendEmail_(caseManagerEmails_().join(','), 'Urgent: unresolved V.O.I.C.E.S 1:1 coverage', message);
-    return { date: dateText, status: 'UNRESOLVED', message: 'No schedule changes made; case managers were alerted.' };
+    return {
+      date: dateText,
+      status: 'UNRESOLVED',
+      message: 'Aide marked OFF; unresolved 1:1 coverage was sent to case managers.'
+    };
   }
 
   replaceRows_('Assignments', row => formatDate_(row.Date) === dateText, proposed);

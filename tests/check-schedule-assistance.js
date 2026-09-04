@@ -59,7 +59,13 @@ const context = {
 };
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(projectRoot, 'ScheduleService.gs'), 'utf8'), context);
+const scheduleService = fs.readFileSync(path.join(projectRoot, 'ScheduleService.gs'), 'utf8');
+vm.runInContext(scheduleService, context);
+const unresolvedCallOff = scheduleService.slice(scheduleService.indexOf('if (failures.length)'));
+if (!unresolvedCallOff.includes("replaceRows_('Assignments'") ||
+    !unresolvedCallOff.includes('Aide marked OFF; unresolved 1:1 coverage')) {
+  throw new Error('Unresolved call-offs do not persist the absent aide OFF state.');
+}
 
 const result = vm.runInContext(`
 (() => {
