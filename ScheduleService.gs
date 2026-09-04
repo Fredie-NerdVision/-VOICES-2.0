@@ -974,6 +974,9 @@ function reconcileCallOffDay_(absentEmail, dateText) {
       .filter(row => row.StudentId && isOneToOneStudent_(row.StudentId))
       .map(row => ({ studentId: String(row.StudentId), assignment: row }));
     const uniqueRequirements = uniqueBy_(requirements, item => item.studentId);
+    const absentStudentIds = uniqueRequirements
+      .filter(item => normalizeEmail_(item.assignment.AideEmail) === absentEmail)
+      .map(item => item.studentId);
     periodAssignments
       .filter(row => normalizeEmail_(row.AideEmail) === absentEmail)
       .forEach(assignment => {
@@ -990,7 +993,12 @@ function reconcileCallOffDay_(absentEmail, dateText) {
       .filter(email => isAideAvailableForPeriod_(email, dateText, periodId));
     const match = matchOneToOneCoverage_(uniqueRequirements, candidateAides);
     if (!match.ok) {
-      failures.push(periodId + ': ' + match.unmatchedStudentIds.join(', '));
+      failures.push(
+        periodId + ': ' + (absentStudentIds.length
+          ? absentStudentIds
+          : match.unmatchedStudentIds
+        ).join(', ')
+      );
       return;
     }
 
@@ -1003,7 +1011,7 @@ function reconcileCallOffDay_(absentEmail, dateText) {
         assignment.Type = 'OFF';
       } else if (assignment.StudentId && isOneToOneStudent_(assignment.StudentId)) {
         assignment.StudentId = '';
-        assignment.Duty = assignment.Duty === '1:1 Support' ? '' : assignment.Duty;
+        assignment.Duty = '';
         assignment.Type = 'STANDARD';
       }
     });

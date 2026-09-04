@@ -63,7 +63,9 @@ const scheduleService = fs.readFileSync(path.join(projectRoot, 'ScheduleService.
 vm.runInContext(scheduleService, context);
 const unresolvedCallOff = scheduleService.slice(scheduleService.indexOf('if (failures.length)'));
 if (!unresolvedCallOff.includes("replaceRows_('Assignments'") ||
-    !unresolvedCallOff.includes('Aide marked OFF; unresolved 1:1 coverage')) {
+    !unresolvedCallOff.includes('Aide marked OFF; unresolved 1:1 coverage') ||
+    !scheduleService.includes('absentStudentIds') ||
+    !scheduleService.includes("assignment.Duty = '';")) {
   throw new Error('Unresolved call-offs do not persist the absent aide OFF state.');
 }
 
