@@ -21,7 +21,7 @@ function parseGoalObjectives_(value) {
 
 function parseObjectiveRecord_(objective, index) {
   if (!objective) {
-    throw new Error('Phase ' + (index + 1) + ' has no task description.');
+    throw new Error('Short-Term Objective ' + (index + 1) + ' has no task description.');
   }
   const ratios = extractObjectiveRatios_(objective);
   const percentageMatch = String(objective).match(/(\d+(?:\.\d+)?)\s*%/);
@@ -214,7 +214,7 @@ function createGoal(payload) {
           GoalId: goalId,
           StudentId: student.Id,
           SubjectId: subjectIds[0],
-          Category: 'Phase ' + (index + 1),
+          Category: 'Short-Term Objective ' + (index + 1),
           Skill: phase.taskDemandDescription,
           TargetCorrect: phase.targetCorrect,
           TargetAttempts: phase.targetAttempts,
@@ -262,7 +262,7 @@ function createGoal(payload) {
       ok: true,
       id: goalId,
       benchmarkCount: benchmarkIds.length,
-      message: 'Goal and ' + benchmarkIds.length + ' phase' +
+      message: 'Goal and ' + benchmarkIds.length + ' Short-Term Objective' +
         (benchmarkIds.length === 1 ? '' : 's') + ' created.'
     };
   });
@@ -272,8 +272,8 @@ function previewBulkGoals(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
-  if (!rows.length) throw new Error('Paste at least one goal or phase row.');
-  if (rows.length > 500) throw new Error('Preview no more than 500 phase rows at a time.');
+  if (!rows.length) throw new Error('Paste at least one goal or Short-Term Objective row.');
+  if (rows.length > 500) throw new Error('Preview no more than 500 Short-Term Objective rows at a time.');
   const students = indexBy_(activeRows_('Students'), 'Id');
   const subjects = indexBy_(activeRows_('Subjects'), 'Id');
   const errors = [];
@@ -344,7 +344,7 @@ function previewBulkGoals(payload) {
     if (orders.some(order => order <= 0) || new Set(orders).size !== orders.length) {
       errors.push({
         row: 0,
-        message: goal.goalKey + ' must use unique positive PhaseOrder values.'
+        message: goal.goalKey + ' must use unique positive Short-Term Objective order values (PhaseOrder).'
       });
     }
     goal.phases.sort((a, b) => a.orderIndex - b.orderIndex);
@@ -409,33 +409,33 @@ function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
     phase.taskDemandDescription || phase.text || phase.skill || phase.description,
     5000
   );
-  if (!taskDemand) throw new Error('Phase ' + (index + 1) + ' needs a task description.');
+  if (!taskDemand) throw new Error('Short-Term Objective ' + (index + 1) + ' needs a task description.');
   const targetAccuracy = optionalNumber_(phase.targetAccuracyPct);
   if (targetAccuracy !== null && (targetAccuracy < 0 || targetAccuracy > 100)) {
-    throw new Error('Phase ' + (index + 1) + ' target accuracy must be from 0 to 100.');
+    throw new Error('Short-Term Objective ' + (index + 1) + ' target accuracy must be from 0 to 100.');
   }
   const targetPromptLevel = normalizePromptLevel_(phase.targetPromptLevel);
   const targetPromptCount = optionalInteger_(phase.targetPromptCount);
   if (targetPromptCount !== null && targetPromptCount < 0) {
-    throw new Error('Phase ' + (index + 1) + ' prompt count cannot be negative.');
+    throw new Error('Short-Term Objective ' + (index + 1) + ' prompt count cannot be negative.');
   }
   const consecutive = optionalInteger_(phase.targetConsecutiveSessions);
   if (consecutive !== null && consecutive <= 0) {
-    throw new Error('Phase ' + (index + 1) + ' consecutive sessions must be positive.');
+    throw new Error('Short-Term Objective ' + (index + 1) + ' consecutive sessions must be positive.');
   }
   const targetCorrect = optionalNumber_(phase.targetCorrect);
   const targetAttempts = optionalNumber_(phase.targetAttempts);
   if ((targetCorrect === null) !== (targetAttempts === null) ||
       (targetAttempts !== null &&
         (targetCorrect < 0 || targetAttempts <= 0 || targetCorrect > targetAttempts))) {
-    throw new Error('Phase ' + (index + 1) + ' correctness ratio is invalid.');
+    throw new Error('Short-Term Objective ' + (index + 1) + ' correctness ratio is invalid.');
   }
   const requiredTrials = optionalNumber_(phase.requiredTrials);
   const totalTrials = optionalNumber_(phase.totalTrials);
   if ((requiredTrials === null) !== (totalTrials === null) ||
       (totalTrials !== null &&
         (requiredTrials <= 0 || totalTrials <= 0 || requiredTrials > totalTrials))) {
-    throw new Error('Phase ' + (index + 1) + ' legacy trial ratio is invalid.');
+    throw new Error('Short-Term Objective ' + (index + 1) + ' legacy trial ratio is invalid.');
   }
   return {
     orderIndex: optionalInteger_(phase.orderIndex) || index + 1,
@@ -485,7 +485,7 @@ function optionalInteger_(value) {
   if (value === '' || value === null || value === undefined) return null;
   const number = Number(value);
   if (!Number.isFinite(number) || !Number.isInteger(number)) {
-    throw new Error('Use a whole number for prompt counts, phase order, and session targets.');
+    throw new Error('Use a whole number for prompt counts, Short-Term Objective order, and session targets.');
   }
   return number;
 }
@@ -800,7 +800,7 @@ function setActiveGoalBenchmark(payload) {
     if (!selected) throw new Error('Benchmark was not found in this goal.');
     const activationDate = formatDate_(payload.activationDate || new Date());
     if (!activationDate || activationDate > formatDate_(new Date())) {
-      throw new Error('Phase activation date must be today or earlier.');
+      throw new Error('Short-Term Objective activation date must be today or earlier.');
     }
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(25000)) {
@@ -814,7 +814,7 @@ function setActiveGoalBenchmark(payload) {
       const selectedCurrent = currentBenchmarks.find(row =>
         String(row.Id) === String(selected.Id)
       );
-      if (!selectedCurrent) throw new Error('The selected phase is no longer available.');
+      if (!selectedCurrent) throw new Error('The selected Short-Term Objective is no longer available.');
       const current = currentBenchmarks.find(row => toBoolean_(row.Active));
       if (current && String(current.Id) === String(selectedCurrent.Id)) {
         return {
@@ -827,7 +827,7 @@ function setActiveGoalBenchmark(payload) {
       if (current &&
           (optionalInteger_(selectedCurrent.OrderIndex) || selectedCurrent._row) <=
           (optionalInteger_(current.OrderIndex) || current._row)) {
-        throw new Error('Activate a later phase in the goal progression order.');
+        throw new Error('Activate a later Short-Term Objective in the goal progression order.');
       }
       const openHistory = rows_('GoalPhaseHistory')
         .filter(row =>
@@ -835,7 +835,7 @@ function setActiveGoalBenchmark(payload) {
           !row.EndedAt
         );
       if (openHistory.some(row => formatDate_(row.ActivatedAt) > activationDate)) {
-        throw new Error('Phase activation cannot precede the current phase.');
+        throw new Error('Short-Term Objective activation cannot precede the current objective.');
       }
       currentBenchmarks.forEach(row => updateRow_('Benchmarks', row._row, {
         Active: String(row.Id) === String(selectedCurrent.Id)
@@ -852,7 +852,7 @@ function setActiveGoalBenchmark(payload) {
         ActivatedAt: activationDate,
         EndedAt: '',
         ChangedBy: staff.Email,
-        ChangeReason: sanitizeText_(payload.reason || 'Phase activated', 500),
+        ChangeReason: sanitizeText_(payload.reason || 'Short-Term Objective activated', 500),
         Source: 'APPLICATION'
       });
       updateRow_('Goals', goal._row, {

@@ -166,7 +166,7 @@ The browser displays an operation overlay and prevents competing clicks while an
 
 ## 8. Goal creation
 
-The case manager selects a student, enters the annual goal, chooses relevant subjects, and may provide zero or any number of objectives/phases. Goals without phases are saved as drafts.
+The case manager selects a student, enters the annual goal, chooses relevant subjects, and may provide zero or any number of Short-Term Objectives. “Phase” remains an internal progression term; goal screens retain the IEP wording “Short-Term Objective.” Goals without objectives are saved as drafts.
 
 The parser:
 
@@ -182,7 +182,7 @@ Creation is protected by a script lock. It creates one annual `Goals` row, its o
 
 The bulk-paste dialog accepts tab-separated rows copied from the documented Google Sheets template. IDs must match exactly; the server returns row-level errors and requires a preview before saving. A stable import batch ID, goal key, and fingerprint make an unchanged retry skip goals already created by a partially completed attempt.
 
-The case-manager Overview controls which benchmark is active and whether the goal is critical. Deactivating a goal closes every open phase interval with the date and actor while preserving prior observations.
+The case-manager Overview shows only the active Short-Term Objective on each goal by default. Other objectives remain available in a collapsed management/history area for manual activation and phase-aware reporting. Deactivating a goal closes every open phase interval with the date and actor while preserving prior observations.
 
 ## 9. Benchmark lookup and entry
 

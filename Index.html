@@ -21,6 +21,7 @@
       --shadow: 0 18px 50px rgba(0, 0, 0, .32);
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
       margin: 0;
       min-height: 100vh;
@@ -585,10 +586,10 @@
 
   <dialog id="bulkGoalDialog" class="wide-dialog">
     <div class="card-header">
-      <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk goals and phases</h2></div>
+      <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk goals and Short-Term Objectives</h2></div>
       <button class="btn ghost small-btn" type="button" onclick="closeDialog('bulkGoalDialog')">Close</button>
     </div>
-    <p class="muted">Columns: GoalKey, StudentId, Goal, Domain, Status, StartDate, DueDate, SubjectIds, PhaseOrder, TaskDemand, TargetAccuracyPct, TargetPromptLevel, TargetPromptCount, TargetConsecutiveSessions, Active. Repeat GoalKey and goal fields for each phase; separate multiple subject IDs with commas.</p>
+    <p class="muted">Columns: GoalKey, StudentId, Goal, Domain, Status, StartDate, DueDate, SubjectIds, PhaseOrder, TaskDemand, TargetAccuracyPct, TargetPromptLevel, TargetPromptCount, TargetConsecutiveSessions, Active. Use one row per Short-Term Objective and repeat the goal fields; separate multiple subject IDs with commas.</p>
     <div class="field"><label for="bulkGoalText">Copied rows</label><textarea id="bulkGoalText" style="min-height:240px"></textarea></div>
     <div id="bulkGoalPreview" class="list" style="margin-top:12px"></div>
     <div class="dialog-actions"><button id="previewBulkGoals" class="btn ghost" type="button">Preview</button><button id="saveBulkGoals" class="btn primary" type="button" disabled>Save previewed goals</button></div>
@@ -812,7 +813,7 @@
           <article class="card desktop-cm-only">
             <div class="card-header"><div><div class="eyebrow">Student workspace</div><h2>Goal progress</h2></div></div>
             <div class="field"><label>Student</label><select id="goalStudent"><option value="">Choose student</option>${options(cm.students, 'id', 'name', state.goalStudentId)}</select></div>
-            <p class="muted small" style="margin:12px 0 0">Goal lines can be hidden locally; phase annotations and prompt colors remain visible without reloading data.</p>
+            <p class="muted small" style="margin:12px 0 0">Goal lines can be hidden locally; Short-Term Objective annotations and prompt colors remain visible without reloading data.</p>
           </article>
           <article class="card span-2 desktop-cm-only">
             <div class="card-header"><div><div class="eyebrow">Annual goals</div><h2>Progress over time</h2></div><button class="btn ghost small-btn" id="openGoalReport" type="button">Progress summary</button></div>
@@ -1659,13 +1660,13 @@
         </article>
         <div class="master-detail">
           <article class="card desktop-cm-only">
-            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste any number of objectives, benchmarks, or phases. Review every parsed condition before saving.</p></div><div class="toolbar"><button id="openBulkGoals" class="btn ghost small-btn" type="button">Bulk paste</button><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div></div>
+            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste any number of Short-Term Objectives. Review every parsed condition before saving.</p></div><div class="toolbar"><button id="openBulkGoals" class="btn ghost small-btn" type="button">Bulk paste</button><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div></div>
             <form id="goalForm" class="form-grid">
               <div class="field full"><label>Student</label><select name="studentId" required><option value="">Choose student</option>${options(students, 'id', 'name', state.benchmarkStudentId)}</select></div>
               <div class="field"><label>Domain</label><select name="domain"><option value="">Not specified</option><option>Academic</option><option>Adaptive</option><option>Behavioral</option><option>Communication</option><option>Social/Emotional</option><option>Transition</option></select></div>
               <div class="field"><label>Status</label><select name="status"><option value="ACTIVE">Active</option><option value="DRAFT">Draft</option></select></div>
               <div class="field full"><label>Annual IEP goal</label><textarea name="goal" placeholder="Describe the overall challenge the student should meet during the IEP year." required></textarea></div>
-              <div class="field full"><label>Benchmarks / phases</label><textarea name="objectivesText" style="min-height:220px" placeholder="Phase 1: State home address with no more than 2 verbal prompts at 60% accuracy for 3 sessions.&#10;&#10;Phase 2: State address and phone number with 1 verbal prompt at 80% accuracy."></textarea><span class="muted small">May be blank for a draft goal with no phases.</span></div>
+              <div class="field full"><label>Short-Term Objectives</label><textarea name="objectivesText" style="min-height:220px" placeholder="Short-Term Objective 1: State home address with no more than 2 verbal prompts at 60% accuracy for 3 sessions.&#10;&#10;Short-Term Objective 2: State address and phone number with 1 verbal prompt at 80% accuracy."></textarea><span class="muted small">May be blank for a draft goal with no Short-Term Objectives.</span></div>
               <div class="field full">
                 <label>Relevant classes / subjects</label>
                 <div class="checks" style="margin-top:7px">${safeArray(state.data.subjects).map(subject => `
@@ -1676,7 +1677,7 @@
               </div>
               <div class="field"><label>Start date</label><input name="startDate" type="date" value="${escapeAttr(state.data.today)}"></div>
               <div class="field"><label>Due date</label><input name="dueDate" type="date"><span class="muted small">Blank uses one calendar year.</span></div>
-              <div class="field full"><div class="eyebrow">Editable phase preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste phases to preview them, or save a draft goal without phases.</div></div></div>
+              <div class="field full"><div class="eyebrow">Editable Short-Term Objective preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste Short-Term Objectives to preview them, or save a draft goal without objectives.</div></div></div>
               <div class="field full"><button class="btn primary" type="submit">Create goal</button></div>
             </form>
           </article>
@@ -1684,14 +1685,18 @@
             <div class="card-header"><div><div class="eyebrow">Student goal workspace</div><h2>${escapeHtml(selectedStudent ? selectedStudent.name : 'Annual goals')}</h2><p class="muted">Active benchmarks are selected from the Overview workspace.</p></div><span class="chip">${selectedGoals.length} goals</span></div>
             <div class="field"><label>Student filter</label><select id="benchmarkStudentFilter"><option value="">Choose student</option>${options(students, 'id', 'name', state.benchmarkStudentId)}</select></div>
             <div class="list scroll-list" style="margin-top:14px">${selectedGoals.length ? selectedGoals.map(goal => {
-              const items = benchmarks.filter(item => String(item.goalId) === String(goal.id));
+              const items = benchmarks.filter(item =>
+                String(item.goalId) === String(goal.id) && item.active
+              );
               return `
                 <div class="goal-card">
                   <div class="row" style="justify-content:space-between"><strong>${escapeHtml(goal.goal)}</strong>${goal.critical ? '<span class="chip critical">Critical</span>' : ''}</div>
                   <div class="checks"><span class="chip ${goal.status === 'ACTIVE' ? 'status-approved' : ''}">${escapeHtml(goal.status)}</span></div>
                   <div class="muted small">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</div>
                   <div class="checks">${safeArray(goal.subjectNames).map(name => `<span class="chip">${escapeHtml(name)}</span>`).join('')}</div>
-                  <div class="checks">${items.map(item => `<span class="chip ${item.active ? 'status-approved' : ''}">${escapeHtml(item.category)}${item.active ? ' · Active' : ''}</span>`).join('')}</div>
+                  <div class="checks">${items.length
+                    ? items.map(item => `<span class="chip status-approved">${escapeHtml(item.category)} · Active</span>`).join('')
+                    : '<span class="muted small">No active Short-Term Objective</span>'}</div>
                   <button class="btn danger small-btn" data-deactivate-goal="${escapeAttr(goal.id)}">Deactivate goal</button>
                 </div>`;
             }).join('') : '<div class="empty">This student has no active, draft, or completed goals.</div>'}</div>
@@ -1713,7 +1718,7 @@
       root.querySelectorAll('[data-deactivate-goal]').forEach(button => button.addEventListener('click', async () => {
         if (!await confirmDialog({
           title: 'Deactivate goal',
-          message: 'Deactivate this goal and all phases? Existing entries will remain.',
+          message: 'Deactivate this goal and all Short-Term Objectives? Existing entries will remain.',
           confirmLabel: 'Deactivate'
         })) return;
         try {
@@ -1726,17 +1731,18 @@
 
     async function saveGoalForm(event) {
       event.preventDefault();
-      const payload = formObject(event.currentTarget);
+      const form = event.currentTarget;
+      const payload = formObject(form);
       try {
         state.parsedObjectives = parseGoalObjectivesClient(payload.objectivesText);
       } catch (error) {
         return toast(error.message, true);
       }
       payload.subjectIds = Array.from(
-        event.currentTarget.querySelectorAll('[data-goal-subject]:checked')
+        form.querySelectorAll('[data-goal-subject]:checked')
       ).map(input => input.value);
       payload.phases = Array.from(
-        event.currentTarget.querySelectorAll('[data-goal-phase]')
+        form.querySelectorAll('[data-goal-phase]')
       ).map((row, index) => ({
         orderIndex: index + 1,
         taskDemandDescription: row.querySelector('[data-phase-task]').value,
@@ -1763,7 +1769,7 @@
           return toast(result && result.message ? result.message : 'Goal was not saved.', true);
         }
         state.goalWorkspaceCache = {};
-        event.currentTarget.reset();
+        form.reset();
         state.parsedObjectives = [];
         await refreshGoalManagerData();
         toast(result.message || 'Goal created.');
@@ -1787,7 +1793,7 @@
         : [text];
       return sections.map((section, index) => {
         const objective = section.replace(/^[\s:;#\d.)\]-]+/, '').trim();
-        if (!objective) throw new Error(`Phase ${index + 1} has no task description.`);
+        if (!objective) throw new Error(`Short-Term Objective ${index + 1} has no task description.`);
         const ratios = [];
         const ratioPattern = /(\d+)\s*(?:\/|out\s+of)\s*(\d+)/gi;
         let ratio;
@@ -1795,7 +1801,7 @@
           const numerator = Number(ratio[1]);
           const denominator = Number(ratio[2]);
           if (denominator <= 0 || numerator < 0 || numerator > denominator) {
-            throw new Error(`Phase ${index + 1} has an invalid ratio.`);
+            throw new Error(`Short-Term Objective ${index + 1} has an invalid ratio.`);
           }
           ratios.push({ numerator, denominator });
         }
@@ -1839,7 +1845,7 @@
       try {
         state.parsedObjectives = parseGoalObjectivesClient(form.elements.objectivesText.value);
         if (!state.parsedObjectives.length) {
-          root.innerHTML = '<div class="empty">No phases parsed. This goal will be saved as a draft unless phases are added.</div>';
+          root.innerHTML = '<div class="empty">No Short-Term Objectives parsed. This goal will be saved as a draft unless objectives are added.</div>';
           return;
         }
         root.innerHTML = state.parsedObjectives.map(item => `
@@ -1849,7 +1855,7 @@
             data-required-trials="${escapeAttr(item.requiredTrials)}"
             data-total-trials="${escapeAttr(item.totalTrials)}">
             <div class="row" style="justify-content:space-between">
-              <strong>Phase ${item.index + 1}</strong>
+              <strong>Short-Term Objective ${item.index + 1}</strong>
               <span class="chip">${escapeHtml(item.metric)}</span>
             </div>
             <div class="field">
@@ -1861,7 +1867,7 @@
               <div class="field"><label>Target prompt level</label><select data-phase-prompt-level><option value="">Not specified</option>${['Independent','Verbal','Gestural/Visual','Model','Physical'].map(level => `<option ${level === item.targetPromptLevel ? 'selected' : ''}>${escapeHtml(level)}</option>`).join('')}</select></div>
               <div class="field"><label>Maximum prompt count</label><input data-phase-prompt-count type="number" min="0" step="1" value="${escapeAttr(item.targetPromptCount)}"></div>
               <div class="field"><label>Consecutive sessions</label><input data-phase-consecutive type="number" min="1" step="1" value="${escapeAttr(item.targetConsecutiveSessions)}"></div>
-              <label class="check full"><input data-phase-active type="radio" name="activePhase" ${item.index === 0 ? 'checked' : ''}> Active phase</label>
+              <label class="check full"><input data-phase-active type="radio" name="activePhase" ${item.index === 0 ? 'checked' : ''}> Active Short-Term Objective</label>
             </div>
           </div>`).join('');
       } catch (error) {
@@ -2426,9 +2432,9 @@
         });
         if (result.code === 'PHASE_DATE_CONFLICT') {
           const useHistorical = await confirmDialog({
-            title: 'Observation date conflicts with active phase',
-            message: 'One or more observations belong to the phase active on their observation date. Use those historical phases?',
-            confirmLabel: 'Use historical phases',
+            title: 'Observation date conflicts with active Short-Term Objective',
+            message: 'One or more observations belong to the Short-Term Objective active on their observation date. Use those historical objectives?',
+            confirmLabel: 'Use historical objectives',
             cancelLabel: 'Change dates'
           });
           if (!useHistorical) return;
@@ -2599,8 +2605,8 @@
           rows: rows,
           importBatchId: clientUuid()
         };
-        root.innerHTML = `<div class="message"><strong>${result.goalCount} goals and ${result.phaseCount} phases are valid</strong><div class="muted small">Nothing has been saved yet.</div></div>` +
-          safeArray(result.goals).map(goal => `<div class="list-item"><strong>${escapeHtml(goal.goalKey)}</strong> · ${escapeHtml(goal.studentId)} · ${goal.phases.length} phase${goal.phases.length === 1 ? '' : 's'}<div class="muted small">${escapeHtml(goal.goal)}</div></div>`).join('');
+        root.innerHTML = `<div class="message"><strong>${result.goalCount} goals and ${result.phaseCount} Short-Term Objectives are valid</strong><div class="muted small">Nothing has been saved yet.</div></div>` +
+          safeArray(result.goals).map(goal => `<div class="list-item"><strong>${escapeHtml(goal.goalKey)}</strong> · ${escapeHtml(goal.studentId)} · ${goal.phases.length} Short-Term Objective${goal.phases.length === 1 ? '' : 's'}<div class="muted small">${escapeHtml(goal.goal)}</div></div>`).join('');
         saveButton.disabled = false;
       } catch (error) {
         root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
@@ -2615,7 +2621,7 @@
       closeDialog('bulkGoalDialog');
       const approved = await confirmDialog({
         title: 'Save bulk goals',
-        message: 'Save every goal and phase in the validated preview?',
+        message: 'Save every goal and Short-Term Objective in the validated preview?',
         confirmLabel: 'Save all'
       });
       if (!approved) {
@@ -2636,7 +2642,7 @@
         document.getElementById('bulkGoalPreview').innerHTML = '';
         document.getElementById('saveBulkGoals').disabled = true;
         await refreshGoalManagerData();
-        toast(`${result.goalCount} goals and ${result.phaseCount} phases saved.`);
+        toast(`${result.goalCount} goals and ${result.phaseCount} Short-Term Objectives saved.`);
       } catch (error) {
         openDialog('bulkGoalDialog');
         toast(error.message, true);
@@ -2877,22 +2883,35 @@
               <span class="chip">Average ${metrics.averagePercent == null ? '—' : escapeHtml(String(metrics.averagePercent)) + '%'}</span>
               <span class="chip">${escapeHtml(String(metrics.entryCount || 0))} entries</span>
               <span class="chip">Trend ${metrics.trend == null ? '—' : (metrics.trend > 0 ? '+' : '') + escapeHtml(String(metrics.trend)) + '%'}</span>
-              <span class="chip">Current phase last 3 ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
+              <span class="chip">Current objective last 3 ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
               <span class="chip">Highest independence ${metrics.highestIndependence ? escapeHtml(metrics.highestIndependence.promptLevel + ' · ' + metrics.highestIndependence.promptCount + ' prompts') : '—'}</span>
             </div>
             <div class="toolbar">
               <button class="btn ${goal.critical ? 'ghost' : 'danger'} small-btn" data-goal-critical="${escapeAttr(goal.id)}" data-critical="${goal.critical ? 'false' : 'true'}">${goal.critical ? 'Remove critical status' : 'Mark goal critical'}</button>
             </div>
-            <div class="list">${benchmarks.length ? benchmarks.map(benchmark => `
-              <div class="benchmark-row ${benchmark.active ? 'active' : ''}">
-                <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(benchmark.id)}">
-                  <strong>${escapeHtml(benchmark.category)}</strong>
-                  <div class="muted small">${escapeHtml(benchmark.skill)}</div>
+            ${(() => {
+              const activeBenchmark = benchmarks.find(benchmark => benchmark.active);
+              const inactiveBenchmarks = benchmarks.filter(benchmark => !benchmark.active);
+              return `<div class="list">${activeBenchmark ? `
+              <div class="benchmark-row active">
+                <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(activeBenchmark.id)}">
+                  <strong>${escapeHtml(activeBenchmark.category)}</strong>
+                  <div class="muted small">${escapeHtml(activeBenchmark.skill)}</div>
                 </button>
-                ${benchmark.active
-                  ? '<span class="chip status-approved">Active</span>'
-                  : `<button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Make active</button>`}
-              </div>`).join('') : '<div class="empty">No benchmarks are assigned to this goal.</div>'}</div>
+                <span class="chip status-approved">Active</span>
+              </div>` : '<div class="empty">No Short-Term Objective is active.</div>'}</div>
+              ${inactiveBenchmarks.length ? `<details style="margin-top:10px">
+                <summary class="muted small">Manage other Short-Term Objectives (${inactiveBenchmarks.length})</summary>
+                <div class="list" style="margin-top:10px">${inactiveBenchmarks.map(benchmark => `
+                  <div class="benchmark-row">
+                    <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(benchmark.id)}">
+                      <strong>${escapeHtml(benchmark.category)}</strong>
+                      <div class="muted small">${escapeHtml(benchmark.skill)}</div>
+                    </button>
+                    <button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Make active</button>
+                  </div>`).join('')}</div>
+              </details>` : ''}`;
+            })()}
           </div>`;
       }).join('') : '<div class="empty">This student has no active annual goals.</div>';
       workspace.querySelectorAll('[data-set-active]').forEach(button => button.addEventListener('click', async () => {
@@ -2955,9 +2974,9 @@
             <div class="eyebrow">Goal ${index + 1}${goal.domain ? ' · ' + escapeHtml(goal.domain) : ''}</div>
             <h2>${escapeHtml(goal.goal)}</h2>
             <div class="checks">
-              <span class="chip">Current phase: ${escapeHtml(metrics.currentPhase || 'Not selected')}</span>
+              <span class="chip">Current Short-Term Objective: ${escapeHtml(metrics.currentPhase || 'Not selected')}</span>
               <span class="chip">Latest 3 combined: ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
-              <span class="chip">Current-phase trials: ${escapeHtml(String(metrics.currentPhaseTrialCount || 0))}</span>
+              <span class="chip">Current-objective trials: ${escapeHtml(String(metrics.currentPhaseTrialCount || 0))}</span>
               <span class="chip">Highest independence: ${metrics.highestIndependence ? escapeHtml(metrics.highestIndependence.promptLevel + ' · ' + metrics.highestIndependence.promptCount + ' prompts') : '—'}</span>
             </div>
             <div class="list" style="margin-top:14px">${safeArray(goal.progressStatements).length
@@ -2966,7 +2985,7 @@
           </article>`;
         }).join('')}
         <article class="card">
-          <div class="eyebrow">Phase-line graph</div>
+          <div class="eyebrow">Short-Term Objective progress graph</div>
           <div id="goalReportLegend" class="legend"></div>
           <div id="goalReportChart" class="chart"></div>
         </article>`;
@@ -3069,7 +3088,7 @@
               ? `<line x1="${lineX}" y1="${y(target)}" x2="${x(Math.max(startTime, endTime))}" y2="${y(target)}" stroke="${item.color}" stroke-width="2" stroke-dasharray="9 6" opacity=".75"/>`
               : '';
             return `<line x1="${lineX}" y1="${top}" x2="${lineX}" y2="${plotBottom}" stroke="${item.color}" stroke-width="2" stroke-dasharray="5 5" opacity=".8"/>
-              <text x="${lineX + 4}" y="${36 + (Number(history.orderIndex || 1) % 3) * 11}" fill="${item.color}" font-size="10">Phase ${escapeHtml(String(history.orderIndex || ''))}: ${escapeHtml(String(benchmark.taskDemandDescription || '').slice(0, 34))}</text>
+              <text x="${lineX + 4}" y="${36 + (Number(history.orderIndex || 1) % 3) * 11}" fill="${item.color}" font-size="10">STO ${escapeHtml(String(history.orderIndex || ''))}: ${escapeHtml(String(benchmark.taskDemandDescription || '').slice(0, 34))}</text>
               ${targetLine}`;
           }).join('');
       }).join('');

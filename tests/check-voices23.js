@@ -36,7 +36,7 @@ if (!benchmarkService.includes('tryLock(25000)') ||
   throw new Error('Observation batching is missing locking or idempotency safeguards.');
 }
 if (!benchmarkService.includes("String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE'") ||
-    !benchmarkService.includes('The historical phase does not belong to this student and goal.') ||
+    !benchmarkService.includes('The historical Short-Term Objective does not belong to this student and goal.') ||
     !benchmarkService.includes("if (!correctionReason) throw new Error('A correction reason is required.')")) {
   throw new Error('Observation summaries, historical phases, or correction audits are not hardened.');
 }
@@ -73,8 +73,16 @@ if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
 });
 if (!html.includes('Goal saving is busy. Your form is still intact') ||
     !html.includes('queuedItem.phaseDateResolution') ||
-    !html.includes('importBatchId: clientUuid()')) {
+    !html.includes('importBatchId: clientUuid()') ||
+    !html.includes('const form = event.currentTarget') ||
+    !html.includes('form.reset()')) {
   throw new Error('Client retry state is not preserved for goals or observations.');
+}
+if (!html.includes('[hidden] { display: none !important; }') ||
+    !html.includes('benchmarks.find(benchmark => benchmark.active)') ||
+    !html.includes('Manage other Short-Term Objectives') ||
+    !goalService.includes("Category: 'Short-Term Objective ' + (index + 1)")) {
+  throw new Error('Short-Term Objective wording, active-only display, or dialog controls regressed.');
 }
 if (!goalService.includes('goalImportFingerprint_') ||
     !goalService.includes("code: 'IMPORT_MISMATCH'") ||

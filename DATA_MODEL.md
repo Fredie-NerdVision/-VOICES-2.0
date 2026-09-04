@@ -55,7 +55,7 @@ Each row is one annual IEP goal:
 - `Status`: `DRAFT`, `ACTIVE`, `COMPLETED`, or `INACTIVE`
 - `ImportBatchId`, `ImportGoalKey`, and `ImportFingerprint` for retry-safe bulk imports
 
-Goals may contain zero or any number of ordered benchmark phases. Draft goals may omit structured targets. Only `ACTIVE` lifecycle goals participate in lookup, analytics, and IEP export; drafts and completed goals remain available to case managers without being treated as active.
+Goals may contain zero or any number of ordered Short-Term Objectives. The code and schema use “phase” internally for progression and chronology, while the application retains “Short-Term Objective” in user-facing goal workflows. Draft goals may omit structured targets. Only `ACTIVE` lifecycle goals participate in lookup, analytics, and IEP export; drafts and completed goals remain available to case managers without being treated as active.
 
 ### Benchmarks
 

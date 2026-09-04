@@ -303,10 +303,10 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
         if (datedPhase && String(datedPhase.BenchmarkId) !== String(benchmark.Id)) {
           if (item.phaseDateResolution === 'USE_HISTORICAL_PHASE') {
             benchmark = benchmarks[String(datedPhase.BenchmarkId)];
-            if (!benchmark) throw new Error('The historical phase is no longer available.');
+            if (!benchmark) throw new Error('The historical Short-Term Objective is no longer available.');
             if (String(benchmark.GoalId) !== String(originalBenchmark.GoalId) ||
                 String(benchmark.StudentId) !== String(originalBenchmark.StudentId)) {
-              throw new Error('The historical phase does not belong to this student and goal.');
+              throw new Error('The historical Short-Term Objective does not belong to this student and goal.');
             }
           } else {
             conflicts.push({
@@ -315,7 +315,7 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
               observationDate: observationDate,
               selectedBenchmarkId: item.benchmarkId,
               suggestedBenchmarkId: datedPhase.BenchmarkId,
-              message: 'A different phase was active on this observation date.'
+              message: 'A different Short-Term Objective was active on this observation date.'
             });
             return;
           }
@@ -324,13 +324,13 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
           if (!resolved ||
               String(resolved.GoalId) !== String(originalBenchmark.GoalId) ||
               String(resolved.StudentId) !== String(originalBenchmark.StudentId)) {
-            throw new Error('The phase history does not belong to this student and goal.');
+            throw new Error('The Short-Term Objective history does not belong to this student and goal.');
           }
         } else if (!isActiveGoal_(goal) || !toBoolean_(benchmark.Active) ||
             rows_('GoalPhaseHistory').some(row =>
               String(row.GoalId) === String(goal.Id)
             )) {
-          throw new Error('This phase was not active on the observation date.');
+          throw new Error('This Short-Term Objective was not active on the observation date.');
         }
       } else if (!toBoolean_(benchmark.Active)) {
         throw new Error('Benchmark was not found or is inactive.');
@@ -387,7 +387,7 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
       code: 'PHASE_DATE_CONFLICT',
       retryable: false,
       conflicts: conflicts,
-      message: 'Resolve phase/date conflicts before saving.'
+      message: 'Resolve Short-Term Objective/date conflicts before saving.'
     };
   }
   if (errors.length) {
@@ -587,7 +587,7 @@ function saveBenchmark(payload) {
     StudentId: student.Id,
     SubjectId: sanitizeText_(payload.subjectId, 100),
     GoalId: sanitizeText_(payload.goalId, 100),
-    Category: sanitizeText_(payload.category || 'Phase', 120),
+    Category: sanitizeText_(payload.category || 'Short-Term Objective', 120),
     Skill: taskDemand,
     TargetCorrect: targetCorrect === null ? '' : targetCorrect,
     TargetAttempts: targetAttempts === null ? '' : targetAttempts,
@@ -692,6 +692,10 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   const targetPromptCount = optionalInteger_(row.TargetPromptCount);
   const targetConsecutiveSessions = optionalInteger_(row.TargetConsecutiveSessions);
   const taskDemand = row.TaskDemandDescription || row.Skill || row.Description || '';
+  const orderIndex = optionalInteger_(row.OrderIndex) || 1;
+  const category = /^Phase\s+\d+$/i.test(String(row.Category || '').trim())
+    ? 'Short-Term Objective ' + orderIndex
+    : row.Category;
   const targetParts = [
     targetAccuracy === null ? '' : targetAccuracy + '% accuracy',
     row.TargetPromptLevel
@@ -712,9 +716,9 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
     subjectName: subjectNames[0] || '',
     subjectIds: subjectIds,
     subjectNames: subjectNames,
-    category: row.Category,
+    category: category,
     skill: row.Skill,
-    orderIndex: optionalInteger_(row.OrderIndex) || 1,
+    orderIndex: orderIndex,
     taskDemandDescription: taskDemand,
     targetCorrect: targetCorrect,
     targetAttempts: targetAttempts,
@@ -729,7 +733,7 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
     critical: toBoolean_(row.Critical),
     active: toBoolean_(row.Active),
     description: row.Description,
-    display: [row.Category, taskDemand, targetParts.join(' · ')].filter(Boolean).join(' — '),
+    display: [category, taskDemand, targetParts.join(' · ')].filter(Boolean).join(' — '),
     mastery: Array.isArray(entries) ? summarizeBenchmarkMastery_(row, entries) : null,
     lastEntry: lastEntry ? {
       timestamp: lastEntry.Timestamp,
