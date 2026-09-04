@@ -31,7 +31,8 @@ function generateIep(payload) {
     throw new Error('IEP end date must be on or after the start date.');
   }
 
-  const goals = activeRows_('Goals')
+  const goals = rows_('Goals')
+    .filter(isActiveGoal_)
     .filter(row => String(row.StudentId) === String(student.Id));
   const goalIds = new Set(goals.map(row => String(row.Id)));
   const benchmarks = rows_('Benchmarks')

@@ -542,8 +542,8 @@ function getAideConflictFromIndexes_(email, dateText, period, indexes) {
     String(row.Status).toUpperCase() === 'APPROVED' &&
     String(row.DayOfWeek).toUpperCase() === dayName_(dateText)
   );
-  if (availability && !toBoolean_(availability.Available)) return 'Not available';
   const hours = getEffectiveDailyHoursFromIndexes_(dateText, email, indexes);
+  if (availability && !toBoolean_(availability.Available) && !hours) return 'Not available';
   if (!hours) return 'Shift hours are not configured for this date';
   if (period && !shiftOverlapLabel_(hours, period)) return 'Outside shift hours';
   const pendingAvailability = indexes.availability.find(row =>
@@ -1123,27 +1123,26 @@ function matchOneToOneCoverage_(requirements, candidateAides) {
 }
 
 function isAideAvailableForPeriod_(email, dateText, periodId) {
-  const unavailable = getUnavailableAidesForDate_(dateText);
-  if (unavailable.some(item => normalizeEmail_(item.email) === normalizeEmail_(email))) return false;
+  const approvedTimeOff = rows_('TimeOffRequests').some(row =>
+    normalizeEmail_(row.AideEmail) === normalizeEmail_(email) &&
+    String(row.Status).toUpperCase() === 'APPROVED' &&
+    dateInRange_(dateText, row.StartDate, row.EndDate)
+  );
+  if (approvedTimeOff) return false;
   const schedule = getDaySchedule_(dateText);
   const period = schedule.periods.find(item => String(item.periodId) === String(periodId));
-  if (!period) return true;
-  const availability = rows_('Availability').find(row =>
-    normalizeEmail_(row.AideEmail) === normalizeEmail_(email) &&
-    row.Status === 'APPROVED' &&
-    String(row.DayOfWeek).toUpperCase() === dayName_(dateText)
-  );
-  if (!availability) return true;
-  if (!toBoolean_(availability.Available)) return false;
-  return normalizeTime_(availability.StartTime) <= period.startTime &&
-    normalizeTime_(availability.EndTime) >= period.endTime;
+  if (!period) return false;
+  const hours = getEffectiveDailyHours_(dateText, email);
+  return Boolean(hours && shiftOverlapLabel_(hours, period));
 }
 
 function getUnavailableAidesForDate_(dateText) {
   return getScheduleStaffingStatus_(dateText)
     .filter(item =>
       item.approvedTimeOff ||
-      (item.approvedAvailability && !item.approvedAvailability.available)
+      (item.approvedAvailability &&
+        !item.approvedAvailability.available &&
+        !item.effectiveHours)
     )
     .map(item => ({
       email: item.email,
@@ -1171,8 +1170,8 @@ function getAideConflict_(email, dateText, period) {
     String(row.Status).toUpperCase() === 'APPROVED' &&
     String(row.DayOfWeek).toUpperCase() === dayName_(dateText)
   );
-  if (availability && !toBoolean_(availability.Available)) return 'Not available';
   const hours = getEffectiveDailyHours_(dateText, email);
+  if (availability && !toBoolean_(availability.Available) && !hours) return 'Not available';
   if (!hours) return 'Shift hours are not configured for this date';
   if (period && !shiftOverlapLabel_(hours, period)) return 'Outside shift hours';
   const pendingAvailability = rows_('Availability').find(row =>

@@ -9,6 +9,7 @@ const tables = {
     { Email: 'approved@example.org', FirstName: 'Approved', LastName: 'Off', Role: 'AIDE', Active: true },
     { Email: 'pending@example.org', FirstName: 'Pending', LastName: 'Off', Role: 'AIDE', Active: true },
     { Email: 'partial@example.org', FirstName: 'Partial', LastName: 'Hours', Role: 'AIDE', Active: true },
+    { Email: 'override@example.org', FirstName: 'Daily', LastName: 'Override', Role: 'AIDE', Active: true },
     { Email: 'availability@example.org', FirstName: 'Pending', LastName: 'Availability', Role: 'AIDE', Active: true }
   ],
   TimeOffRequests: [
@@ -17,9 +18,12 @@ const tables = {
   ],
   Availability: [
     { AideEmail: 'partial@example.org', DayOfWeek: 'TUESDAY', Available: true, StartTime: '08:30', EndTime: '12:00', Status: 'APPROVED' },
+    { AideEmail: 'override@example.org', DayOfWeek: 'TUESDAY', Available: false, Status: 'APPROVED' },
     { AideEmail: 'availability@example.org', DayOfWeek: 'TUESDAY', Available: false, Status: 'PENDING' }
   ],
-  AideDailyHours: []
+  AideDailyHours: [
+    { AideEmail: 'override@example.org', Date: '2026-09-01', StartTime: '08:45', EndTime: '12:00' }
+  ]
 };
 
 const context = {
@@ -80,6 +84,18 @@ const result = vm.runInContext(`
   if (partial !== '') throw new Error('Partial-period overlap should be allowed.');
   if (pendingAvailability !== 'Shift hours are not configured for this date') {
     throw new Error('Missing shift hours should block before pending availability warnings.');
+  }
+  getDaySchedule_ = () => ({
+    periods: [{ periodId: 'P1', startTime: '08:00', endTime: '09:00' }]
+  });
+  if (isAideAvailableForPeriod_('approved@example.org', date, 'P1')) {
+    throw new Error('Approved time off should exclude call-off replacements.');
+  }
+  if (!isAideAvailableForPeriod_('partial@example.org', date, 'P1')) {
+    throw new Error('Partial recurring shift overlap should allow call-off replacement.');
+  }
+  if (!isAideAvailableForPeriod_('override@example.org', date, 'P1')) {
+    throw new Error('A date-specific partial shift should override recurring unavailability.');
   }
   return { unavailable: unavailable.length, approved, pending, partial, pendingAvailability };
 })()

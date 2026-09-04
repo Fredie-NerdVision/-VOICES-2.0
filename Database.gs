@@ -10,7 +10,8 @@ const SHEET_SCHEMAS = Object.freeze({
   IEPs: ['Id', 'StudentId', 'CaseManagerEmail', 'StartDate', 'EndDate', 'Status', 'FileUrl'],
   Goals: [
     'Id', 'StudentId', 'Goal', 'StartDate', 'DueDate', 'Active',
-    'CreatedBy', 'CreatedAt', 'UpdatedAt', 'Domain', 'Status'
+    'CreatedBy', 'CreatedAt', 'UpdatedAt', 'Domain', 'Status',
+    'ImportBatchId', 'ImportGoalKey', 'ImportFingerprint'
   ],
   Benchmarks: [
     'Id', 'StudentId', 'SubjectId', 'Category', 'Skill', 'TargetCorrect', 'TargetAttempts',
@@ -27,7 +28,7 @@ const SHEET_SCHEMAS = Object.freeze({
   ],
   GoalPhaseHistory: [
     'Id', 'GoalId', 'BenchmarkId', 'ActivatedAt', 'EndedAt',
-    'ChangedBy', 'ChangeReason', 'Source'
+    'ChangedBy', 'ChangeReason', 'Source', 'EndedBy', 'EndReason'
   ],
   ScheduleTypes: ['Id', 'Name', 'IsDefault', 'Active'],
   SchedulePeriods: ['ScheduleTypeId', 'PeriodId', 'Label', 'StartTime', 'EndTime', 'SortOrder'],
@@ -249,8 +250,9 @@ function migrateVoices23Data_() {
   goals.forEach(goal => {
     const status = String(goal.Status || '').toUpperCase() ||
       (toBoolean_(goal.Active) ? 'ACTIVE' : 'INACTIVE');
-    if (String(goal.Status || '') !== status) {
-      updateRow_('Goals', goal._row, { Status: status });
+    const active = status === 'ACTIVE';
+    if (String(goal.Status || '') !== status || toBoolean_(goal.Active) !== active) {
+      updateRow_('Goals', goal._row, { Status: status, Active: active });
     }
   });
 

@@ -19,6 +19,9 @@ const iepService = read('IEPService.gs');
   'SubmissionBatchId',
   'SubmissionFingerprint',
   'CorrectionOfEntryId',
+  'ImportBatchId',
+  'ImportFingerprint',
+  'EndedBy',
   'Revision'
 ].forEach(value => {
   if (!database.includes(value)) throw new Error('Missing 2.3 schema field: ' + value);
@@ -32,6 +35,11 @@ if (!benchmarkService.includes('tryLock(25000)') ||
     !benchmarkService.includes('observationBatchFingerprint_')) {
   throw new Error('Observation batching is missing locking or idempotency safeguards.');
 }
+if (!benchmarkService.includes("String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE'") ||
+    !benchmarkService.includes('The historical phase does not belong to this student and goal.') ||
+    !benchmarkService.includes("if (!correctionReason) throw new Error('A correction reason is required.')")) {
+  throw new Error('Observation summaries, historical phases, or correction audits are not hardened.');
+}
 if (!/function getStudentsForClass[\s\S]*?assertClassAccess_\(staff, classRow\)/.test(benchmarkService) ||
     !/function lookupBenchmarks[\s\S]*?assertClassAccess_\(staff, classRow\)/.test(benchmarkService) ||
     !benchmarkService.includes('getBenchmarkLookupContext_(staffMember, currentAssignment)')) {
@@ -43,6 +51,9 @@ if (!scheduleService.includes("code: 'STALE_SCHEDULE'") ||
     !scheduleService.includes('replaceRowsUnlocked_') ||
     !database.includes('function replaceRowsUnlocked_')) {
   throw new Error('Schedule revision, lunch, or overlap support is missing.');
+}
+if (!/function isAideAvailableForPeriod_[\s\S]*?getEffectiveDailyHours_[\s\S]*?shiftOverlapLabel_/.test(scheduleService)) {
+  throw new Error('Call-off replacements do not honor effective date-specific shift overlap.');
 }
 if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
   throw new Error('Native browser confirmation or prompt dialogs remain.');
@@ -60,8 +71,20 @@ if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
 ].forEach(value => {
   if (!html.includes(value)) throw new Error('Missing 2.3 client behavior: ' + value);
 });
+if (!html.includes('Goal saving is busy. Your form is still intact') ||
+    !html.includes('queuedItem.phaseDateResolution') ||
+    !html.includes('importBatchId: clientUuid()')) {
+  throw new Error('Client retry state is not preserved for goals or observations.');
+}
+if (!goalService.includes('goalImportFingerprint_') ||
+    !goalService.includes("code: 'IMPORT_MISMATCH'") ||
+    !goalService.includes('.filter(isActiveGoal_)') ||
+    !goalService.includes("EndReason: 'Goal deactivated'")) {
+  throw new Error('Goal import idempotency or lifecycle safeguards are missing.');
+}
 if (!iepService.includes('mastery targets not fully recorded') ||
     !iepService.includes('statement.statement') ||
+    !iepService.includes('.filter(isActiveGoal_)') ||
     !iepService.includes(
       'normalizeEmail_(row.Email) === normalizeEmail_(student.CaseManagerEmail)'
     )) {
@@ -71,7 +94,8 @@ if (!iepService.includes('mastery targets not fully recorded') ||
 const tables = {
   GoalPhaseHistory: [
     { Id: 'H1', GoalId: 'G1', BenchmarkId: 'B1', ActivatedAt: '2026-08-01', EndedAt: '2026-09-01' },
-    { Id: 'H2', GoalId: 'G1', BenchmarkId: 'B2', ActivatedAt: '2026-09-01', EndedAt: '' }
+    { Id: 'H2', GoalId: 'G1', BenchmarkId: 'B2', ActivatedAt: '2026-09-01', EndedAt: '' },
+    { Id: 'H3', GoalId: 'G2', BenchmarkId: 'B3', ActivatedAt: '2026-08-01', EndedAt: '2026-09-10', EndReason: 'Goal deactivated' }
   ]
 };
 const context = {
@@ -139,6 +163,22 @@ const result = vm.runInContext(`
   }
   const unavailable = summarizeBenchmarkMastery_({ ...benchmark, TargetPromptCount: '' }, entries);
   if (unavailable.available) throw new Error('Incomplete targets should make mastery unavailable.');
+  const sameDate = summarizeBenchmarkMastery_(
+    { ...benchmark, TargetConsecutiveSessions: 3 },
+    [
+      { ObservationDate: '2026-09-10', Percent: 80, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' },
+      { ObservationDate: '2026-09-10', Percent: 90, ActualPromptLevel: 'Independent', ActualPromptCount: 0, Status: 'ACTIVE' },
+      { ObservationDate: '2026-09-10', Percent: 85, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' }
+    ]
+  );
+  if (sameDate.mastered || sameDate.consecutiveSessionsMet !== 1) {
+    throw new Error('Multiple observations on one date counted as separate mastery sessions.');
+  }
+  if (isActiveGoal_({ Active: false, Status: 'DRAFT' }) ||
+      isActiveGoal_({ Active: false, Status: 'COMPLETED' }) ||
+      !isActiveGoal_({ Active: true, Status: 'ACTIVE' })) {
+    throw new Error('Goal lifecycle filtering failed.');
+  }
 
   const metrics = summarizeGoalEntries_(entries, [benchmark]);
   if (metrics.currentPhaseLastThreeAccuracy !== 84.2) {
@@ -150,6 +190,10 @@ const result = vm.runInContext(`
   if (getPhaseForObservationDate_('G1', '2026-08-15').BenchmarkId !== 'B1' ||
       getPhaseForObservationDate_('G1', '2026-09-15').BenchmarkId !== 'B2') {
     throw new Error('Observation-date phase chronology failed.');
+  }
+  if (getPhaseForObservationDate_('G2', '2026-09-10').BenchmarkId !== 'B3' ||
+      getPhaseForObservationDate_('G2', '2026-09-11') !== null) {
+    throw new Error('Goal deactivation boundary handling failed.');
   }
   return { phases: parsed.length, latestThree: metrics.currentPhaseLastThreeAccuracy };
 })()

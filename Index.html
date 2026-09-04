@@ -1688,12 +1688,13 @@
               return `
                 <div class="goal-card">
                   <div class="row" style="justify-content:space-between"><strong>${escapeHtml(goal.goal)}</strong>${goal.critical ? '<span class="chip critical">Critical</span>' : ''}</div>
+                  <div class="checks"><span class="chip ${goal.status === 'ACTIVE' ? 'status-approved' : ''}">${escapeHtml(goal.status)}</span></div>
                   <div class="muted small">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</div>
                   <div class="checks">${safeArray(goal.subjectNames).map(name => `<span class="chip">${escapeHtml(name)}</span>`).join('')}</div>
                   <div class="checks">${items.map(item => `<span class="chip ${item.active ? 'status-approved' : ''}">${escapeHtml(item.category)}${item.active ? ' · Active' : ''}</span>`).join('')}</div>
                   <button class="btn danger small-btn" data-deactivate-goal="${escapeAttr(goal.id)}">Deactivate goal</button>
                 </div>`;
-            }).join('') : '<div class="empty">This student has no active goals.</div>'}</div>
+            }).join('') : '<div class="empty">This student has no active, draft, or completed goals.</div>'}</div>
           </article>
         </div>`;
       const form = document.getElementById('goalForm');
@@ -1755,6 +1756,12 @@
       }
       try {
         const result = await server('createGoal', payload);
+        if (!result || !result.ok) {
+          if (result && result.code === 'WRITE_BUSY') {
+            return toast('Goal saving is busy. Your form is still intact; retry shortly.', true);
+          }
+          return toast(result && result.message ? result.message : 'Goal was not saved.', true);
+        }
         state.goalWorkspaceCache = {};
         event.currentTarget.reset();
         state.parsedObjectives = [];
@@ -2426,8 +2433,11 @@
           });
           if (!useHistorical) return;
           safeArray(result.conflicts).forEach(conflict => {
-            const item = entries[Number(conflict.row) - 1];
+            const index = Number(conflict.row) - 1;
+            const item = entries[index];
+            const queuedItem = state.observationQueue[index];
             if (item) item.phaseDateResolution = 'USE_HISTORICAL_PHASE';
+            if (queuedItem) queuedItem.phaseDateResolution = 'USE_HISTORICAL_PHASE';
           });
           result = await server('saveBenchmarkEntriesBatch', {
             submissionBatchId: state.observationBatchId,
@@ -2586,7 +2596,8 @@
         }
         state.bulkGoalPreview = {
           source: document.getElementById('bulkGoalText').value,
-          rows: rows
+          rows: rows,
+          importBatchId: clientUuid()
         };
         root.innerHTML = `<div class="message"><strong>${result.goalCount} goals and ${result.phaseCount} phases are valid</strong><div class="muted small">Nothing has been saved yet.</div></div>` +
           safeArray(result.goals).map(goal => `<div class="list-item"><strong>${escapeHtml(goal.goalKey)}</strong> · ${escapeHtml(goal.studentId)} · ${goal.phases.length} phase${goal.phases.length === 1 ? '' : 's'}<div class="muted small">${escapeHtml(goal.goal)}</div></div>`).join('');
@@ -2612,7 +2623,10 @@
         return;
       }
       try {
-        const result = await server('saveBulkGoals', { rows: preview.rows });
+        const result = await server('saveBulkGoals', {
+          rows: preview.rows,
+          importBatchId: preview.importBatchId
+        });
         if (!result.ok) {
           openDialog('bulkGoalDialog');
           return toast(result.message || 'Bulk goal import failed.', true);
@@ -2883,10 +2897,13 @@
       }).join('') : '<div class="empty">This student has no active annual goals.</div>';
       workspace.querySelectorAll('[data-set-active]').forEach(button => button.addEventListener('click', async () => {
         try {
-          await server('setActiveGoalBenchmark', {
+          const result = await server('setActiveGoalBenchmark', {
             goalId: button.dataset.goalId,
             benchmarkId: button.dataset.setActive
           });
+          if (!result || !result.ok) {
+            return toast(result && result.message ? result.message : 'The active objective was not changed.', true);
+          }
           state.goalWorkspaceCache[state.goalStudentId] = null;
           await loadGoalWorkspace(state.goalStudentId, true);
           const benchmark = state.data.caseManager.benchmarks.find(item =>

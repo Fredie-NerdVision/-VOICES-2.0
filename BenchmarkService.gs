@@ -144,10 +144,15 @@ function lookupBenchmarks(filters) {
 
   const students = indexBy_(activeRows_('Students'), 'Id');
   const subjectId = String(classRow.SubjectId);
-  const entries = rows_('BenchmarkEntries');
+  const activeGoalIds = new Set(
+    rows_('Goals').filter(isActiveGoal_).map(row => String(row.Id))
+  );
+  const entries = rows_('BenchmarkEntries')
+    .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE');
   return activeRows_('Benchmarks')
     .filter(row =>
       selected.includes(String(row.StudentId)) &&
+      (!row.GoalId || activeGoalIds.has(String(row.GoalId))) &&
       benchmarkMatchesSubject_(row, subjectId)
     )
     .map(row => {
@@ -217,7 +222,8 @@ function saveBenchmarkEntriesBatch(payload) {
       'Benchmarks',
       'BenchmarkSubjects',
       'Classes',
-      'GoalPhaseHistory'
+      'GoalPhaseHistory',
+      'Goals'
     ].forEach(invalidateRowsCache_);
     const completed = getCompletedObservationBatch_(batchId);
     if (completed.length) {
@@ -271,6 +277,7 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
   const conflicts = [];
   const records = [];
   const benchmarks = indexBy_(rows_('Benchmarks'), 'Id');
+  const goals = indexBy_(rows_('Goals'), 'Id');
   const classes = indexBy_(activeRows_('Classes'), 'Id');
   const today = formatDate_(new Date());
   items.forEach((item, index) => {
@@ -287,11 +294,20 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
         throw new Error('Observation date must be today or earlier.');
       }
       if (benchmark.GoalId) {
+        const originalBenchmark = benchmark;
+        const goal = goals[String(benchmark.GoalId)];
+        if (!goal || String(goal.StudentId) !== String(benchmark.StudentId)) {
+          throw new Error('The benchmark goal relationship is invalid.');
+        }
         const datedPhase = getPhaseForObservationDate_(benchmark.GoalId, observationDate);
         if (datedPhase && String(datedPhase.BenchmarkId) !== String(benchmark.Id)) {
           if (item.phaseDateResolution === 'USE_HISTORICAL_PHASE') {
             benchmark = benchmarks[String(datedPhase.BenchmarkId)];
             if (!benchmark) throw new Error('The historical phase is no longer available.');
+            if (String(benchmark.GoalId) !== String(originalBenchmark.GoalId) ||
+                String(benchmark.StudentId) !== String(originalBenchmark.StudentId)) {
+              throw new Error('The historical phase does not belong to this student and goal.');
+            }
           } else {
             conflicts.push({
               row: index + 1,
@@ -303,7 +319,17 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
             });
             return;
           }
-        } else if (!datedPhase && !toBoolean_(benchmark.Active)) {
+        } else if (datedPhase) {
+          const resolved = benchmarks[String(datedPhase.BenchmarkId)];
+          if (!resolved ||
+              String(resolved.GoalId) !== String(originalBenchmark.GoalId) ||
+              String(resolved.StudentId) !== String(originalBenchmark.StudentId)) {
+            throw new Error('The phase history does not belong to this student and goal.');
+          }
+        } else if (!isActiveGoal_(goal) || !toBoolean_(benchmark.Active) ||
+            rows_('GoalPhaseHistory').some(row =>
+              String(row.GoalId) === String(goal.Id)
+            )) {
           throw new Error('This phase was not active on the observation date.');
         }
       } else if (!toBoolean_(benchmark.Active)) {
@@ -432,7 +458,9 @@ function observationBatchFingerprint_(items) {
 function correctBenchmarkEntry(payload) {
   payload = payload || {};
   const staff = requireCaseManager_();
-  assertRequired_(payload, ['entryId', 'reason', 'replacement']);
+  assertRequired_(payload, ['entryId', 'replacement']);
+  const correctionReason = sanitizeText_(payload.reason, 1000);
+  if (!correctionReason) throw new Error('A correction reason is required.');
   const original = findOne_('BenchmarkEntries', row =>
     String(row.Id) === String(payload.entryId)
   );
@@ -470,7 +498,8 @@ function correctBenchmarkEntry(payload) {
       'Benchmarks',
       'BenchmarkSubjects',
       'Classes',
-      'GoalPhaseHistory'
+      'GoalPhaseHistory',
+      'Goals'
     ].forEach(invalidateRowsCache_);
     validated = validateObservationBatch_(
       [replacementPayload],
@@ -488,7 +517,7 @@ function correctBenchmarkEntry(payload) {
     const now = new Date();
     const replacement = validated.records[0];
     replacement.CorrectionOfEntryId = current.Id;
-    replacement.CorrectionReason = sanitizeText_(payload.reason, 1000);
+    replacement.CorrectionReason = correctionReason;
     appendRow_('BenchmarkEntries', replacement);
     updateRow_('BenchmarkEntries', current._row, {
       Status: 'CORRECTED',

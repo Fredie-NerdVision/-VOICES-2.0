@@ -178,11 +178,11 @@ The parser:
 - preserves source text when structured values are absent;
 - requires an editable preview before save.
 
-Creation is protected by a script lock. It creates one annual `Goals` row, its ordered phase rows, subject relationships, and initial phase-history boundary. The first phase starts active for an active goal.
+Creation is protected by a script lock. It creates one annual `Goals` row, its ordered phase rows, subject relationships, and initial phase-history boundary. The first phase starts active for an active goal. Draft and completed lifecycle states are retained for management but excluded from active lookup, analytics, and IEP export.
 
-The bulk-paste dialog accepts tab-separated rows copied from the documented Google Sheets template. IDs must match exactly; the server returns row-level errors and requires a preview before saving.
+The bulk-paste dialog accepts tab-separated rows copied from the documented Google Sheets template. IDs must match exactly; the server returns row-level errors and requires a preview before saving. A stable import batch ID, goal key, and fingerprint make an unchanged retry skip goals already created by a partially completed attempt.
 
-The case-manager Overview controls which benchmark is active and whether the goal is critical. Deactivating a goal preserves its history.
+The case-manager Overview controls which benchmark is active and whether the goal is critical. Deactivating a goal closes every open phase interval with the date and actor while preserving prior observations.
 
 ## 9. Benchmark lookup and entry
 
@@ -208,9 +208,9 @@ Multiple students may be selected. Each saved entry records:
 - timestamp;
 - entering staff email.
 
-Staff may queue individual entries or paste up to 200 tab-separated rows. One submission batch ID and normalized fingerprint are reused across retries; reusing an ID with different data is rejected. Validation runs before and after a 25-second script lock; `WRITE_BUSY` and validation responses leave the browser queue intact. Staff can download a tab-separated backup before retrying or navigating away. Backdated phase conflicts require an explicit historical-phase choice.
+Staff may queue individual entries or paste up to 200 tab-separated rows. One submission batch ID and normalized fingerprint are reused across retries; reusing an ID with different data is rejected. Validation runs before and after a 25-second script lock; `WRITE_BUSY` and validation responses leave the browser queue intact. Historical-phase choices are persisted into that queue before retrying so a lost response can be submitted with the same fingerprint. Staff can download a tab-separated backup before retrying or navigating away. Backdated phase conflicts require an explicit historical-phase choice.
 
-Case-manager analytics preserve raw counts, calculate latest-three current-phase accuracy from combined successes/trials, and evaluate mastery only when accuracy and prompt targets are complete. Charts support local goal visibility, prompt-colored points, monotonic phase dividers, and phase target lines. Printable progress summaries provide standardized IEP statements.
+Case-manager analytics preserve raw counts, calculate latest-three current-phase accuracy from combined successes/trials, and evaluate mastery only when accuracy and prompt targets are complete. Consecutive mastery counts distinct observation dates; if a date has multiple observations, every observation on that date must meet the benchmark target for that date to qualify. Charts support local goal visibility, prompt-colored points, monotonic phase dividers, and phase target lines. Printable progress summaries provide standardized IEP statements.
 
 ## 10. Schedule builder
 

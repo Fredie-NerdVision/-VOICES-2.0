@@ -128,26 +128,83 @@ function createGoal(payload) {
     const activeIndex = phases.length && status === 'ACTIVE'
       ? Math.max(0, phases.findIndex(phase => phase.active))
       : -1;
+    const importBatchId = sanitizeText_(payload.importBatchId || '', 100);
+    const importGoalKey = sanitizeText_(payload.importGoalKey || '', 100);
+    if (Boolean(importBatchId) !== Boolean(importGoalKey)) {
+      throw new Error('Bulk goal imports require both an import batch ID and goal key.');
+    }
+    const importFingerprint = importBatchId
+      ? goalImportFingerprint_({
+          studentId: student.Id,
+          goal: sanitizeText_(payload.goal, 4000),
+          domain: sanitizeText_(payload.domain || '', 100),
+          status: status,
+          startDate: startDate,
+          dueDate: dueDate,
+          subjectIds: subjectIds.slice().sort(),
+          phases: phases
+        })
+      : '';
 
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(25000)) {
       return { ok: false, code: 'WRITE_BUSY', retryable: true };
     }
-    const goalId = uuid_();
+    let goalId = '';
     const benchmarkIds = [];
     try {
+      invalidateRowsCache_('Goals');
+      invalidateRowsCache_('Benchmarks');
+      if (importBatchId) {
+        const existing = findOne_('Goals', row =>
+          String(row.ImportBatchId || '') === importBatchId &&
+          String(row.ImportGoalKey || '') === importGoalKey
+        );
+        if (existing) {
+          if (String(existing.ImportFingerprint || '') !== importFingerprint) {
+            return {
+              ok: false,
+              code: 'IMPORT_MISMATCH',
+              retryable: false,
+              message: 'This import goal key was already used with different content.'
+            };
+          }
+          const existingBenchmarkCount = rows_('Benchmarks')
+            .filter(row => String(row.GoalId) === String(existing.Id))
+            .length;
+          if (existingBenchmarkCount !== phases.length) {
+            return {
+              ok: false,
+              code: 'IMPORT_INCOMPLETE',
+              retryable: false,
+              message: 'A prior attempt left this goal incomplete; review it before retrying.'
+            };
+          }
+          return {
+            ok: true,
+            id: existing.Id,
+            benchmarkCount: existingBenchmarkCount,
+            alreadyCreated: true,
+            message: 'Goal was already created by this import.'
+          };
+        }
+      }
+      goalId = uuid_();
       appendRow_('Goals', {
         Id: goalId,
         StudentId: student.Id,
         Goal: sanitizeText_(payload.goal, 4000),
         StartDate: startDate,
         DueDate: dueDate,
-        Active: status !== 'INACTIVE',
+        Active: status === 'ACTIVE',
         CreatedBy: staff.Email,
         CreatedAt: new Date(),
         UpdatedAt: new Date(),
         Domain: sanitizeText_(payload.domain || '', 100),
-        Status: status
+        Status: status,
+        ImportBatchId: importBatchId,
+        ImportGoalKey: importGoalKey,
+        ImportFingerprint: importFingerprint
       });
       const benchmarkRows = phases.map((phase, index) => {
         const benchmarkId = uuid_();
@@ -196,7 +253,7 @@ function createGoal(payload) {
         });
       }
     } catch (error) {
-      rollbackGoalCreation_(goalId, benchmarkIds);
+      if (goalId) rollbackGoalCreation_(goalId, benchmarkIds);
       throw error;
     } finally {
       lock.releaseLock();
@@ -303,17 +360,31 @@ function previewBulkGoals(payload) {
 }
 
 function saveBulkGoals(payload) {
+  payload = payload || {};
   const preview = previewBulkGoals(payload);
   if (!preview.ok) return preview;
+  const importBatchId = sanitizeText_(payload.importBatchId, 100);
+  if (!importBatchId) {
+    return {
+      ok: false,
+      code: 'IMPORT_BATCH_REQUIRED',
+      message: 'Preview the import again to create a retry-safe import batch.'
+    };
+  }
   const results = [];
   for (let index = 0; index < preview.goals.length; index += 1) {
-    const result = createGoal(preview.goals[index]);
+    const goal = preview.goals[index];
+    const result = createGoal(Object.assign({}, goal, {
+      importBatchId: importBatchId,
+      importGoalKey: goal.goalKey
+    }));
     if (!result.ok) {
       return {
         ok: false,
         code: result.code || 'IMPORT_FAILED',
         completed: results.length,
-        message: 'Bulk goal import stopped before all goals were saved.'
+        retryable: result.retryable !== false,
+        message: result.message || 'Bulk goal import stopped before all goals were saved.'
       };
     }
     results.push(result);
@@ -323,6 +394,13 @@ function saveBulkGoals(payload) {
     goalCount: results.length,
     phaseCount: results.reduce((total, item) => total + item.benchmarkCount, 0)
   };
+}
+
+function goalImportFingerprint_(goal) {
+  return Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    JSON.stringify(goal)
+  ).map(value => ((value + 256) % 256).toString(16).padStart(2, '0')).join('');
 }
 
 function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
@@ -386,6 +464,14 @@ function normalizeGoalStatus_(value, phaseCount) {
   return status;
 }
 
+function goalStatus_(row) {
+  return String(row.Status || (toBoolean_(row.Active) ? 'ACTIVE' : 'INACTIVE')).toUpperCase();
+}
+
+function isActiveGoal_(row) {
+  return goalStatus_(row) === 'ACTIVE' && toBoolean_(row.Active);
+}
+
 function normalizePromptLevel_(value) {
   if (!value) return '';
   const matched = VOICES.PROMPT_LEVELS.find(level =>
@@ -435,7 +521,8 @@ function getGoalManagerData_(staff) {
   const students = managedStudents_(staff);
   const studentIds = new Set(students.map(row => String(row.Id)));
   const studentIndex = indexBy_(students, 'Id');
-  const goals = activeRows_('Goals')
+  const goals = rows_('Goals')
+    .filter(row => ['ACTIVE', 'DRAFT', 'COMPLETED'].includes(goalStatus_(row)))
     .filter(row => studentIds.has(String(row.StudentId)));
   const goalIds = new Set(goals.map(row => String(row.Id)));
   const benchmarks = rows_('Benchmarks')
@@ -456,7 +543,8 @@ function getStudentGoalWorkspace(studentId, options) {
     options = options || {};
     const staff = requireCaseManager_();
     const student = requireManagedStudent_(staff, studentId);
-    const goals = activeRows_('Goals')
+    const goals = rows_('Goals')
+      .filter(isActiveGoal_)
       .filter(row => String(row.StudentId) === String(student.Id));
     const goalIds = new Set(goals.map(row => String(row.Id)));
     const benchmarks = rows_('Benchmarks')
@@ -700,7 +788,7 @@ function setActiveGoalBenchmark(payload) {
     payload = payload || {};
     assertRequired_(payload, ['goalId', 'benchmarkId']);
     const goal = findOne_('Goals', row =>
-      String(row.Id) === String(payload.goalId) && toBoolean_(row.Active)
+      String(row.Id) === String(payload.goalId) && isActiveGoal_(row)
     );
     if (!goal) throw new Error('Goal was not found.');
     requireManagedStudent_(staff, goal.StudentId);
@@ -753,7 +841,9 @@ function setActiveGoalBenchmark(payload) {
         Active: String(row.Id) === String(selectedCurrent.Id)
       }));
       openHistory.forEach(row => updateRow_('GoalPhaseHistory', row._row, {
-          EndedAt: activationDate
+        EndedAt: activationDate,
+        EndedBy: staff.Email,
+        EndReason: 'Later phase activated'
       }));
       appendRow_('GoalPhaseHistory', {
         Id: uuid_(),
@@ -799,7 +889,12 @@ function getPhaseForObservationDate_(goalId, observationDate) {
   const date = formatDate_(observationDate);
   return getGoalPhaseHistory_(goalId)
     .filter(row => formatDate_(row.ActivatedAt) <= date)
-    .filter(row => !row.EndedAt || date < formatDate_(row.EndedAt))
+    .filter(row =>
+      !row.EndedAt ||
+      date < formatDate_(row.EndedAt) ||
+      (String(row.EndReason || '') === 'Goal deactivated' &&
+        date === formatDate_(row.EndedAt))
+    )
     .sort((a, b) =>
       String(b.ActivatedAt).localeCompare(String(a.ActivatedAt)) ||
       String(b.Id).localeCompare(String(a.Id))
@@ -839,10 +934,21 @@ function summarizeBenchmarkMastery_(benchmark, entries) {
       mastered: false
     };
   }
-  const results = entries
+  const datedResults = entries
     .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
     .sort(compareObservationEntries_)
-    .map(row => entryMeetsBenchmarkTarget_(row, benchmark));
+    .reduce((map, row) => {
+      const date = formatDate_(row.ObservationDate || row.Timestamp);
+      if (!date) return map;
+      if (!map[date]) map[date] = [];
+      map[date].push(entryMeetsBenchmarkTarget_(row, benchmark));
+      return map;
+    }, {});
+  const results = Object.keys(datedResults).sort().map(date => {
+    const observations = datedResults[date];
+    if (!observations.some(result => result !== null)) return null;
+    return observations.every(result => result === true);
+  });
   let consecutive = 0;
   for (let index = results.length - 1; index >= 0 && results[index] === true; index -= 1) {
     consecutive += 1;
@@ -888,6 +994,7 @@ function deactivateGoal(goalId) {
     const goal = findOne_('Goals', row => String(row.Id) === String(goalId));
     if (!goal) throw new Error('Goal was not found.');
     requireManagedStudent_(staff, goal.StudentId);
+    const deactivationDate = formatDate_(new Date());
     updateRow_('Goals', goal._row, {
       Active: false,
       Status: 'INACTIVE',
@@ -896,7 +1003,17 @@ function deactivateGoal(goalId) {
     rows_('Benchmarks')
       .filter(row => String(row.GoalId) === String(goal.Id))
       .forEach(row => updateRow_('Benchmarks', row._row, { Active: false }));
-    return { ok: true };
+    rows_('GoalPhaseHistory')
+      .filter(row =>
+        String(row.GoalId) === String(goal.Id) &&
+        !row.EndedAt
+      )
+      .forEach(row => updateRow_('GoalPhaseHistory', row._row, {
+        EndedAt: deactivationDate,
+        EndedBy: staff.Email,
+        EndReason: 'Goal deactivated'
+      }));
+    return { ok: true, deactivatedAt: deactivationDate };
   });
 }
 
@@ -957,10 +1074,10 @@ function publicGoal_(row, student, benchmarks) {
     studentName: student ? student.Name : '',
     goal: row.Goal,
     domain: row.Domain || '',
-    status: row.Status || (toBoolean_(row.Active) ? 'ACTIVE' : 'INACTIVE'),
+    status: goalStatus_(row),
     startDate: formatDate_(row.StartDate),
     dueDate: formatDate_(row.DueDate),
-    active: toBoolean_(row.Active),
+    active: isActiveGoal_(row),
     critical: goalBenchmarks.some(benchmark => toBoolean_(benchmark.Critical)),
     subjectIds: subjectIds,
     subjectNames: subjectIds.map(id => subjects[id].Name),

@@ -53,8 +53,9 @@ Each row is one annual IEP goal:
 - `UpdatedAt`
 - `Domain`
 - `Status`: `DRAFT`, `ACTIVE`, `COMPLETED`, or `INACTIVE`
+- `ImportBatchId`, `ImportGoalKey`, and `ImportFingerprint` for retry-safe bulk imports
 
-Goals may contain zero or any number of ordered benchmark phases. Draft goals may omit structured targets.
+Goals may contain zero or any number of ordered benchmark phases. Draft goals may omit structured targets. Only `ACTIVE` lifecycle goals participate in lookup, analytics, and IEP export; drafts and completed goals remain available to case managers without being treated as active.
 
 ### Benchmarks
 
@@ -71,7 +72,7 @@ Each benchmark row is an ordered task/condition phase associated with a goal thr
 
 ### GoalPhaseHistory
 
-Records every phase activation boundary with `ActivatedAt`, `EndedAt`, actor, reason, and source. Backdated observations are resolved against this history rather than silently assigned to the current phase.
+Records every phase activation boundary with `ActivatedAt`, `EndedAt`, actor, reason, and source. Closed intervals also retain `EndedBy` and `EndReason`. Backdated observations are resolved against this history rather than silently assigned to the current phase, and the resolved phase must belong to the same goal and student.
 
 ### BenchmarkSubjects
 
@@ -79,7 +80,7 @@ Each goal has subject relevance tags shared by all of its phases. A benchmark is
 
 ### BenchmarkEntries
 
-Each active row preserves raw successes/trials, calculated accuracy, observation date, actual prompt level/count, class, evaluator, notes, an idempotent submission batch ID, and a normalized batch fingerprint. The fingerprint rejects accidental batch-ID reuse with different data. Correction fields retain the original entry and record replacement provenance rather than overwriting history.
+Each active row preserves raw successes/trials, calculated accuracy, observation date, actual prompt level/count, class, evaluator, notes, an idempotent submission batch ID, and a normalized batch fingerprint. The fingerprint rejects accidental batch-ID reuse with different data. Correction fields retain the original entry and a required correction reason rather than overwriting history; superseded rows are excluded from current lookup and analytics.
 
 ### IEPs
 
