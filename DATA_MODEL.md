@@ -51,33 +51,35 @@ Each row is one annual IEP goal:
 - `CreatedBy`
 - `CreatedAt`
 - `UpdatedAt`
+- `Domain`
+- `Status`: `DRAFT`, `ACTIVE`, `COMPLETED`, or `INACTIVE`
 
-The case-manager Goals workspace requires exactly three `Short-Term Objective` sections in one combined text input and creates three rows in `Benchmarks`.
+Goals may contain zero or any number of ordered benchmark phases. Draft goals may omit structured targets.
 
 ### Benchmarks
 
-Each benchmark row is a short-term objective associated with a goal through `GoalId`. The metric:
+Each benchmark row is an ordered task/condition phase associated with a goal through `GoalId`. Legacy ratios remain available, while 2.3 adds:
 
-> Math - Money Math: student will get 3 out of 5 correct in 4 / 5 trials
+- `OrderIndex`
+- `TaskDemandDescription`
+- `TargetPromptLevel`
+- `TargetPromptCount`
+- `TargetAccuracyPct`
+- `TargetConsecutiveSessions`
 
-is represented by:
+`TargetCorrect`, `TargetAttempts`, `RequiredTrials`, and `TotalTrials` are retained for compatibility. Within each non-draft goal, one phase is active for current lookup and data entry.
 
-- `Category`: Math - Money Math
-- `Skill`: the individual goal text
-- `TargetCorrect`: 3
-- `TargetAttempts`: 5
-- `RequiredTrials`: 4
-- `TotalTrials`: 5
+### GoalPhaseHistory
 
-`StudentId`, `GoalId`, `SubjectId`, `StartDate`, `DueDate`, `Critical`, `Active`, and `Description` complete the record. `SubjectId` is the compatibility/primary subject. Within each active annual goal, one objective is marked `Active` for lookup and data entry.
+Records every phase activation boundary with `ActivatedAt`, `EndedAt`, actor, reason, and source. Backdated observations are resolved against this history rather than silently assigned to the current phase.
 
 ### BenchmarkSubjects
 
-Each goal has one set of relevance tags shared by its three benchmarks. For lookup compatibility, each `BenchmarkId`, `SubjectId` junction row repeats a goal tag for one benchmark. A benchmark is returned when the selected class subject matches either its primary `Benchmarks.SubjectId` or any junction row.
+Each goal has subject relevance tags shared by all of its phases. A benchmark is returned when the selected class subject matches either its primary `Benchmarks.SubjectId` or a junction row.
 
 ### BenchmarkEntries
 
-Written by the app. Each row stores the benchmark/student/class, signed-in staff email, correct and attempted counts, calculated percent, timestamp, and notes.
+Each active row preserves raw successes/trials, calculated accuracy, observation date, actual prompt level/count, class, evaluator, notes, an idempotent submission batch ID, and a normalized batch fingerprint. The fingerprint rejects accidental batch-ID reuse with different data. Correction fields retain the original entry and record replacement provenance rather than overwriting history.
 
 ### IEPs
 
@@ -93,7 +95,7 @@ Reusable template assignments are stored in `Assignments` with a blank `Date` an
 
 ### DaySchedules / Assignments
 
-`DaySchedules` represents a one-day temporary schedule. `Assignments` contains one aide assignment per period:
+`DaySchedules` represents a one-day temporary schedule and carries a `Revision` plus update attribution to reject stale saves. `Assignments` contains one aide assignment per period:
 
 - `ClassId` for class coverage
 - `StudentId` for 1:1 coverage
@@ -102,7 +104,11 @@ Reusable template assignments are stored in `Assignments` with a blank `Date` an
 
 `OFF` clears and overrides class/student fields for that aide and period.
 
-The weekly scheduler reads Monday-Sunday. Explicit saved weekend schedules count toward weekly hours. Template fallback is limited to weekdays listed in the comma-separated `Settings.ScheduleWeekdays` value. Overlapping assignments are merged before hours are totaled, and weekly capacity is advisory rather than a hard limit.
+### AideDailyHours
+
+Stores each aide's date-specific shift start/end and optional lunch start. A selected lunch deducts exactly 30 minutes. Date-specific rows override approved recurring availability; approved time off still blocks scheduling.
+
+Weekly hours are calculated from effective shift times, not assignment cells. Partial-period overlap is allowed, periods entirely outside a shift are blocked, and weekly capacity remains advisory.
 
 ## Staff records and communication
 
@@ -127,6 +133,9 @@ Benchmarks.GoalId    -> Goals.Id
 Goals.StudentId      -> Students.Id
 BenchmarkSubjects.BenchmarkId -> Benchmarks.Id
 BenchmarkSubjects.SubjectId   -> Subjects.Id
+GoalPhaseHistory.GoalId       -> Goals.Id
+GoalPhaseHistory.BenchmarkId  -> Benchmarks.Id
+AideDailyHours.AideEmail      -> Staff.Email
 ```
 
 Do not place student medical details or unnecessary sensitive information in free-text notes. Follow district retention and access-control policy for all IEP and benchmark data.

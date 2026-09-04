@@ -1,8 +1,16 @@
 const VOICES = Object.freeze({
   APP_NAME: 'V.O.I.C.E.S 2.0',
+  RELEASE: '2.3',
   DATABASE_PROPERTY: 'VOICES_DATABASE_ID',
   LOGO_FILE_PROPERTY: 'VOICES_LOGO_FILE_ID',
   TIME_ZONE: Session.getScriptTimeZone(),
+  PROMPT_LEVELS: Object.freeze([
+    'Independent',
+    'Verbal',
+    'Gestural/Visual',
+    'Model',
+    'Physical'
+  ]),
   ROLES: Object.freeze({
     AIDE: 'AIDE',
     TEACHER: 'TEACHER',
@@ -39,7 +47,7 @@ function getAppBootstrap() {
       classes: getClassesForStaff_(staff),
       students: getStudentsForStaff_(staff),
       currentAssignment: currentAssignment,
-      benchmarkLookup: getBenchmarkLookupContext_(currentAssignment)
+      benchmarkLookup: getBenchmarkLookupContext_(staff, currentAssignment)
     };
 
     if (isCaseManager) {
@@ -121,6 +129,12 @@ function toBoolean_(value) {
 function toNumber_(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : (fallback || 0);
+}
+
+function optionalNumber_(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function uuid_() {

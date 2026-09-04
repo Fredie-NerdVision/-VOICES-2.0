@@ -1,7 +1,7 @@
 const SHEET_SCHEMAS = Object.freeze({
   Settings: ['Key', 'Value'],
   Staff: ['Id', 'Email', 'FirstName', 'LastName', 'Role', 'IsAdmin', 'Active', 'WeeklyHours'],
-  Students: ['Id', 'Name', 'CaseManagerEmail', 'IsOneToOne', 'Active'],
+  Students: ['Id', 'Name', 'Grade', 'CaseManagerEmail', 'IsOneToOne', 'Active'],
   Subjects: ['Id', 'Name', 'Active'],
   Classes: ['Id', 'Name', 'SubjectId', 'TeacherEmail', 'PeriodId', 'Active'],
   ClassStudents: ['ClassId', 'StudentId'],
@@ -10,24 +10,38 @@ const SHEET_SCHEMAS = Object.freeze({
   IEPs: ['Id', 'StudentId', 'CaseManagerEmail', 'StartDate', 'EndDate', 'Status', 'FileUrl'],
   Goals: [
     'Id', 'StudentId', 'Goal', 'StartDate', 'DueDate', 'Active',
-    'CreatedBy', 'CreatedAt', 'UpdatedAt'
+    'CreatedBy', 'CreatedAt', 'UpdatedAt', 'Domain', 'Status'
   ],
   Benchmarks: [
     'Id', 'StudentId', 'SubjectId', 'Category', 'Skill', 'TargetCorrect', 'TargetAttempts',
     'RequiredTrials', 'TotalTrials', 'StartDate', 'DueDate', 'Critical', 'Active', 'Description',
-    'GoalId'
+    'GoalId', 'OrderIndex', 'TaskDemandDescription', 'TargetPromptLevel',
+    'TargetPromptCount', 'TargetAccuracyPct', 'TargetConsecutiveSessions'
   ],
   BenchmarkSubjects: ['BenchmarkId', 'SubjectId'],
   BenchmarkEntries: [
     'Id', 'Timestamp', 'BenchmarkId', 'StudentId', 'StaffEmail', 'ClassId',
-    'Correct', 'Attempts', 'Percent', 'Notes'
+    'Correct', 'Attempts', 'Percent', 'Notes', 'ObservationDate', 'ActualPromptLevel',
+    'ActualPromptCount', 'SubmissionBatchId', 'SubmissionFingerprint', 'Status', 'CorrectionOfEntryId',
+    'CorrectionReason', 'CorrectedBy', 'CorrectedAt'
+  ],
+  GoalPhaseHistory: [
+    'Id', 'GoalId', 'BenchmarkId', 'ActivatedAt', 'EndedAt',
+    'ChangedBy', 'ChangeReason', 'Source'
   ],
   ScheduleTypes: ['Id', 'Name', 'IsDefault', 'Active'],
   SchedulePeriods: ['ScheduleTypeId', 'PeriodId', 'Label', 'StartTime', 'EndTime', 'SortOrder'],
-  DaySchedules: ['Id', 'Date', 'Name', 'BaseScheduleTypeId', 'Temporary', 'Status', 'CreatedBy'],
+  DaySchedules: [
+    'Id', 'Date', 'Name', 'BaseScheduleTypeId', 'Temporary', 'Status',
+    'CreatedBy', 'Revision', 'UpdatedBy', 'UpdatedAt'
+  ],
   Assignments: [
     'Id', 'DayScheduleId', 'Date', 'PeriodId', 'AideEmail', 'ClassId',
     'StudentId', 'Duty', 'Note', 'Type'
+  ],
+  AideDailyHours: [
+    'Id', 'Date', 'AideEmail', 'StartTime', 'EndTime', 'LunchStartTime',
+    'LunchMinutes', 'UpdatedBy', 'UpdatedAt'
   ],
   Messages: ['Id', 'Message', 'StartDate', 'EndDate', 'Active', 'CreatedBy', 'CreatedAt'],
   TimeEntries: ['Id', 'AideEmail', 'ClockIn', 'ClockOut', 'Hours', 'Note', 'Verified'],
@@ -67,7 +81,7 @@ function setupVoicesDatabase(options) {
   options = options || {};
   const spreadsheet = options.spreadsheetId
     ? SpreadsheetApp.openById(options.spreadsheetId)
-    : SpreadsheetApp.create(options.name || 'V.O.I.C.E.S 2.2 Database');
+    : SpreadsheetApp.create(options.name || 'V.O.I.C.E.S 2.3 Database');
 
   PropertiesService.getScriptProperties().setProperty(VOICES.DATABASE_PROPERTY, spreadsheet.getId());
   Object.keys(SHEET_SCHEMAS).forEach(name => ensureSheet_(spreadsheet, name, SHEET_SCHEMAS[name]));
@@ -87,6 +101,7 @@ function setupVoicesDatabase(options) {
 
   seedDefaults_();
   migrateVoices22Data_();
+  migrateVoices23Data_();
   formatDatabase_(spreadsheet);
   return {
     spreadsheetId: spreadsheet.getId(),
@@ -97,21 +112,41 @@ function setupVoicesDatabase(options) {
 }
 
 function upgradeVoices22Database() {
-  const spreadsheet = getDatabase_();
-  Object.keys(SHEET_SCHEMAS).forEach(name => ensureSheet_(spreadsheet, name, SHEET_SCHEMAS[name]));
-  migrateVoices22Data_();
-  seedDefaults_();
-  formatDatabase_(spreadsheet);
-  return {
-    ok: true,
-    spreadsheetId: spreadsheet.getId(),
-    spreadsheetUrl: spreadsheet.getUrl(),
-    message: 'V.O.I.C.E.S 2.2 database schema is ready.'
-  };
+  return upgradeVoices23Database();
 }
 
 function upgradeVoices21Database() {
   return upgradeVoices22Database();
+}
+
+function upgradeVoices23Database() {
+  const spreadsheet = getDatabase_();
+  Object.keys(SHEET_SCHEMAS).forEach(name => ensureSheet_(spreadsheet, name, SHEET_SCHEMAS[name]));
+  migrateVoices22Data_();
+  migrateVoices23Data_();
+  seedDefaults_();
+  formatDatabase_(spreadsheet);
+  const validation = validateVoices23Database_();
+  const ok = validation.invalidBenchmarks === 0 &&
+    validation.invalidGoalStudents === 0 &&
+    validation.invalidBenchmarkStudents === 0 &&
+    validation.invalidEntries === 0 &&
+    validation.invalidEntryStudents === 0 &&
+    validation.invalidBenchmarkSubjects === 0 &&
+    validation.invalidPhaseHistory === 0 &&
+    validation.duplicateGoalIds === 0 &&
+    validation.duplicateBenchmarkIds === 0 &&
+    validation.duplicateEntryIds === 0 &&
+    validation.invalidActivePhaseCounts === 0;
+  return {
+    ok: ok,
+    spreadsheetId: spreadsheet.getId(),
+    spreadsheetUrl: spreadsheet.getUrl(),
+    validation: validation,
+    message: ok
+      ? 'V.O.I.C.E.S 2.3 database schema is ready.'
+      : 'V.O.I.C.E.S 2.3 schema was applied, but validation issues require review.'
+  };
 }
 
 function withDatabaseId_(spreadsheetId, callback) {
@@ -204,6 +239,203 @@ function migrateVoices22Data_() {
   });
 }
 
+function migrateVoices23Data_() {
+  const goals = rows_('Goals');
+  const benchmarks = rows_('Benchmarks');
+  const entries = rows_('BenchmarkEntries');
+  const histories = rows_('GoalPhaseHistory');
+  const historyBenchmarkIds = new Set(histories.map(row => String(row.BenchmarkId)));
+
+  goals.forEach(goal => {
+    const status = String(goal.Status || '').toUpperCase() ||
+      (toBoolean_(goal.Active) ? 'ACTIVE' : 'INACTIVE');
+    if (String(goal.Status || '') !== status) {
+      updateRow_('Goals', goal._row, { Status: status });
+    }
+  });
+
+  const benchmarksByGoal = benchmarks.reduce((map, benchmark) => {
+    const goalId = String(benchmark.GoalId || '');
+    if (!map[goalId]) map[goalId] = [];
+    map[goalId].push(benchmark);
+    return map;
+  }, {});
+  const entriesByBenchmark = entries.reduce((map, entry) => {
+    const benchmarkId = String(entry.BenchmarkId || '');
+    if (!map[benchmarkId]) map[benchmarkId] = [];
+    map[benchmarkId].push(entry);
+    return map;
+  }, {});
+
+  Object.keys(benchmarksByGoal).forEach(goalId => {
+    const ordered = benchmarksByGoal[goalId].slice().sort((a, b) => {
+      const aMatch = String(a.Category || '').match(/(\d+)/);
+      const bMatch = String(b.Category || '').match(/(\d+)/);
+      const aOrder = aMatch ? Number(aMatch[1]) : Number.MAX_SAFE_INTEGER;
+      const bOrder = bMatch ? Number(bMatch[1]) : Number.MAX_SAFE_INTEGER;
+      return aOrder - bOrder || a._row - b._row;
+    });
+    const goal = goals.find(item => String(item.Id) === goalId);
+    const phaseHistoryCandidates = ordered.filter(benchmark =>
+      toBoolean_(benchmark.Active) ||
+      (entriesByBenchmark[String(benchmark.Id)] || []).length
+    );
+    if (!phaseHistoryCandidates.length && ordered.length && goal && toBoolean_(goal.Active)) {
+      phaseHistoryCandidates.push(ordered[0]);
+    }
+    const activationDates = phaseHistoryCandidates.map(benchmark => {
+      const benchmarkEntries = entriesByBenchmark[String(benchmark.Id)] || [];
+      const firstEntry = benchmarkEntries
+        .map(entry => formatDate_(entry.ObservationDate || entry.Timestamp))
+        .filter(Boolean)
+        .sort()[0];
+      return firstEntry || formatDate_(benchmark.StartDate) ||
+        (goal ? formatDate_(goal.StartDate) : '') || formatDate_(new Date());
+    });
+    activationDates.forEach((date, index) => {
+      if (index && date < activationDates[index - 1]) {
+        activationDates[index] = activationDates[index - 1];
+      }
+    });
+    ordered.forEach((benchmark, index) => {
+      const targetCorrect = optionalNumber_(benchmark.TargetCorrect);
+      const targetAttempts = optionalNumber_(benchmark.TargetAttempts);
+      const targetAccuracy = optionalNumber_(benchmark.TargetAccuracyPct);
+      const derivedAccuracy = targetAccuracy === null &&
+          targetCorrect !== null && targetAttempts !== null && targetAttempts > 0
+        ? Math.round(targetCorrect / targetAttempts * 1000) / 10
+        : targetAccuracy;
+      const patch = {};
+      if (optionalNumber_(benchmark.OrderIndex) === null) patch.OrderIndex = index + 1;
+      if (!String(benchmark.TaskDemandDescription || '').trim()) {
+        patch.TaskDemandDescription = benchmark.Description || benchmark.Skill || '';
+      }
+      if (derivedAccuracy !== null &&
+          optionalNumber_(benchmark.TargetAccuracyPct) !== derivedAccuracy) {
+        patch.TargetAccuracyPct = derivedAccuracy;
+      }
+      if (Object.keys(patch).length) updateRow_('Benchmarks', benchmark._row, patch);
+    });
+    phaseHistoryCandidates.forEach((benchmark, index) => {
+      if (!historyBenchmarkIds.has(String(benchmark.Id))) {
+        appendRow_('GoalPhaseHistory', {
+          Id: uuid_(),
+          GoalId: goalId,
+          BenchmarkId: benchmark.Id,
+          ActivatedAt: activationDates[index],
+          EndedAt: index < phaseHistoryCandidates.length - 1 ? activationDates[index + 1] : '',
+          ChangedBy: '',
+          ChangeReason: 'Migrated from V.O.I.C.E.S 2.2',
+          Source: 'MIGRATION'
+        });
+        historyBenchmarkIds.add(String(benchmark.Id));
+      }
+    });
+    const candidateOrder = phaseHistoryCandidates.reduce((map, benchmark, index) => {
+      map[String(benchmark.Id)] = index;
+      return map;
+    }, {});
+    const migratedHistory = rows_('GoalPhaseHistory')
+      .filter(row =>
+        String(row.GoalId) === String(goalId) &&
+        String(row.Source).toUpperCase() === 'MIGRATION' &&
+        candidateOrder[String(row.BenchmarkId)] !== undefined
+      )
+      .sort((a, b) =>
+        candidateOrder[String(a.BenchmarkId)] - candidateOrder[String(b.BenchmarkId)]
+      );
+    migratedHistory.forEach((row, index) => {
+      const endedAt = index < migratedHistory.length - 1
+        ? migratedHistory[index + 1].ActivatedAt
+        : '';
+      if (String(row.EndedAt || '') !== String(endedAt || '')) {
+        updateRow_('GoalPhaseHistory', row._row, { EndedAt: endedAt });
+      }
+    });
+  });
+
+  entries.forEach(entry => {
+    const patch = {};
+    if (!entry.ObservationDate) patch.ObservationDate = formatDate_(entry.Timestamp);
+    if (!entry.Status) patch.Status = 'ACTIVE';
+    if (Object.keys(patch).length) updateRow_('BenchmarkEntries', entry._row, patch);
+  });
+
+  rows_('DaySchedules').forEach(schedule => {
+    const patch = {};
+    if (optionalNumber_(schedule.Revision) === null) patch.Revision = 1;
+    if (!schedule.UpdatedBy) patch.UpdatedBy = schedule.CreatedBy || '';
+    if (!schedule.UpdatedAt) patch.UpdatedAt = new Date();
+    if (Object.keys(patch).length) updateRow_('DaySchedules', schedule._row, patch);
+  });
+
+  upsertSetting_('SchemaVersion', '2.3');
+}
+
+function validateVoices23Database_() {
+  const goals = rows_('Goals');
+  const benchmarks = rows_('Benchmarks');
+  const entries = rows_('BenchmarkEntries');
+  const history = rows_('GoalPhaseHistory');
+  const benchmarkSubjects = rows_('BenchmarkSubjects');
+  const studentIds = new Set(rows_('Students').map(row => String(row.Id)));
+  const subjectIds = new Set(rows_('Subjects').map(row => String(row.Id)));
+  const goalIds = new Set(goals.map(row => String(row.Id)));
+  const benchmarkIds = new Set(benchmarks.map(row => String(row.Id)));
+  const benchmarkIndex = benchmarks.reduce((map, row) => {
+    map[String(row.Id)] = row;
+    return map;
+  }, {});
+  const invalidBenchmarks = benchmarks
+    .filter(row => !goalIds.has(String(row.GoalId))).length;
+  const invalidGoalStudents = goals
+    .filter(row => !studentIds.has(String(row.StudentId))).length;
+  const invalidBenchmarkStudents = benchmarks
+    .filter(row => !studentIds.has(String(row.StudentId))).length;
+  const invalidEntries = entries
+    .filter(row => !benchmarkIds.has(String(row.BenchmarkId))).length;
+  const invalidEntryStudents = entries
+    .filter(row => !studentIds.has(String(row.StudentId))).length;
+  const invalidBenchmarkSubjects = benchmarkSubjects.filter(row =>
+    !benchmarkIds.has(String(row.BenchmarkId)) ||
+    !subjectIds.has(String(row.SubjectId))
+  ).length;
+  const invalidHistory = history
+    .filter(row =>
+      !goalIds.has(String(row.GoalId)) ||
+      !benchmarkIds.has(String(row.BenchmarkId)) ||
+      String(benchmarkIndex[String(row.BenchmarkId)].GoalId) !== String(row.GoalId)
+    ).length;
+  const duplicateCount = rows => rows.length -
+    new Set(rows.map(row => String(row.Id))).size;
+  const invalidActivePhaseCounts = goals.filter(goal => {
+    const status = String(goal.Status || (toBoolean_(goal.Active) ? 'ACTIVE' : 'INACTIVE'))
+      .toUpperCase();
+    if (status !== 'ACTIVE') return false;
+    const goalBenchmarks = benchmarks.filter(row =>
+      String(row.GoalId) === String(goal.Id)
+    );
+    if (!goalBenchmarks.length) return true;
+    return goalBenchmarks.filter(row => toBoolean_(row.Active)).length !== 1;
+  }).length;
+  return {
+    goals: goalIds.size,
+    benchmarks: benchmarkIds.size,
+    entries: entries.length,
+    invalidBenchmarks: invalidBenchmarks,
+    invalidGoalStudents: invalidGoalStudents,
+    invalidBenchmarkStudents: invalidBenchmarkStudents,
+    invalidEntries: invalidEntries,
+    invalidEntryStudents: invalidEntryStudents,
+    invalidBenchmarkSubjects: invalidBenchmarkSubjects,
+    invalidPhaseHistory: invalidHistory,
+    duplicateGoalIds: duplicateCount(goals),
+    duplicateBenchmarkIds: duplicateCount(benchmarks),
+    duplicateEntryIds: duplicateCount(entries),
+    invalidActivePhaseCounts: invalidActivePhaseCounts
+  };
+}
+
 function formatDatabase_(spreadsheet) {
   Object.keys(SHEET_SCHEMAS).forEach(name => {
     const sheet = spreadsheet.getSheetByName(name);
@@ -236,6 +468,7 @@ function seedDefaults_() {
       Value: 'MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY'
     });
   }
+  upsertSetting_('SchemaVersion', '2.3');
 
   if (activeRows_('Subjects').length === 0) {
     ['Math', 'English Language Arts', 'Science', 'Social Studies', 'Life Skills', 'Communication', 'Behavior', 'Transition']
@@ -317,6 +550,19 @@ function appendRow_(name, record) {
   return record;
 }
 
+function appendRows_(name, records) {
+  if (!records || !records.length) return [];
+  const headers = SHEET_SCHEMAS[name];
+  if (!headers) throw new Error('Unknown schema: ' + name);
+  const target = sheet_(name);
+  const values = records.map(record =>
+    headers.map(header => record[header] === undefined ? '' : record[header])
+  );
+  target.getRange(target.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
+  invalidateRowsCache_(name);
+  return records;
+}
+
 function updateRow_(name, rowNumber, patch) {
   const headers = SHEET_SCHEMAS[name];
   const sheet = sheet_(name);
@@ -337,21 +583,27 @@ function replaceRows_(name, predicate, replacementRows) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    const keep = rows_(name).filter(row => !predicate(row));
-    const all = keep.concat(replacementRows || []);
-    const sheet = sheet_(name);
-    const headers = SHEET_SCHEMAS[name];
-    if (sheet.getLastRow() > 1) {
-      sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).clearContent();
-    }
-    if (all.length) {
-      const values = all.map(record => headers.map(header => record[header] === undefined ? '' : record[header]));
-      sheet.getRange(2, 1, values.length, headers.length).setValues(values);
-    }
-    invalidateRowsCache_(name);
+    replaceRowsUnlocked_(name, predicate, replacementRows);
   } finally {
     lock.releaseLock();
   }
+}
+
+function replaceRowsUnlocked_(name, predicate, replacementRows) {
+  const keep = rows_(name).filter(row => !predicate(row));
+  const all = keep.concat(replacementRows || []);
+  const sheet = sheet_(name);
+  const headers = SHEET_SCHEMAS[name];
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).clearContent();
+  }
+  if (all.length) {
+    const values = all.map(record =>
+      headers.map(header => record[header] === undefined ? '' : record[header])
+    );
+    sheet.getRange(2, 1, values.length, headers.length).setValues(values);
+  }
+  invalidateRowsCache_(name);
 }
 
 function invalidateRowsCache_(name) {
@@ -369,6 +621,17 @@ function settingsMap_() {
     map[row.Key] = row.Value;
     return map;
   }, {});
+}
+
+function upsertSetting_(key, value) {
+  const existing = findOne_('Settings', row => row.Key === key);
+  if (existing) {
+    if (String(existing.Value) !== String(value)) {
+      updateRow_('Settings', existing._row, { Value: value });
+    }
+  } else {
+    appendRow_('Settings', { Key: key, Value: value });
+  }
 }
 
 function saveSetting(key, value) {

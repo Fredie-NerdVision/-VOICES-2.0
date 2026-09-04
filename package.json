@@ -1,10 +1,10 @@
 {
   "name": "voices-google-apps-script",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "description": "V.O.I.C.E.S Google Apps Script application",
   "scripts": {
-    "test": "node tests/validate-syntax.js && node tests/check-demo.js && node tests/check-weekly-schedule.js && node tests/check-schedule-assistance.js && node tests/check-schedule-client.js && node tests/check-schedule-off.js",
+    "test": "node tests/validate-syntax.js && node tests/check-demo.js && node tests/check-voices23.js && node tests/check-weekly-schedule.js && node tests/check-schedule-assistance.js && node tests/check-schedule-client.js && node tests/check-schedule-off.js",
     "test:syntax": "node tests/validate-syntax.js"
   }
 }

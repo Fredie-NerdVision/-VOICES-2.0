@@ -45,6 +45,7 @@ function getScheduleBuilderData(dateText) {
         studentId: row.StudentId
       })),
       staffingStatus: getScheduleStaffingStatus_(date),
+      dailyHours: getDailyHoursForDate_(date),
       unavailable: getUnavailableAidesForDate_(date),
       unassignedOneToOnes: getUnassignedOneToOnes_(date),
       week: getWeeklyScheduleData_(date)
@@ -82,6 +83,7 @@ function getScheduleStaffingStatus_(dateText) {
       );
       return {
         email: email,
+        effectiveHours: getEffectiveDailyHours_(dateText, email),
         approvedTimeOff: approvedTimeOff ? {
           type: approvedTimeOff.Type,
           startDate: formatDate_(approvedTimeOff.StartDate),
@@ -194,7 +196,12 @@ function previewWeeklyHours(payload) {
       throw new Error('Schedule periods and assignments must be lists.');
     }
     const week = buildWeeklyScheduleData_(payload.date);
-    const draftDay = publicDraftScheduleDay_(payload.date, payload.periods, payload.assignments);
+    const draftDay = publicDraftScheduleDay_(
+      payload.date,
+      payload.periods,
+      payload.assignments,
+      payload.dailyHours || []
+    );
     week.days = week.days.map(day => day.date === payload.date ? draftDay : day);
     week.summary = summarizeWeeklySchedule_(week.days, week.aides);
     return week.summary;
@@ -272,6 +279,7 @@ function buildWeeklyScheduleIndexes_() {
     aides: activeRows_('Staff').filter(row => row.Role === VOICES.ROLES.AIDE),
     timeOff: rows_('TimeOffRequests'),
     availability: rows_('Availability'),
+    dailyHours: rows_('AideDailyHours'),
     scheduleWeekdays: scheduleWeekdays_()
   };
 }
@@ -314,11 +322,14 @@ function resolveWeeklyScheduleDay_(dateText, indexes) {
     source: daySchedule ? 'DAY' : (useTemplate ? 'TEMPLATE' : 'NONE'),
     periods: periods,
     assignments: assignments,
+    dailyHours: indexes.aides.map(aide =>
+      getEffectiveDailyHoursFromIndexes_(dateText, aide.Email, indexes)
+    ).filter(Boolean),
     conflicts: conflicts
   };
 }
 
-function publicDraftScheduleDay_(dateText, periods, assignments) {
+function publicDraftScheduleDay_(dateText, periods, assignments, dailyHours) {
   const normalizedPeriods = periods.map((period, index) => ({
     periodId: sanitizeText_(period.periodId || ('CUSTOM_' + (index + 1)), 100),
     label: sanitizeText_(period.label || ('Period ' + (index + 1)), 100),
@@ -358,6 +369,7 @@ function publicDraftScheduleDay_(dateText, periods, assignments) {
     source: 'DRAFT',
     periods: normalizedPeriods,
     assignments: normalizedAssignments,
+    dailyHours: (dailyHours || []).map(item => normalizeDailyHours_(dateText, item)),
     conflicts: []
   };
 }
@@ -400,32 +412,97 @@ function summarizeWeeklySchedule_(days, aides) {
 }
 
 function scheduledHoursForAide_(day, email) {
-  const intervals = day.assignments
-    .filter(item => normalizeEmail_(item.aideEmail) === normalizeEmail_(email))
-    .filter(countsAsScheduledAssignment_)
-    .map(item => {
-      const period = day.periods.find(row => String(row.periodId) === String(item.periodId));
-      return period ? [timeToMinutes_(period.startTime), timeToMinutes_(period.endTime)] : null;
-    })
-    .filter(item => item && item[0] >= 0 && item[1] > item[0])
-    .sort((a, b) => a[0] - b[0]);
-  if (!intervals.length) return 0;
-  const merged = [intervals[0].slice()];
-  intervals.slice(1).forEach(interval => {
-    const current = merged[merged.length - 1];
-    if (interval[0] <= current[1]) current[1] = Math.max(current[1], interval[1]);
-    else merged.push(interval.slice());
+  const hours = (day.dailyHours || []).find(item =>
+    normalizeEmail_(item.aideEmail) === normalizeEmail_(email)
+  );
+  if (!hours) return 0;
+  const start = timeToMinutes_(hours.startTime);
+  const end = timeToMinutes_(hours.endTime);
+  if (start < 0 || end <= start) return 0;
+  return roundHours_((end - start - (toNumber_(hours.lunchMinutes) || 0)) / 60);
+}
+
+function getDailyHoursForDate_(dateText) {
+  return activeRows_('Staff')
+    .filter(row => row.Role === VOICES.ROLES.AIDE)
+    .map(row => getEffectiveDailyHours_(dateText, row.Email))
+    .filter(Boolean);
+}
+
+function getEffectiveDailyHours_(dateText, email) {
+  return getEffectiveDailyHoursFromIndexes_(dateText, email, {
+    dailyHours: rows_('AideDailyHours'),
+    availability: rows_('Availability')
   });
-  const grossHours = merged.reduce((total, interval) => total + interval[1] - interval[0], 0) / 60;
-  return roundHours_(grossHours - (grossHours > 5 ? .5 : 0));
+}
+
+function getEffectiveDailyHoursFromIndexes_(dateText, email, indexes) {
+  const normalizedEmail = normalizeEmail_(email);
+  const override = (indexes.dailyHours || []).find(row =>
+    formatDate_(row.Date) === dateText &&
+    normalizeEmail_(row.AideEmail) === normalizedEmail
+  );
+  if (override) {
+    return normalizeDailyHours_(dateText, {
+      aideEmail: normalizedEmail,
+      startTime: override.StartTime,
+      endTime: override.EndTime,
+      lunchStartTime: override.LunchStartTime,
+      lunchMinutes: override.LunchMinutes,
+      source: 'DATE'
+    });
+  }
+  const availability = (indexes.availability || []).find(row =>
+    normalizeEmail_(row.AideEmail) === normalizedEmail &&
+    String(row.Status).toUpperCase() === 'APPROVED' &&
+    String(row.DayOfWeek).toUpperCase() === dayName_(dateText)
+  );
+  if (!availability || !toBoolean_(availability.Available)) return null;
+  return normalizeDailyHours_(dateText, {
+    aideEmail: normalizedEmail,
+    startTime: availability.StartTime,
+    endTime: availability.EndTime,
+    lunchStartTime: '',
+    lunchMinutes: 0,
+    source: 'AVAILABILITY'
+  });
+}
+
+function normalizeDailyHours_(dateText, item) {
+  return {
+    date: dateText,
+    aideEmail: normalizeEmail_(item.aideEmail || item.AideEmail),
+    startTime: normalizeTime_(item.startTime || item.StartTime),
+    endTime: normalizeTime_(item.endTime || item.EndTime),
+    lunchStartTime: normalizeTime_(item.lunchStartTime || item.LunchStartTime),
+    lunchMinutes: toNumber_(item.lunchMinutes === undefined ? item.LunchMinutes : item.lunchMinutes),
+    source: item.source || 'DATE'
+  };
+}
+
+function shiftOverlapLabel_(hours, period) {
+  if (!hours || !period) return '';
+  const start = Math.max(timeToMinutes_(hours.startTime), timeToMinutes_(period.startTime || period.StartTime));
+  const end = Math.min(timeToMinutes_(hours.endTime), timeToMinutes_(period.endTime || period.EndTime));
+  if (start < 0 || end <= start) return '';
+  return minutesToTime_(start) + '–' + minutesToTime_(end);
+}
+
+function minutesToTime_(minutes) {
+  return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' +
+    String(minutes % 60).padStart(2, '0');
 }
 
 function countsAsScheduledAssignment_(assignment) {
   if (!assignment) return false;
-  if (String(assignment.type || '').toUpperCase() === 'OFF') return false;
-  if (String(assignment.duty || '').trim().toUpperCase() === 'OFF') return false;
-  return Boolean(assignment.classId || assignment.studentId ||
-    String(assignment.duty || '').trim() || String(assignment.note || '').trim());
+  const type = assignment.type === undefined ? assignment.Type : assignment.type;
+  const duty = assignment.duty === undefined ? assignment.Duty : assignment.duty;
+  const classId = assignment.classId === undefined ? assignment.ClassId : assignment.classId;
+  const studentId = assignment.studentId === undefined ? assignment.StudentId : assignment.studentId;
+  const note = assignment.note === undefined ? assignment.Note : assignment.note;
+  if (String(type || '').toUpperCase() === 'OFF') return false;
+  if (String(duty || '').trim().toUpperCase() === 'OFF') return false;
+  return Boolean(classId || studentId || String(duty || '').trim() || String(note || '').trim());
 }
 
 function publicAssignmentWithIndexes_(row, indexes) {
@@ -466,10 +543,9 @@ function getAideConflictFromIndexes_(email, dateText, period, indexes) {
     String(row.DayOfWeek).toUpperCase() === dayName_(dateText)
   );
   if (availability && !toBoolean_(availability.Available)) return 'Not available';
-  if (availability && period && (normalizeTime_(availability.StartTime) > period.startTime ||
-      normalizeTime_(availability.EndTime) < period.endTime)) {
-    return 'Outside approved hours';
-  }
+  const hours = getEffectiveDailyHoursFromIndexes_(dateText, email, indexes);
+  if (!hours) return 'Shift hours are not configured for this date';
+  if (period && !shiftOverlapLabel_(hours, period)) return 'Outside shift hours';
   const pendingAvailability = indexes.availability.find(row =>
     normalizeEmail_(row.AideEmail) === normalizeEmail_(email) &&
     String(row.Status).toUpperCase() === 'PENDING' &&
@@ -533,38 +609,12 @@ function getAllClasses_() {
 function saveSchedule(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
-  assertRequired_(payload, ['date', 'name', 'periods', 'assignments']);
+  assertRequired_(payload, ['date', 'name', 'periods', 'assignments', 'dailyHours']);
   if (!Array.isArray(payload.periods) || !payload.periods.length) throw new Error('At least one period is required.');
   if (!Array.isArray(payload.assignments)) throw new Error('Assignments must be a list.');
-
-  const existing = findOne_('DaySchedules', row =>
-    String(row.Id) === String(payload.id) ||
-    (formatDate_(row.Date) === payload.date && row.Status === 'ACTIVE')
-  );
-  const dayScheduleId = existing ? existing.Id : uuid_();
-  if (existing) {
-    updateRow_('DaySchedules', existing._row, {
-      Date: payload.date,
-      Name: sanitizeText_(payload.name, 150),
-      BaseScheduleTypeId: payload.baseScheduleTypeId || '',
-      Temporary: payload.temporary === undefined ? true : Boolean(payload.temporary),
-      Status: 'ACTIVE',
-      CreatedBy: staff.Email
-    });
-  } else {
-    appendRow_('DaySchedules', {
-      Id: dayScheduleId,
-      Date: payload.date,
-      Name: sanitizeText_(payload.name, 150),
-      BaseScheduleTypeId: payload.baseScheduleTypeId || '',
-      Temporary: payload.temporary === undefined ? true : Boolean(payload.temporary),
-      Status: 'ACTIVE',
-      CreatedBy: staff.Email
-    });
-  }
-
+  if (!Array.isArray(payload.dailyHours)) throw new Error('Daily shift hours must be a list.');
   const periods = payload.periods.map((period, index) => ({
-    ScheduleTypeId: dayScheduleId,
+    ScheduleTypeId: '',
     PeriodId: sanitizeText_(period.periodId || ('CUSTOM_' + (index + 1)), 100),
     Label: sanitizeText_(period.label || ('Period ' + (index + 1)), 100),
     StartTime: normalizeTime_(period.startTime),
@@ -572,24 +622,33 @@ function saveSchedule(payload) {
     SortOrder: index + 1
   }));
   validatePeriods_(periods);
-  replaceRows_('SchedulePeriods', row => String(row.ScheduleTypeId) === String(dayScheduleId), periods);
-
-  const warnings = [];
-  const periodIndex = periods.reduce((map, period) => {
-    map[String(period.PeriodId)] = period;
-    return map;
-  }, {});
+  const periodIds = new Set(periods.map(period => String(period.PeriodId)));
+  const aideEmails = new Set(activeRows_('Staff')
+    .filter(row => row.Role === VOICES.ROLES.AIDE)
+    .map(row => normalizeEmail_(row.Email)));
+  const classIds = new Set(activeRows_('Classes').map(row => String(row.Id)));
+  const studentIds = new Set(activeRows_('Students').map(row => String(row.Id)));
   const assignments = payload.assignments.map(item => {
     assertRequired_(item, ['periodId', 'aideEmail']);
     const aideEmail = normalizeEmail_(item.aideEmail);
-    const conflict = getAideConflict_(aideEmail, payload.date, periodIndex[String(item.periodId)]);
-    if (conflict) warnings.push(aideEmail + ' · ' + item.periodId + ': ' + conflict);
+    if (!periodIds.has(String(item.periodId))) {
+      throw new Error('An assignment references an unavailable period.');
+    }
+    if (!aideEmails.has(aideEmail)) {
+      throw new Error('An assignment references an inactive or unknown aide.');
+    }
     const type = String(item.duty || '').trim().toUpperCase() === 'OFF'
       ? 'OFF'
       : sanitizeText_(item.type || (item.studentId ? 'ONE_TO_ONE' : 'STANDARD'), 50);
+    if (type !== 'OFF' && item.classId && !classIds.has(String(item.classId))) {
+      throw new Error('An assignment references an inactive or unknown class.');
+    }
+    if (type !== 'OFF' && item.studentId && !studentIds.has(String(item.studentId))) {
+      throw new Error('An assignment references an inactive or unknown student.');
+    }
     return {
       Id: item.id || uuid_(),
-      DayScheduleId: dayScheduleId,
+      DayScheduleId: '',
       Date: payload.date,
       PeriodId: sanitizeText_(item.periodId, 100),
       AideEmail: aideEmail,
@@ -601,8 +660,95 @@ function saveSchedule(payload) {
     };
   });
   validateUniqueAssignments_(assignments);
-  replaceRows_('Assignments', row => String(row.DayScheduleId) === String(dayScheduleId), assignments);
-  invalidateScheduleCache_();
+  const dailyHours = payload.dailyHours
+    .filter(item => item && (item.startTime || item.endTime))
+    .map(item => {
+      assertRequired_(item, ['aideEmail', 'startTime', 'endTime']);
+      const normalized = normalizeDailyHours_(payload.date, item);
+      if (!aideEmails.has(normalized.aideEmail)) {
+        throw new Error('Shift hours reference an inactive or unknown aide.');
+      }
+      const start = timeToMinutes_(normalized.startTime);
+      const end = timeToMinutes_(normalized.endTime);
+      if (start < 0 || end <= start) {
+        throw new Error(normalized.aideEmail + ' has invalid shift hours.');
+      }
+      if (normalized.lunchStartTime) {
+        const lunch = timeToMinutes_(normalized.lunchStartTime);
+        if (lunch < start || lunch + 30 > end) {
+          throw new Error(normalized.aideEmail + ' has a lunch outside the shift.');
+        }
+        normalized.lunchMinutes = 30;
+      } else {
+        normalized.lunchMinutes = 0;
+      }
+      return normalized;
+    });
+  validateScheduleAssignmentsForHours_(payload.date, assignments, periods, dailyHours);
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return { ok: false, code: 'WRITE_BUSY', message: 'The schedule is being updated. Retry without reloading.' };
+  }
+  let dayScheduleId = '';
+  let nextRevision = 1;
+  try {
+    const existing = findOne_('DaySchedules', row =>
+      String(row.Id) === String(payload.id) ||
+      (formatDate_(row.Date) === payload.date && row.Status === 'ACTIVE')
+    );
+    const currentRevision = existing ? Math.max(1, toNumber_(existing.Revision, 1)) : 0;
+    if (currentRevision !== toNumber_(payload.revision, 0)) {
+      return {
+        ok: false,
+        code: 'STALE_SCHEDULE',
+        message: 'This schedule changed after it was opened. Reload before saving.',
+        currentRevision: currentRevision
+      };
+    }
+    validateScheduleAssignmentsForHours_(payload.date, assignments, periods, dailyHours);
+    dayScheduleId = existing ? existing.Id : uuid_();
+    nextRevision = currentRevision + 1;
+    const scheduleRecord = {
+      Date: payload.date,
+      Name: sanitizeText_(payload.name, 150),
+      BaseScheduleTypeId: payload.baseScheduleTypeId || '',
+      Temporary: payload.temporary === undefined ? true : Boolean(payload.temporary),
+      Status: 'ACTIVE',
+      CreatedBy: existing ? existing.CreatedBy : staff.Email,
+      Revision: nextRevision,
+      UpdatedBy: staff.Email,
+      UpdatedAt: new Date()
+    };
+    if (existing) updateRow_('DaySchedules', existing._row, scheduleRecord);
+    else appendRow_('DaySchedules', Object.assign({ Id: dayScheduleId }, scheduleRecord));
+    periods.forEach(period => { period.ScheduleTypeId = dayScheduleId; });
+    assignments.forEach(item => { item.DayScheduleId = dayScheduleId; });
+    replaceRowsUnlocked_(
+      'SchedulePeriods',
+      row => String(row.ScheduleTypeId) === String(dayScheduleId),
+      periods
+    );
+    replaceRowsUnlocked_(
+      'Assignments',
+      row => String(row.DayScheduleId) === String(dayScheduleId),
+      assignments
+    );
+    replaceRowsUnlocked_('AideDailyHours', row => formatDate_(row.Date) === payload.date, dailyHours.map(item => ({
+      Id: uuid_(),
+      Date: payload.date,
+      AideEmail: item.aideEmail,
+      StartTime: item.startTime,
+      EndTime: item.endTime,
+      LunchStartTime: item.lunchStartTime,
+      LunchMinutes: item.lunchMinutes,
+      UpdatedBy: staff.Email,
+      UpdatedAt: new Date()
+    })));
+    invalidateScheduleCache_();
+  } finally {
+    lock.releaseLock();
+  }
   const unassigned = getUnassignedOneToOnes_(payload.date);
   if (!unassigned.length) {
     rows_('Notifications')
@@ -616,7 +762,8 @@ function saveSchedule(payload) {
   return {
     ok: true,
     id: dayScheduleId,
-    warnings: Array.from(new Set(warnings)),
+    revision: nextRevision,
+    warnings: [],
     unassignedOneToOnes: unassigned,
     weeklyHours: getWeeklyScheduleData_(payload.date).summary
   };
@@ -687,6 +834,7 @@ function getDaySchedule_(dateText) {
     .map(publicAssignment_);
   return {
     id: daySchedule ? daySchedule.Id : '',
+    revision: daySchedule ? Math.max(1, toNumber_(daySchedule.Revision, 1)) : 0,
     date: dateText,
     name: daySchedule ? daySchedule.Name : (useTemplate ? defaultType.Name : 'No schedule'),
     baseScheduleTypeId: daySchedule ? daySchedule.BaseScheduleTypeId : (useTemplate ? defaultType.Id : ''),
@@ -1024,12 +1172,9 @@ function getAideConflict_(email, dateText, period) {
     String(row.DayOfWeek).toUpperCase() === dayName_(dateText)
   );
   if (availability && !toBoolean_(availability.Available)) return 'Not available';
-  const startTime = period ? normalizeTime_(period.StartTime || period.startTime) : '';
-  const endTime = period ? normalizeTime_(period.EndTime || period.endTime) : '';
-  if (availability && period && (normalizeTime_(availability.StartTime) > startTime ||
-      normalizeTime_(availability.EndTime) < endTime)) {
-    return 'Outside approved hours';
-  }
+  const hours = getEffectiveDailyHours_(dateText, email);
+  if (!hours) return 'Shift hours are not configured for this date';
+  if (period && !shiftOverlapLabel_(hours, period)) return 'Outside shift hours';
   const pendingAvailability = rows_('Availability').find(row =>
     normalizeEmail_(row.AideEmail) === normalizeEmail_(email) &&
     String(row.Status).toUpperCase() === 'PENDING' &&
@@ -1083,6 +1228,39 @@ function validateUniqueAssignments_(assignments) {
     const key = item.PeriodId + '|' + normalizeEmail_(item.AideEmail);
     if (seen.has(key)) throw new Error('An aide can only have one assignment per period.');
     seen.add(key);
+  });
+}
+
+function validateScheduleAssignmentsForHours_(dateText, assignments, periods, dailyHours) {
+  const periodIndex = periods.reduce((map, period) => {
+    map[String(period.PeriodId)] = period;
+    return map;
+  }, {});
+  const hourIndex = {};
+  dailyHours.forEach(item => {
+    const email = normalizeEmail_(item.aideEmail);
+    if (hourIndex[email]) throw new Error('Only one shift can be configured per aide and date.');
+    hourIndex[email] = item;
+  });
+  const timeOff = rows_('TimeOffRequests');
+  assignments.filter(countsAsScheduledAssignment_).forEach(item => {
+    const email = normalizeEmail_(item.AideEmail);
+    const approvedTimeOff = timeOff.find(row =>
+      normalizeEmail_(row.AideEmail) === email &&
+      String(row.Status).toUpperCase() === 'APPROVED' &&
+      dateInRange_(dateText, row.StartDate, row.EndDate)
+    );
+    if (approvedTimeOff) {
+      throw new Error(email + ' has approved time off and cannot be assigned.');
+    }
+    const hours = hourIndex[email];
+    if (!hours) {
+      throw new Error('Set ' + email + ' shift hours before assigning coverage.');
+    }
+    const period = periodIndex[String(item.PeriodId)];
+    if (!period || !shiftOverlapLabel_(hours, period)) {
+      throw new Error(email + ' cannot be assigned to ' + item.PeriodId + ' outside shift hours.');
+    }
   });
 }
 

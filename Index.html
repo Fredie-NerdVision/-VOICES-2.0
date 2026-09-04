@@ -423,6 +423,10 @@
     }
     dialog.wide-dialog { width: min(1000px, calc(100vw - 30px)); }
     dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
+    dialog.dialog-fallback-open { display: block; position: fixed; z-index: 1002; inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
+    #dialogFallbackBackdrop { display: none; position: fixed; inset: 0; z-index: 1001; background: rgba(0,0,0,.76); backdrop-filter: blur(5px); }
+    body.dialog-open #dialogFallbackBackdrop { display: block; }
+    body.dialog-open > *:not(dialog):not(#dialogFallbackBackdrop):not(script) { pointer-events: none; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
     .empty { padding: 24px; text-align: center; color: var(--muted); }
     @media (max-width: 900px) {
@@ -441,6 +445,14 @@
       .welcome { max-width: 190px; }
       .card { padding: 16px; border-radius: 18px; }
       .toolbar { flex-wrap: wrap; }
+    }
+    @media print {
+      body * { visibility: hidden !important; }
+      #goalReportDialog, #goalReportDialog * { visibility: visible !important; }
+      #goalReportDialog { position: absolute; inset: 0; width: 100%; max-width: none; max-height: none; background: #fff; color: #111; border: 0; box-shadow: none; }
+      #goalReportDialog .no-print { display: none !important; }
+      #goalReportDialog .card, #goalReportDialog .message { background: #fff; color: #111; border-color: #bbb; break-inside: avoid; }
+      #goalReportDialog .muted { color: #444; }
     }
   </style>
 </head>
@@ -552,6 +564,45 @@
     <div id="benchmarkHistoryContent"></div>
   </dialog>
 
+  <dialog id="goalReportDialog" class="wide-dialog">
+    <div class="card-header no-print">
+      <div><div class="eyebrow">IEP meeting export</div><h2>Progress summary</h2></div>
+      <div class="toolbar"><button id="printGoalReport" class="btn primary small-btn" type="button">Print / Save as PDF</button><button class="btn ghost small-btn" type="button" onclick="closeDialog('goalReportDialog')">Close</button></div>
+    </div>
+    <div id="goalReportContent"></div>
+  </dialog>
+
+  <dialog id="bulkObservationDialog" class="wide-dialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk observations</h2></div>
+      <button class="btn ghost small-btn" type="button" onclick="closeDialog('bulkObservationDialog')">Close</button>
+    </div>
+    <p class="muted">Columns: BenchmarkId, ClassId, ObservationDate, Successes, Trials, PromptLevel, PromptCount, Notes. Include the header row; IDs must match exactly.</p>
+    <div class="field"><label for="bulkObservationText">Copied rows</label><textarea id="bulkObservationText" style="min-height:220px"></textarea></div>
+    <div id="bulkObservationPreview" class="list" style="margin-top:12px"></div>
+    <div class="dialog-actions"><button id="previewBulkObservations" class="btn ghost" type="button">Preview</button><button id="queueBulkObservations" class="btn primary" type="button" disabled>Add previewed rows to queue</button></div>
+  </dialog>
+
+  <dialog id="bulkGoalDialog" class="wide-dialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk goals and phases</h2></div>
+      <button class="btn ghost small-btn" type="button" onclick="closeDialog('bulkGoalDialog')">Close</button>
+    </div>
+    <p class="muted">Columns: GoalKey, StudentId, Goal, Domain, Status, StartDate, DueDate, SubjectIds, PhaseOrder, TaskDemand, TargetAccuracyPct, TargetPromptLevel, TargetPromptCount, TargetConsecutiveSessions, Active. Repeat GoalKey and goal fields for each phase; separate multiple subject IDs with commas.</p>
+    <div class="field"><label for="bulkGoalText">Copied rows</label><textarea id="bulkGoalText" style="min-height:240px"></textarea></div>
+    <div id="bulkGoalPreview" class="list" style="margin-top:12px"></div>
+    <div class="dialog-actions"><button id="previewBulkGoals" class="btn ghost" type="button">Preview</button><button id="saveBulkGoals" class="btn primary" type="button" disabled>Save previewed goals</button></div>
+  </dialog>
+
+  <div id="dialogFallbackBackdrop" aria-hidden="true"></div>
+  <dialog id="appDecisionDialog" role="dialog" aria-modal="true" aria-labelledby="appDecisionTitle" aria-describedby="appDecisionDescription">
+    <h2 id="appDecisionTitle">Confirm</h2>
+    <p id="appDecisionDescription" class="muted"></p>
+    <div id="appDecisionInputWrap" class="field" hidden><label id="appDecisionInputLabel" for="appDecisionInput">Value</label><input id="appDecisionInput"></div>
+    <label id="appDecisionCheckboxWrap" class="check" hidden><input id="appDecisionCheckbox" type="checkbox"><span id="appDecisionCheckboxLabel"></span></label>
+    <div class="dialog-actions"><button id="appDecisionCancel" class="btn ghost" type="button">Cancel</button><button id="appDecisionConfirm" class="btn primary" type="button">Confirm</button></div>
+  </dialog>
+
   <script>
     const state = {
       data: null,
@@ -561,6 +612,8 @@
       editingBenchmarkId: null,
       benchmarkStudentId: '',
       goalStudentId: '',
+      goalVisibility: {},
+      currentGoalWorkspace: null,
       goalWorkspaceCache: {},
       benchmarkEntryCache: {},
       parsedObjectives: [],
@@ -570,10 +623,17 @@
       lookupClassId: '',
       aideWeekDate: '',
       fullScheduleDate: '',
+      observationQueue: [],
+      observationBatchId: '',
       pendingOperations: 0
     };
 
     document.addEventListener('DOMContentLoaded', init);
+    window.addEventListener('beforeunload', event => {
+      if (!state.observationQueue.length) return;
+      event.preventDefault();
+      event.returnValue = '';
+    });
 
     async function init() {
       bindStaticForms();
@@ -752,10 +812,10 @@
           <article class="card desktop-cm-only">
             <div class="card-header"><div><div class="eyebrow">Student workspace</div><h2>Goal progress</h2></div></div>
             <div class="field"><label>Student</label><select id="goalStudent"><option value="">Choose student</option>${options(cm.students, 'id', 'name', state.goalStudentId)}</select></div>
-            <p class="muted small" style="margin:12px 0 0">Each colored line combines chronological entries from that annual goal’s three benchmarks.</p>
+            <p class="muted small" style="margin:12px 0 0">Goal lines can be hidden locally; phase annotations and prompt colors remain visible without reloading data.</p>
           </article>
           <article class="card span-2 desktop-cm-only">
-            <div class="card-header"><div><div class="eyebrow">Annual goals</div><h2>Progress over time</h2></div></div>
+            <div class="card-header"><div><div class="eyebrow">Annual goals</div><h2>Progress over time</h2></div><button class="btn ghost small-btn" id="openGoalReport" type="button">Progress summary</button></div>
             <div id="goalProgressChart" class="chart"><div class="empty">Choose a student to load goal progress.</div></div>
             <div id="goalLegend" class="goal-legend"></div>
           </article>
@@ -769,6 +829,7 @@
       if (!studentSelect) return;
       studentSelect.addEventListener('change', () => {
         state.goalStudentId = studentSelect.value;
+        state.goalVisibility = {};
         loadGoalWorkspace(state.goalStudentId);
       });
       if (state.goalStudentId) loadGoalWorkspace(state.goalStudentId);
@@ -822,6 +883,7 @@
         state.scheduleData.scheduleTypes = safeArray(state.scheduleData.scheduleTypes);
         state.scheduleData.training = safeArray(state.scheduleData.training);
         state.scheduleData.staffingStatus = safeArray(state.scheduleData.staffingStatus);
+        state.scheduleData.dailyHours = safeArray(state.scheduleData.dailyHours);
         state.scheduleData.unassignedOneToOnes = safeArray(state.scheduleData.unassignedOneToOnes);
         state.scheduleData.unavailable = safeArray(state.scheduleData.unavailable);
         state.scheduleData.schedule.periods = safeArray(state.scheduleData.schedule.periods);
@@ -976,6 +1038,7 @@
     function scheduleDraftChanged() {
       if (!state.scheduleData || !document.getElementById('scheduleTable')) return;
       state.scheduleData.schedule.assignments = collectScheduleAssignments();
+      collectScheduleDailyHours_();
       refreshScheduleCellStatusIndicators_();
       updateScheduleHeaderHours_();
       renderScheduleCoverageAssistant();
@@ -1050,6 +1113,30 @@
       table.querySelectorAll('.schedule-cell [data-field]').forEach(input => input.addEventListener('change', () => {
         scheduleDraftChanged();
       }));
+      table.querySelectorAll('[data-shift-field]').forEach(input => input.addEventListener('change', () => {
+        const hours = scheduleHoursForAide_(input.dataset.aideEmail, true);
+        hours[input.dataset.shiftField] = input.value;
+        scheduleDraftChanged();
+      }));
+      table.querySelectorAll('[data-lunch-check]').forEach(input => input.addEventListener('change', () => {
+        if (input.checked) {
+          table.querySelectorAll('[data-lunch-check]').forEach(other => {
+            if (other !== input && normalizeEmail(other.dataset.aideEmail) === normalizeEmail(input.dataset.aideEmail)) {
+              other.checked = false;
+            }
+          });
+          const time = input.closest('.schedule-cell').querySelector('[data-lunch-time]');
+          if (time && !time.value) {
+            const period = safeArray(state.scheduleData.schedule.periods)
+              .find(item => String(item.periodId) === String(input.closest('.schedule-cell').dataset.periodId));
+            time.value = period ? period.startTime : '';
+          }
+        }
+        scheduleDraftChanged();
+      }));
+      table.querySelectorAll('[data-lunch-time]').forEach(input =>
+        input.addEventListener('change', scheduleDraftChanged)
+      );
       table.querySelectorAll('[data-mark-aide-off]').forEach(button =>
         button.addEventListener('click', () => markScheduleAideOff_(button.dataset.markAideOff))
       );
@@ -1095,36 +1182,47 @@
         String(item.periodId) === String(period.periodId) && normalizeEmail(item.aideEmail) === normalizeEmail(aide.email)
       ) || {};
       const status = scheduleCellStatus(aide.email, period);
+      const blocked = status.blockingReason ? 'disabled' : '';
       const key = encodeURIComponent(period.periodId + '|' + aide.email);
       return `<td class="schedule-assignment-cell ${escapeAttr(status.level)}">
         <div class="schedule-cell" data-cell="${key}" data-period-id="${escapeAttr(period.periodId)}" data-aide-email="${escapeAttr(aide.email)}">
           ${status.blockingReason ? `<div class="schedule-cell-alert blocked">${escapeHtml(status.blockingReason)}</div>` : ''}
           ${!status.blockingReason && status.warningReason ? `<div class="schedule-cell-alert warning">${escapeHtml(status.warningReason)}</div>` : ''}
-          <select data-field="classId"><option value="">No class</option>${options(state.scheduleData.classes, 'id', 'name', assignment.classId)}</select>
-          <select data-field="studentId"><option value="">No 1:1</option>${options(state.scheduleData.oneToOneStudents, 'id', 'name', assignment.studentId)}</select>
-          <input data-field="duty" placeholder="Duty / OFF" value="${escapeAttr(assignment.duty || '')}">
-          <input data-field="note" placeholder="Note" value="${escapeAttr(assignment.note || '')}">
+          <select data-field="classId" ${blocked}><option value="">No class</option>${options(state.scheduleData.classes, 'id', 'name', assignment.classId)}</select>
+          <select data-field="studentId" ${blocked}><option value="">No 1:1</option>${options(state.scheduleData.oneToOneStudents, 'id', 'name', assignment.studentId)}</select>
+          <input data-field="duty" placeholder="Duty / OFF" value="${escapeAttr(assignment.duty || '')}" ${blocked}>
+          <input data-field="note" placeholder="Note" value="${escapeAttr(assignment.note || '')}" ${blocked}>
+          <label class="check small"><input type="checkbox" data-lunch-check data-aide-email="${escapeAttr(aide.email)}" ${scheduleLunchIsInPeriod_(aide.email, period) ? 'checked' : ''} ${blocked}> Lunch</label>
+          <input type="time" data-lunch-time value="${scheduleLunchIsInPeriod_(aide.email, period) ? escapeAttr(scheduleHoursForAide_(aide.email).lunchStartTime || '') : ''}" aria-label="Lunch start time" ${blocked}>
+          ${status.coveredTime ? `<div class="muted small">Covered ${escapeHtml(status.coveredTime)}</div>` : ''}
         </div>
       </td>`;
     }
 
     function renderScheduleAideHeader(aide) {
       const status = scheduleCellStatus(aide.email, null);
-      const hours = scheduleLiveHoursForAide_(aide.email, safeArray(state.scheduleData.schedule.assignments));
+      const shift = scheduleHoursForAide_(aide.email);
+      const hours = scheduleLiveHoursForAide_(aide.email);
       const availability = status.availabilityLabel
         ? `<div class="muted">${escapeHtml(status.availabilityLabel)}</div>`
         : '';
       const badge = status.blockingReason
         ? `<span class="chip status-denied">${escapeHtml(status.shortLabel)}</span>`
         : (status.warningReason ? `<span class="chip status-pending">Pending request</span>` : '');
-      return `<th>${escapeHtml(aide.displayName)}<div class="muted">${escapeHtml(aide.email)}</div><div class="schedule-header-hours" data-aide-hours="${escapeAttr(aide.email)}">${scheduleHeaderHoursMarkup_(hours)}</div>${availability}${badge}<button class="btn danger small-btn schedule-aide-off" type="button" data-mark-aide-off="${escapeAttr(aide.email)}" aria-label="Mark ${escapeAttr(aide.displayName)} off for all periods">Mark off</button></th>`;
+      return `<th>${escapeHtml(aide.displayName)}<div class="muted">${escapeHtml(aide.email)}</div>
+        <div class="form-grid"><div class="field"><label>Start</label><input type="time" data-shift-field="startTime" data-aide-email="${escapeAttr(aide.email)}" value="${escapeAttr(shift.startTime || '')}"></div><div class="field"><label>End</label><input type="time" data-shift-field="endTime" data-aide-email="${escapeAttr(aide.email)}" value="${escapeAttr(shift.endTime || '')}"></div></div>
+        <div class="schedule-header-hours" data-aide-hours="${escapeAttr(aide.email)}">${scheduleHeaderHoursMarkup_(hours)}</div>${availability}${badge}<button class="btn danger small-btn schedule-aide-off" type="button" data-mark-aide-off="${escapeAttr(aide.email)}" aria-label="Mark ${escapeAttr(aide.displayName)} off for all periods">Mark off</button></th>`;
     }
 
-    function markScheduleAideOff_(email) {
+    async function markScheduleAideOff_(email) {
       const aide = safeArray(state.scheduleData && state.scheduleData.aides)
         .find(item => normalizeEmail(item.email) === normalizeEmail(email));
       const displayName = aide ? aide.displayName : email;
-      if (!confirm(`Mark ${displayName} OFF for every period? Their class, 1:1, duty, and note assignments will be cleared from this draft.`)) return;
+      if (!await confirmDialog({
+        title: 'Mark aide off',
+        message: `Mark ${displayName} OFF for every period? Their class, 1:1, duty, and note assignments will be cleared from this draft.`,
+        confirmLabel: 'Mark off'
+      })) return;
       document.querySelectorAll('.schedule-cell').forEach(cell => {
         if (normalizeEmail(cell.dataset.aideEmail) !== normalizeEmail(email)) return;
         cell.querySelectorAll('[data-field]').forEach(input => {
@@ -1145,6 +1243,9 @@
           tableCell.classList.remove('blocked', 'warning', 'available');
           tableCell.classList.add(status.level);
         }
+        cell.querySelectorAll('[data-field], [data-lunch-check], [data-lunch-time]').forEach(input => {
+          input.disabled = Boolean(status.blockingReason);
+        });
         cell.querySelectorAll(':scope > .schedule-cell-alert').forEach(alert => alert.remove());
         if (status.blockingReason) {
           cell.insertAdjacentHTML('afterbegin', `<div class="schedule-cell-alert blocked">${escapeHtml(status.blockingReason)}</div>`);
@@ -1156,12 +1257,9 @@
 
     function updateScheduleHeaderHours_() {
       if (!state.scheduleData) return;
-      const assignments = document.getElementById('scheduleTable')
-        ? collectScheduleAssignments()
-        : safeArray(state.scheduleData.schedule.assignments);
       document.querySelectorAll('[data-aide-hours]').forEach(element => {
         element.innerHTML = scheduleHeaderHoursMarkup_(
-          scheduleLiveHoursForAide_(element.dataset.aideHours, assignments)
+          scheduleLiveHoursForAide_(element.dataset.aideHours)
         );
       });
     }
@@ -1171,32 +1269,56 @@
       return `Day ${roundClientHours(hours.dailyHours)} hrs · Week ${roundClientHours(hours.weeklyHours)}${capacity} hrs${hours.lunchDeducted ? '<div class="muted">0.5 hr lunch deducted</div>' : ''}`;
     }
 
-    function scheduleLiveHoursForAide_(email, assignments) {
-      const intervals = safeArray(assignments)
-        .filter(item => normalizeEmail(item.aideEmail) === normalizeEmail(email))
-        .filter(item => {
-          if (String(item.type || '').toUpperCase() === 'OFF') return false;
-          if (String(item.duty || '').trim().toUpperCase() === 'OFF') return false;
-          return Boolean(item.classId || item.studentId || String(item.duty || '').trim() || String(item.note || '').trim());
-        })
-        .map(item => {
-          const period = safeArray(state.scheduleData.schedule.periods)
-            .find(row => String(row.periodId) === String(item.periodId));
-          return period ? [scheduleTimeToMinutes_(period.startTime), scheduleTimeToMinutes_(period.endTime)] : null;
-        })
-        .filter(item => item && item[0] >= 0 && item[1] > item[0])
-        .sort((a, b) => a[0] - b[0]);
-      const merged = [];
-      intervals.forEach(interval => {
-        const current = merged[merged.length - 1];
-        if (current && interval[0] <= current[1]) current[1] = Math.max(current[1], interval[1]);
-        else merged.push(interval.slice());
+    function scheduleHoursForAide_(email, create) {
+      let hours = safeArray(state.scheduleData && state.scheduleData.dailyHours)
+        .find(item => normalizeEmail(item.aideEmail) === normalizeEmail(email));
+      if (!hours && create) {
+        hours = { aideEmail: email, startTime: '', endTime: '', lunchStartTime: '', lunchMinutes: 0, source: 'DATE' };
+        state.scheduleData.dailyHours.push(hours);
+      }
+      return hours || {};
+    }
+
+    function scheduleLunchIsInPeriod_(email, period) {
+      const lunch = scheduleTimeToMinutes_(scheduleHoursForAide_(email).lunchStartTime);
+      return lunch >= scheduleTimeToMinutes_(period.startTime) &&
+        lunch < scheduleTimeToMinutes_(period.endTime);
+    }
+
+    function collectScheduleDailyHours_() {
+      const values = safeArray(state.scheduleData.dailyHours).map(item => ({...item}));
+      document.querySelectorAll('[data-shift-field]').forEach(input => {
+        let item = values.find(row => normalizeEmail(row.aideEmail) === normalizeEmail(input.dataset.aideEmail));
+        if (!item) {
+          item = { aideEmail: input.dataset.aideEmail, startTime: '', endTime: '', lunchStartTime: '', lunchMinutes: 0 };
+          values.push(item);
+        }
+        item[input.dataset.shiftField] = input.value;
       });
-      const grossHours = roundClientHours(
-        merged.reduce((total, interval) => total + interval[1] - interval[0], 0) / 60
-      );
-      const lunchDeducted = grossHours > 5;
-      const dailyHours = roundClientHours(grossHours - (lunchDeducted ? .5 : 0));
+      values.forEach(item => {
+        item.lunchStartTime = '';
+        item.lunchMinutes = 0;
+      });
+      document.querySelectorAll('[data-lunch-check]:checked').forEach(input => {
+        const item = values.find(row => normalizeEmail(row.aideEmail) === normalizeEmail(input.dataset.aideEmail));
+        const time = input.closest('.schedule-cell').querySelector('[data-lunch-time]');
+        if (item) {
+          item.lunchStartTime = time ? time.value : '';
+          item.lunchMinutes = item.lunchStartTime ? 30 : 0;
+        }
+      });
+      state.scheduleData.dailyHours = values;
+      return values.filter(item => item.startTime || item.endTime);
+    }
+
+    function scheduleLiveHoursForAide_(email) {
+      const shift = scheduleHoursForAide_(email);
+      const start = scheduleTimeToMinutes_(shift.startTime);
+      const end = scheduleTimeToMinutes_(shift.endTime);
+      const lunchDeducted = Boolean(shift.lunchStartTime);
+      const dailyHours = start >= 0 && end > start
+        ? roundClientHours((end - start - (lunchDeducted ? 30 : 0)) / 60)
+        : 0;
       const summary = safeArray(state.scheduleData.week && state.scheduleData.week.summary && state.scheduleData.week.summary.aides)
         .find(item => normalizeEmail(item.email) === normalizeEmail(email)) || {};
       const priorDay = safeArray(summary.byDay)
@@ -1228,18 +1350,31 @@
       const staffing = safeArray(state.scheduleData && state.scheduleData.staffingStatus)
         .find(item => normalizeEmail(item.email) === normalizeEmail(email)) || {};
       const approvedAvailability = staffing.approvedAvailability || null;
+      const shift = scheduleHoursForAide_(email);
       let blockingReason = '';
       let warningReason = '';
       let shortLabel = '';
+      let coveredTime = '';
       if (staffing.approvedTimeOff) {
         blockingReason = 'Approved time off: ' + (staffing.approvedTimeOff.type || 'Time off');
         shortLabel = 'Time off';
       } else if (approvedAvailability && !approvedAvailability.available) {
         blockingReason = 'Not available';
         shortLabel = 'Unavailable';
-      } else if (period && approvedAvailability && approvedAvailability.available &&
-          (approvedAvailability.startTime > period.startTime || approvedAvailability.endTime < period.endTime)) {
-        blockingReason = `Outside approved hours (${approvedAvailability.startTime}–${approvedAvailability.endTime})`;
+      } else if (!shift.startTime || !shift.endTime) {
+        blockingReason = 'Set shift hours for this date';
+        shortLabel = 'Hours missing';
+      } else if (period) {
+        const overlapStart = Math.max(scheduleTimeToMinutes_(shift.startTime), scheduleTimeToMinutes_(period.startTime));
+        const overlapEnd = Math.min(scheduleTimeToMinutes_(shift.endTime), scheduleTimeToMinutes_(period.endTime));
+        if (overlapEnd <= overlapStart) {
+          blockingReason = `Outside shift hours (${shift.startTime}–${shift.endTime})`;
+          shortLabel = 'Outside hours';
+        } else {
+          coveredTime = scheduleMinutesToTime_(overlapStart) + '–' + scheduleMinutesToTime_(overlapEnd);
+        }
+      }
+      if (period && blockingReason && !shortLabel) {
         shortLabel = 'Outside hours';
       }
       if (staffing.pendingTimeOff) {
@@ -1252,10 +1387,16 @@
         blockingReason: blockingReason,
         warningReason: warningReason,
         shortLabel: shortLabel,
-        availabilityLabel: approvedAvailability && approvedAvailability.available
-          ? `Available ${approvedAvailability.startTime}–${approvedAvailability.endTime}`
+        coveredTime: coveredTime,
+        availabilityLabel: shift.startTime && shift.endTime
+          ? `Shift ${shift.startTime}–${shift.endTime}`
           : ''
       };
+    }
+
+    function scheduleMinutesToTime_(minutes) {
+      return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' +
+        String(minutes % 60).padStart(2, '0');
     }
 
     function renderScheduleCoverageAssistant() {
@@ -1266,6 +1407,7 @@
         ? collectScheduleAssignments()
         : safeArray(state.scheduleData.schedule.assignments);
       const conflicts = assignments
+        .filter(scheduleAssignmentCounts_)
         .map(assignment => {
           const period = safeArray(state.scheduleData.schedule.periods)
             .find(item => String(item.periodId) === String(assignment.periodId));
@@ -1274,6 +1416,7 @@
         })
         .filter(Boolean);
       const pending = assignments
+        .filter(scheduleAssignmentCounts_)
         .map(assignment => {
           const period = safeArray(state.scheduleData.schedule.periods)
             .find(item => String(item.periodId) === String(assignment.periodId));
@@ -1419,9 +1562,16 @@
           const details = overCapacity.map(item =>
             `${item.displayName}: ${item.assignedHours}/${item.capacityHours} hours`
           ).join('\n');
-          if (!confirm('This schedule places staff above weekly capacity:\n\n' + details + '\n\nSave anyway?')) return;
+          if (!await confirmDialog({
+            title: 'Weekly capacity exceeded',
+            message: 'This schedule places staff above weekly capacity:\n\n' + details,
+            confirmLabel: 'Save anyway'
+          })) return;
         }
         const result = await server('saveSchedule', payload);
+        if (!result || result.ok === false) {
+          throw new Error(result && result.message ? result.message : 'The schedule could not be saved.');
+        }
         const warnings = safeArray(result.warnings);
         toast(warnings.length ? 'Saved with warnings: ' + warnings.join(' ') : 'Schedule saved.');
         await loadScheduleBuilder();
@@ -1431,22 +1581,38 @@
     function currentSchedulePayload() {
       return {
         id: state.scheduleData.schedule.id,
+        revision: state.scheduleData.schedule.revision || 0,
         date: state.scheduleData.date,
         name: document.getElementById('scheduleName').value,
         baseScheduleTypeId: document.getElementById('scheduleBase').value,
         temporary: true,
         periods: state.scheduleData.schedule.periods,
-        assignments: collectScheduleAssignments()
+        assignments: collectScheduleAssignments(),
+        dailyHours: collectScheduleDailyHours_()
       };
     }
 
+    function scheduleAssignmentCounts_(item) {
+      if (!item) return false;
+      if (String(item.type || '').toUpperCase() === 'OFF') return false;
+      if (String(item.duty || '').trim().toUpperCase() === 'OFF') return false;
+      return Boolean(item.classId || item.studentId ||
+        String(item.duty || '').trim() || String(item.note || '').trim());
+    }
+
     async function saveCurrentAsScheduleType() {
-      const name = prompt('Name this reusable schedule type:');
-      if (!name) return;
+      const decision = await requestDialog({
+        title: 'Save schedule type',
+        message: 'Name this reusable schedule type.',
+        inputLabel: 'Schedule type name',
+        checkboxLabel: 'Make this the default when no daily schedule exists',
+        confirmLabel: 'Save type'
+      });
+      if (!decision.confirmed || !decision.value.trim()) return;
       try {
         await server('saveScheduleType', {
-          name,
-          isDefault: confirm('Make this the default schedule when no daily schedule exists?'),
+          name: decision.value.trim(),
+          isDefault: decision.checked,
           periods: state.scheduleData.schedule.periods,
           assignments: collectScheduleAssignments()
         });
@@ -1493,11 +1659,13 @@
         </article>
         <div class="master-detail">
           <article class="card desktop-cm-only">
-            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste the three benchmarks together. V.O.I.C.E.S detects each “Short-Term Objective” and its ratio.</p></div><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div>
+            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste any number of objectives, benchmarks, or phases. Review every parsed condition before saving.</p></div><div class="toolbar"><button id="openBulkGoals" class="btn ghost small-btn" type="button">Bulk paste</button><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div></div>
             <form id="goalForm" class="form-grid">
               <div class="field full"><label>Student</label><select name="studentId" required><option value="">Choose student</option>${options(students, 'id', 'name', state.benchmarkStudentId)}</select></div>
+              <div class="field"><label>Domain</label><select name="domain"><option value="">Not specified</option><option>Academic</option><option>Adaptive</option><option>Behavioral</option><option>Communication</option><option>Social/Emotional</option><option>Transition</option></select></div>
+              <div class="field"><label>Status</label><select name="status"><option value="ACTIVE">Active</option><option value="DRAFT">Draft</option></select></div>
               <div class="field full"><label>Annual IEP goal</label><textarea name="goal" placeholder="Describe the overall challenge the student should meet during the IEP year." required></textarea></div>
-              <div class="field full"><label>Three short-term benchmarks</label><textarea name="objectivesText" style="min-height:220px" placeholder="Short-Term Objective 1: Given ..., the student will ... in 4 out of 5 opportunities.&#10;&#10;Short-Term Objective 2: Given ..., the student will ... with 4/5 accuracy.&#10;&#10;Short-Term Objective 3: Given ..., the student will ... in 5 out of 5 trials." required></textarea></div>
+              <div class="field full"><label>Benchmarks / phases</label><textarea name="objectivesText" style="min-height:220px" placeholder="Phase 1: State home address with no more than 2 verbal prompts at 60% accuracy for 3 sessions.&#10;&#10;Phase 2: State address and phone number with 1 verbal prompt at 80% accuracy."></textarea><span class="muted small">May be blank for a draft goal with no phases.</span></div>
               <div class="field full">
                 <label>Relevant classes / subjects</label>
                 <div class="checks" style="margin-top:7px">${safeArray(state.data.subjects).map(subject => `
@@ -1508,7 +1676,7 @@
               </div>
               <div class="field"><label>Start date</label><input name="startDate" type="date" value="${escapeAttr(state.data.today)}"></div>
               <div class="field"><label>Due date</label><input name="dueDate" type="date"><span class="muted small">Blank uses one calendar year.</span></div>
-              <div class="field full"><div class="eyebrow">Parsed benchmark preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste three objectives to preview the benchmarks.</div></div></div>
+              <div class="field full"><div class="eyebrow">Editable phase preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste phases to preview them, or save a draft goal without phases.</div></div></div>
               <div class="field full"><button class="btn primary" type="submit">Create goal</button></div>
             </form>
           </article>
@@ -1530,6 +1698,7 @@
         </div>`;
       const form = document.getElementById('goalForm');
       if (!form) return;
+      document.getElementById('openBulkGoals').addEventListener('click', () => openDialog('bulkGoalDialog'));
       form.addEventListener('submit', saveGoalForm);
       form.elements.objectivesText.addEventListener('input', () => renderGoalObjectivePreview(form));
       form.elements.studentId.addEventListener('change', event => {
@@ -1541,7 +1710,11 @@
       });
       bindRefreshButtons(root);
       root.querySelectorAll('[data-deactivate-goal]').forEach(button => button.addEventListener('click', async () => {
-        if (!confirm('Deactivate this goal and all three benchmarks? Existing entries will remain.')) return;
+        if (!await confirmDialog({
+          title: 'Deactivate goal',
+          message: 'Deactivate this goal and all phases? Existing entries will remain.',
+          confirmLabel: 'Deactivate'
+        })) return;
         try {
           await server('deactivateGoal', button.dataset.deactivateGoal);
           await refreshGoalManagerData();
@@ -1561,11 +1734,21 @@
       payload.subjectIds = Array.from(
         event.currentTarget.querySelectorAll('[data-goal-subject]:checked')
       ).map(input => input.value);
-      payload.objectiveOverrides = state.parsedObjectives.map(item => ({
-        index: item.index,
-        text: event.currentTarget.querySelector(
-          `[data-objective-text="${item.index}"]`
-        ).value
+      payload.phases = Array.from(
+        event.currentTarget.querySelectorAll('[data-goal-phase]')
+      ).map((row, index) => ({
+        orderIndex: index + 1,
+        taskDemandDescription: row.querySelector('[data-phase-task]').value,
+        text: row.querySelector('[data-phase-task]').value,
+        targetAccuracyPct: row.querySelector('[data-phase-accuracy]').value,
+        targetPromptLevel: row.querySelector('[data-phase-prompt-level]').value,
+        targetPromptCount: row.querySelector('[data-phase-prompt-count]').value,
+        targetConsecutiveSessions: row.querySelector('[data-phase-consecutive]').value,
+        targetCorrect: row.dataset.targetCorrect || '',
+        targetAttempts: row.dataset.targetAttempts || '',
+        requiredTrials: row.dataset.requiredTrials || '',
+        totalTrials: row.dataset.totalTrials || '',
+        active: row.querySelector('[data-phase-active]').checked
       }));
       if (!payload.subjectIds.length) {
         return toast('Choose at least one relevant class or subject for the goal.', true);
@@ -1582,20 +1765,22 @@
 
     function parseGoalObjectivesClient(value) {
       const text = String(value || '').trim();
-      const marker = /short\s*[-–—]?\s*term\s+objective\b\s*[:\-–—]?\s*/gi;
+      if (!text) return [];
+      const marker = /(?:^|\n)\s*(?:short\s*[-–—]?\s*term\s+objective|benchmark|phase|objective)\b\s*(?:#?\s*\d+)?\s*[:\-–—]?\s*/gim;
       const matches = [];
       let match;
       while ((match = marker.exec(text)) !== null) {
         matches.push({ index: match.index, end: marker.lastIndex });
       }
-      if (!matches.length) throw new Error('Add three “Short-Term Objective” headings.');
-      if (matches.length !== 3) {
-        throw new Error('Each goal must contain exactly three short-term objectives.');
-      }
-      return matches.map((item, index) => {
-        const end = matches[index + 1] ? matches[index + 1].index : text.length;
-        const objective = text.slice(item.end, end).replace(/^[\s:;#\d.)\]-]+/, '').trim();
-        if (!objective) throw new Error(`Short-Term Objective ${index + 1} has no text.`);
+      const sections = matches.length
+        ? matches.map((item, index) => text.slice(
+          item.end,
+          matches[index + 1] ? matches[index + 1].index : text.length
+        ))
+        : [text];
+      return sections.map((section, index) => {
+        const objective = section.replace(/^[\s:;#\d.)\]-]+/, '').trim();
+        if (!objective) throw new Error(`Phase ${index + 1} has no task description.`);
         const ratios = [];
         const ratioPattern = /(\d+)\s*(?:\/|out\s+of)\s*(\d+)/gi;
         let ratio;
@@ -1603,18 +1788,40 @@
           const numerator = Number(ratio[1]);
           const denominator = Number(ratio[2]);
           if (denominator <= 0 || numerator < 0 || numerator > denominator) {
-            throw new Error(`Short-Term Objective ${index + 1} has an invalid ratio.`);
+            throw new Error(`Phase ${index + 1} has an invalid ratio.`);
           }
           ratios.push({ numerator, denominator });
         }
-        if (!ratios.length) {
-          throw new Error(`Short-Term Objective ${index + 1} needs a ratio such as 4/5 or 4 out of 5.`);
-        }
+        const percent = objective.match(/(\d+(?:\.\d+)?)\s*%/);
+        const promptLevel = /\bindependent(?:ly)?\b/i.test(objective) ? 'Independent'
+          : /\bverbal\b/i.test(objective) ? 'Verbal'
+          : /\b(?:gestural|visual)\b/i.test(objective) ? 'Gestural/Visual'
+          : /\bmodel(?:ing|led)?\b/i.test(objective) ? 'Model'
+          : /\bphysical\b/i.test(objective) ? 'Physical'
+          : '';
+        const promptMatches = Array.from(objective.matchAll(
+          /(?:no\s+more\s+than|maximum\s+of|up\s+to|with|using)?\s*(\d+)\s+(?:\w+\s+)?prompts?\b/gi
+        ));
+        const consecutive = objective.match(/(\d+)\s+consecutive\s+(?:sessions?|observations?)\b/i) ||
+          objective.match(/(?:for|across|in)\s+(\d+)\s+(?:sessions?|observations?)\b/i);
+        const targetAccuracyPct = percent
+          ? Number(percent[1])
+          : (ratios[0] ? Math.round(ratios[0].numerator / ratios[0].denominator * 1000) / 10 : '');
         return {
           index,
           text: objective,
-          metric: `${ratios[0].numerator}/${ratios[0].denominator}` +
-            (ratios[1] ? ` in ${ratios[1].numerator}/${ratios[1].denominator} trials` : '')
+          taskDemandDescription: objective,
+          targetAccuracyPct,
+          targetPromptLevel: promptLevel,
+          targetPromptCount: promptLevel === 'Independent'
+            ? 0
+            : (promptMatches.length ? Number(promptMatches[promptMatches.length - 1][1]) : ''),
+          targetConsecutiveSessions: consecutive ? Number(consecutive[1]) : '',
+          targetCorrect: ratios[0] ? ratios[0].numerator : '',
+          targetAttempts: ratios[0] ? ratios[0].denominator : '',
+          requiredTrials: ratios[1] ? ratios[1].numerator : '',
+          totalTrials: ratios[1] ? ratios[1].denominator : '',
+          metric: targetAccuracyPct === '' ? 'Targets incomplete' : `${targetAccuracyPct}%`
         };
       });
     }
@@ -1624,15 +1831,30 @@
       if (!root) return;
       try {
         state.parsedObjectives = parseGoalObjectivesClient(form.elements.objectivesText.value);
+        if (!state.parsedObjectives.length) {
+          root.innerHTML = '<div class="empty">No phases parsed. This goal will be saved as a draft unless phases are added.</div>';
+          return;
+        }
         root.innerHTML = state.parsedObjectives.map(item => `
-          <div class="objective-preview">
+          <div class="objective-preview" data-goal-phase
+            data-target-correct="${escapeAttr(item.targetCorrect)}"
+            data-target-attempts="${escapeAttr(item.targetAttempts)}"
+            data-required-trials="${escapeAttr(item.requiredTrials)}"
+            data-total-trials="${escapeAttr(item.totalTrials)}">
             <div class="row" style="justify-content:space-between">
-              <strong>Short-Term Objective ${item.index + 1}</strong>
+              <strong>Phase ${item.index + 1}</strong>
               <span class="chip">${escapeHtml(item.metric)}</span>
             </div>
             <div class="field">
-              <label>Benchmark text</label>
-              <textarea data-objective-text="${item.index}" style="min-height:120px">${escapeHtml(item.text)}</textarea>
+              <label>Task demand</label>
+              <textarea data-phase-task style="min-height:100px">${escapeHtml(item.taskDemandDescription)}</textarea>
+            </div>
+            <div class="form-grid">
+              <div class="field"><label>Target accuracy %</label><input data-phase-accuracy type="number" min="0" max="100" step="0.1" value="${escapeAttr(item.targetAccuracyPct)}"></div>
+              <div class="field"><label>Target prompt level</label><select data-phase-prompt-level><option value="">Not specified</option>${['Independent','Verbal','Gestural/Visual','Model','Physical'].map(level => `<option ${level === item.targetPromptLevel ? 'selected' : ''}>${escapeHtml(level)}</option>`).join('')}</select></div>
+              <div class="field"><label>Maximum prompt count</label><input data-phase-prompt-count type="number" min="0" step="1" value="${escapeAttr(item.targetPromptCount)}"></div>
+              <div class="field"><label>Consecutive sessions</label><input data-phase-consecutive type="number" min="1" step="1" value="${escapeAttr(item.targetConsecutiveSessions)}"></div>
+              <label class="check full"><input data-phase-active type="radio" name="activePhase" ${item.index === 0 ? 'checked' : ''}> Active phase</label>
             </div>
           </div>`).join('');
       } catch (error) {
@@ -1769,7 +1991,11 @@
       root.querySelectorAll('[data-edit-staff]').forEach(button => button.addEventListener('click', () => { state.editingStaffEmail = button.dataset.editStaff; renderPeople(root); }));
       root.querySelectorAll('[data-edit-student]').forEach(button => button.addEventListener('click', () => { state.editingStudentId = button.dataset.editStudent; renderPeople(root); }));
       root.querySelectorAll('[data-delete-staff]').forEach(button => button.addEventListener('click', async () => {
-        if (!confirm('Delete this staff member from the active whitelist?')) return;
+        if (!await confirmDialog({
+          title: 'Remove staff access',
+          message: 'Delete this staff member from the active whitelist?',
+          confirmLabel: 'Remove access'
+        })) return;
         try {
           await server('deleteStaff', button.dataset.deleteStaff);
           await refreshBootstrap('people');
@@ -1777,7 +2003,11 @@
         } catch (error) { toast(error.message, true); }
       }));
       root.querySelectorAll('[data-delete-student]').forEach(button => button.addEventListener('click', async () => {
-        if (!confirm('Deactivate this student? Benchmarks and history will remain.')) return;
+        if (!await confirmDialog({
+          title: 'Deactivate student',
+          message: 'Deactivate this student? Benchmarks and history will remain.',
+          confirmLabel: 'Deactivate'
+        })) return;
         try {
           await server('deleteStudent', button.dataset.deleteStudent);
           await refreshBootstrap('people');
@@ -1953,7 +2183,7 @@
       return `
         <div class="card-header">
           <div><div class="eyebrow">Primary workflow</div><h2>Benchmark lookup and input</h2><p class="muted">Your current assignment is selected when available. Choose another teacher and period to override it.</p></div>
-          <button class="btn ghost small-btn" type="button" data-refresh="${escapeAttr(state.selectedTab)}">Refresh</button>
+          <div class="toolbar"><button id="openBulkObservations" class="btn ghost small-btn" type="button">Bulk paste</button><button class="btn ghost small-btn" type="button" data-refresh="${escapeAttr(state.selectedTab)}">Refresh</button></div>
         </div>
         <div class="form-grid three">
           <div class="field"><label>Teacher</label><select id="lookupTeacher"><option value="">Select a teacher</option>${options(teachers, 'email', 'displayName', selectedTeacher)}</select></div>
@@ -1972,6 +2202,7 @@
       teacher.addEventListener('change', () => populateLookupPeriods(''));
       period.addEventListener('change', renderLookupStudents);
       button.addEventListener('click', lookupBenchmarks);
+      document.getElementById('openBulkObservations')?.addEventListener('click', () => openDialog('bulkObservationDialog'));
       bindRefreshButtons(document);
       populateLookupPeriods(state.lookupClassId);
     }
@@ -2029,7 +2260,9 @@
       const root = document.getElementById('benchmarkResults');
       if (!root) return;
       const results = safeArray(state.benchmarkResults);
-      root.innerHTML = results.length ? results.map(item => `
+      root.innerHTML = `
+        <div id="observationQueuePanel"></div>
+        ${results.length ? results.map(item => `
         <div class="benchmark-card" data-benchmark-card="${escapeAttr(item.id)}">
           <div>
             <div class="row">${item.critical ? '<span class="chip critical">Critical</span>' : ''}<span class="chip">${escapeHtml(item.subjectName)}</span></div>
@@ -2042,30 +2275,358 @@
             <input type="hidden" name="benchmarkId" value="${escapeAttr(item.id)}">
             <input type="hidden" name="classId" value="${escapeAttr(state.lookupClassId)}">
             <div class="score-grid">
-              <div class="field"><label>Correct</label><input name="correct" type="number" min="0" required></div>
-              <div class="field"><label>Questions</label><input name="attempts" type="number" min="1" required></div>
+              <div class="field"><label>Raw successes</label><div class="row"><button class="btn ghost small-btn" type="button" data-counter="correct" data-delta="-1">−</button><input name="correct" type="number" min="0" step="1" value="0" required><button class="btn ghost small-btn" type="button" data-counter="correct" data-delta="1">+</button></div></div>
+              <div class="field"><label>Raw trials</label><div class="row"><button class="btn ghost small-btn" type="button" data-counter="attempts" data-delta="-1">−</button><input name="attempts" type="number" min="1" step="1" value="1" required><button class="btn ghost small-btn" type="button" data-counter="attempts" data-delta="1">+</button></div></div>
             </div>
+            <div class="score-grid" style="margin-top:8px">
+              <div class="field"><label>Observation date</label><input name="observationDate" type="date" max="${escapeAttr(state.data.today)}" value="${escapeAttr(state.data.today)}" required></div>
+              <div class="field"><label>Prompt level used</label><select name="actualPromptLevel" required><option value="">Choose prompt</option>${['Independent','Verbal','Gestural/Visual','Model','Physical'].map(level => `<option>${escapeHtml(level)}</option>`).join('')}</select></div>
+            </div>
+            <div class="field" style="margin-top:8px"><label>Prompt count</label><input name="actualPromptCount" type="number" min="0" step="1" required></div>
             <div class="field" style="margin-top:8px"><label>Notes</label><input name="notes"></div>
-            <button class="btn primary" style="margin-top:10px;width:100%">Save input</button>
+            <button class="btn primary" style="margin-top:10px;width:100%">Add to observation queue</button>
           </form>
-        </div>`).join('') : '<div class="empty">No active benchmarks match this class subject and student selection.</div>';
-      root.querySelectorAll('.benchmark-entry-form').forEach(form => form.addEventListener('submit', async event => {
+        </div>`).join('') : '<div class="empty">No active benchmarks match this class subject and student selection.</div>'}`;
+      renderObservationQueue();
+      root.querySelectorAll('[data-counter]').forEach(button => button.addEventListener('click', () => {
+        adjustObservationCounter(button.closest('form'), button.dataset.counter, Number(button.dataset.delta));
+      }));
+      root.querySelectorAll('[name="actualPromptLevel"]').forEach(select => select.addEventListener('change', () => {
+        const count = select.closest('form').elements.actualPromptCount;
+        if (select.value === 'Independent') count.value = 0;
+      }));
+      root.querySelectorAll('.benchmark-entry-form').forEach(form => form.addEventListener('submit', event => {
         event.preventDefault();
         const payload = formObject(event.currentTarget);
         payload.correct = Number(payload.correct);
         payload.attempts = Number(payload.attempts);
-        try {
-          const result = await server('saveBenchmarkEntry', payload);
-          event.currentTarget.reset();
-          toast('Saved: ' + result.percent + '%');
-          const selectedClass = document.getElementById('lookupPeriod')?.value || '';
-          const selectedStudents = Array.from(document.querySelectorAll('#lookupStudents input:checked')).map(input => input.value);
-          if (selectedClass && selectedStudents.length) {
-            state.benchmarkResults = await server('lookupBenchmarks', { classId: selectedClass, studentIds: selectedStudents });
-            renderBenchmarkResults();
-          }
-        } catch (error) { toast(error.message, true); }
+        payload.actualPromptCount = Number(payload.actualPromptCount);
+        if (!Number.isInteger(payload.correct) || !Number.isInteger(payload.attempts) ||
+            payload.correct < 0 || payload.attempts <= 0 || payload.correct > payload.attempts) {
+          return toast('Successes must be between 0 and the total raw trials.', true);
+        }
+        if (!payload.actualPromptLevel || !Number.isInteger(payload.actualPromptCount) ||
+            payload.actualPromptCount < 0) {
+          return toast('Choose a prompt level and enter its prompt count.', true);
+        }
+        if (payload.actualPromptLevel === 'Independent' && payload.actualPromptCount !== 0) {
+          return toast('Independent observations must use a prompt count of 0.', true);
+        }
+        const benchmark = results.find(item => String(item.id) === String(payload.benchmarkId));
+        payload.localId = clientUuid();
+        payload.label = benchmark
+          ? `${benchmark.studentName} · ${benchmark.category}`
+          : payload.benchmarkId;
+        state.observationQueue.push(payload);
+        if (!state.observationBatchId) state.observationBatchId = clientUuid();
+        event.currentTarget.reset();
+        event.currentTarget.elements.correct.value = 0;
+        event.currentTarget.elements.attempts.value = 1;
+        event.currentTarget.elements.observationDate.value = state.data.today;
+        renderObservationQueue();
+        toast('Observation added to the queue.');
       }));
+    }
+
+    function adjustObservationCounter(form, field, delta) {
+      if (!form) return;
+      const correct = form.elements.correct;
+      const attempts = form.elements.attempts;
+      if (field === 'attempts') {
+        attempts.value = Math.max(1, Number(attempts.value || 1) + delta);
+        if (Number(correct.value || 0) > Number(attempts.value)) correct.value = attempts.value;
+      } else {
+        correct.value = Math.max(
+          0,
+          Math.min(Number(attempts.value || 1), Number(correct.value || 0) + delta)
+        );
+      }
+    }
+
+    function renderObservationQueue() {
+      const root = document.getElementById('observationQueuePanel');
+      if (!root) return;
+      const queue = state.observationQueue;
+      root.innerHTML = queue.length ? `
+        <div class="message">
+          <div class="card-header">
+            <div><strong>${queue.length} queued observation${queue.length === 1 ? '' : 's'}</strong><div class="muted small">The queue clears only after the server confirms the whole batch.</div></div>
+            <div class="row">
+              <button class="btn ghost small-btn" id="downloadObservationQueue" type="button">Download backup</button>
+              <button class="btn primary small-btn" id="saveObservationQueue" type="button">Save queue</button>
+            </div>
+          </div>
+          <div class="list">${queue.map((item, index) => `
+            <div class="row" style="justify-content:space-between">
+              <span>${escapeHtml(item.label)} · ${escapeHtml(String(item.correct))}/${escapeHtml(String(item.attempts))} · ${escapeHtml(item.actualPromptLevel)} ${escapeHtml(String(item.actualPromptCount))}</span>
+              <button class="btn ghost small-btn" type="button" data-remove-observation="${escapeAttr(item.localId)}">Remove</button>
+            </div>`).join('')}</div>
+        </div>` : '';
+      root.querySelectorAll('[data-remove-observation]').forEach(button => button.addEventListener('click', () => {
+        state.observationQueue = state.observationQueue.filter(item =>
+          item.localId !== button.dataset.removeObservation
+        );
+        if (!state.observationQueue.length) state.observationBatchId = '';
+        renderObservationQueue();
+      }));
+      document.getElementById('downloadObservationQueue')?.addEventListener(
+        'click',
+        downloadObservationQueue_
+      );
+      document.getElementById('saveObservationQueue')?.addEventListener('click', submitObservationQueue);
+    }
+
+    function downloadObservationQueue_() {
+      if (!state.observationQueue.length) return;
+      const fields = [
+        ['BenchmarkId', 'benchmarkId'],
+        ['ClassId', 'classId'],
+        ['ObservationDate', 'observationDate'],
+        ['Successes', 'correct'],
+        ['Trials', 'attempts'],
+        ['PromptLevel', 'actualPromptLevel'],
+        ['PromptCount', 'actualPromptCount'],
+        ['Notes', 'notes']
+      ];
+      const encode = value => String(value == null ? '' : value)
+        .replace(/[\t\r\n]+/g, ' ');
+      const rows = [
+        fields.map(field => field[0]).join('\t'),
+        ...state.observationQueue.map(item =>
+          fields.map(field => encode(item[field[1]])).join('\t')
+        )
+      ];
+      const blob = new Blob([rows.join('\n')], { type: 'text/tab-separated-values' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'voices-unsaved-observations-' + state.data.today + '.tsv';
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+
+    async function submitObservationQueue() {
+      if (!state.observationQueue.length) return;
+      const entries = state.observationQueue.map(item => {
+        const copy = { ...item };
+        delete copy.localId;
+        delete copy.label;
+        return copy;
+      });
+      try {
+        let result = await server('saveBenchmarkEntriesBatch', {
+          submissionBatchId: state.observationBatchId,
+          entries
+        });
+        if (result.code === 'PHASE_DATE_CONFLICT') {
+          const useHistorical = await confirmDialog({
+            title: 'Observation date conflicts with active phase',
+            message: 'One or more observations belong to the phase active on their observation date. Use those historical phases?',
+            confirmLabel: 'Use historical phases',
+            cancelLabel: 'Change dates'
+          });
+          if (!useHistorical) return;
+          safeArray(result.conflicts).forEach(conflict => {
+            const item = entries[Number(conflict.row) - 1];
+            if (item) item.phaseDateResolution = 'USE_HISTORICAL_PHASE';
+          });
+          result = await server('saveBenchmarkEntriesBatch', {
+            submissionBatchId: state.observationBatchId,
+            entries
+          });
+        }
+        if (!result.ok) {
+          return toast(result.message || 'The observation queue could not be saved.', true);
+        }
+        const savedCount = state.observationQueue.length;
+        state.observationQueue = [];
+        state.observationBatchId = '';
+        toast(`${savedCount} observation${savedCount === 1 ? '' : 's'} saved.`);
+        const selectedClass = document.getElementById('lookupPeriod')?.value || '';
+        const selectedStudents = Array.from(
+          document.querySelectorAll('#lookupStudents input:checked')
+        ).map(input => input.value);
+        if (selectedClass && selectedStudents.length) {
+          state.benchmarkResults = await server('lookupBenchmarks', {
+            classId: selectedClass,
+            studentIds: selectedStudents
+          });
+          renderBenchmarkResults();
+        }
+      } catch (error) {
+        toast(`${error.message} Your observation queue is still intact.`, true);
+      }
+    }
+
+    function clientUuid() {
+      return globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : 'batch-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    }
+
+    function parseTabularRows_(text, columns) {
+      const lines = String(text || '').split(/\r?\n/).filter(line => line.trim());
+      if (lines.length < 2) throw new Error('Include a header row and at least one data row.');
+      const normalize = value => String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+      const headers = lines[0].split('\t').map(normalize);
+      const indexes = {};
+      columns.forEach(column => {
+        const index = headers.indexOf(normalize(column.header));
+        if (index < 0 && column.required) throw new Error('Missing required column: ' + column.header);
+        indexes[column.key] = index;
+      });
+      return lines.slice(1).map(line => {
+        const values = line.split('\t');
+        const row = {};
+        columns.forEach(column => {
+          row[column.key] = indexes[column.key] < 0 ? '' : String(values[indexes[column.key]] || '').trim();
+        });
+        return row;
+      });
+    }
+
+    function parseBulkObservationRows_() {
+      return parseTabularRows_(document.getElementById('bulkObservationText').value, [
+        { header: 'BenchmarkId', key: 'benchmarkId', required: true },
+        { header: 'ClassId', key: 'classId', required: true },
+        { header: 'ObservationDate', key: 'observationDate', required: true },
+        { header: 'Successes', key: 'correct', required: true },
+        { header: 'Trials', key: 'attempts', required: true },
+        { header: 'PromptLevel', key: 'actualPromptLevel', required: true },
+        { header: 'PromptCount', key: 'actualPromptCount', required: true },
+        { header: 'Notes', key: 'notes', required: false }
+      ]).map(row => ({
+        ...row,
+        correct: Number(row.correct),
+        attempts: Number(row.attempts),
+        actualPromptCount: Number(row.actualPromptCount)
+      }));
+    }
+
+    async function previewBulkObservations_() {
+      const root = document.getElementById('bulkObservationPreview');
+      const queueButton = document.getElementById('queueBulkObservations');
+      queueButton.disabled = true;
+      try {
+        const rows = parseBulkObservationRows_();
+        const result = await server('previewBenchmarkEntriesBatch', {
+          submissionBatchId: clientUuid(),
+          entries: rows
+        });
+        if (!result.ok) {
+          const issues = safeArray(result.errors).concat(safeArray(result.conflicts));
+          root.innerHTML = issues.map(issue => `<div class="list-item critical">Row ${escapeHtml(issue.row)}: ${escapeHtml(issue.message)}</div>`).join('') ||
+            `<div class="empty">${escapeHtml(result.message || 'Preview failed.')}</div>`;
+          return;
+        }
+        state.bulkObservationPreview = {
+          source: document.getElementById('bulkObservationText').value,
+          rows: rows
+        };
+        root.innerHTML = `<div class="message"><strong>${result.count} valid observation rows</strong><div class="muted small">Review the count before adding these rows to the unsaved queue.</div></div>` +
+          safeArray(result.rows).slice(0, 20).map(item => `<div class="list-item">Row ${item.row}: ${escapeHtml(item.studentId)} · ${escapeHtml(item.observationDate)} · ${escapeHtml(item.score)} · ${escapeHtml(item.prompt)}</div>`).join('') +
+          (result.count > 20 ? `<div class="muted small">Plus ${result.count - 20} more valid rows.</div>` : '');
+        queueButton.disabled = false;
+      } catch (error) {
+        root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    function queueBulkObservations_() {
+      const preview = state.bulkObservationPreview;
+      if (!preview || preview.source !== document.getElementById('bulkObservationText').value) {
+        return toast('Preview the current pasted rows before adding them.', true);
+      }
+      preview.rows.forEach(item => state.observationQueue.push({
+        ...item,
+        localId: clientUuid(),
+        label: item.benchmarkId
+      }));
+      if (!state.observationBatchId) state.observationBatchId = clientUuid();
+      closeDialog('bulkObservationDialog');
+      state.bulkObservationPreview = null;
+      document.getElementById('bulkObservationText').value = '';
+      document.getElementById('bulkObservationPreview').innerHTML = '';
+      document.getElementById('queueBulkObservations').disabled = true;
+      renderObservationQueue();
+      toast(`${preview.rows.length} observations added to the queue.`);
+    }
+
+    function parseBulkGoalRows_() {
+      return parseTabularRows_(document.getElementById('bulkGoalText').value, [
+        { header: 'GoalKey', key: 'goalKey', required: true },
+        { header: 'StudentId', key: 'studentId', required: true },
+        { header: 'Goal', key: 'goal', required: true },
+        { header: 'Domain', key: 'domain', required: false },
+        { header: 'Status', key: 'status', required: false },
+        { header: 'StartDate', key: 'startDate', required: false },
+        { header: 'DueDate', key: 'dueDate', required: false },
+        { header: 'SubjectIds', key: 'subjectIds', required: true },
+        { header: 'PhaseOrder', key: 'phaseOrder', required: false },
+        { header: 'TaskDemand', key: 'taskDemandDescription', required: false },
+        { header: 'TargetAccuracyPct', key: 'targetAccuracyPct', required: false },
+        { header: 'TargetPromptLevel', key: 'targetPromptLevel', required: false },
+        { header: 'TargetPromptCount', key: 'targetPromptCount', required: false },
+        { header: 'TargetConsecutiveSessions', key: 'targetConsecutiveSessions', required: false },
+        { header: 'Active', key: 'active', required: false }
+      ]);
+    }
+
+    async function previewBulkGoals_() {
+      const root = document.getElementById('bulkGoalPreview');
+      const saveButton = document.getElementById('saveBulkGoals');
+      saveButton.disabled = true;
+      try {
+        const rows = parseBulkGoalRows_();
+        const result = await server('previewBulkGoals', { rows });
+        if (!result.ok) {
+          root.innerHTML = safeArray(result.errors).map(issue =>
+            `<div class="list-item critical">${issue.row ? 'Row ' + escapeHtml(issue.row) + ': ' : ''}${escapeHtml(issue.message)}</div>`
+          ).join('');
+          return;
+        }
+        state.bulkGoalPreview = {
+          source: document.getElementById('bulkGoalText').value,
+          rows: rows
+        };
+        root.innerHTML = `<div class="message"><strong>${result.goalCount} goals and ${result.phaseCount} phases are valid</strong><div class="muted small">Nothing has been saved yet.</div></div>` +
+          safeArray(result.goals).map(goal => `<div class="list-item"><strong>${escapeHtml(goal.goalKey)}</strong> · ${escapeHtml(goal.studentId)} · ${goal.phases.length} phase${goal.phases.length === 1 ? '' : 's'}<div class="muted small">${escapeHtml(goal.goal)}</div></div>`).join('');
+        saveButton.disabled = false;
+      } catch (error) {
+        root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function saveBulkGoals_() {
+      const preview = state.bulkGoalPreview;
+      if (!preview || preview.source !== document.getElementById('bulkGoalText').value) {
+        return toast('Preview the current pasted rows before saving them.', true);
+      }
+      closeDialog('bulkGoalDialog');
+      const approved = await confirmDialog({
+        title: 'Save bulk goals',
+        message: 'Save every goal and phase in the validated preview?',
+        confirmLabel: 'Save all'
+      });
+      if (!approved) {
+        openDialog('bulkGoalDialog');
+        return;
+      }
+      try {
+        const result = await server('saveBulkGoals', { rows: preview.rows });
+        if (!result.ok) {
+          openDialog('bulkGoalDialog');
+          return toast(result.message || 'Bulk goal import failed.', true);
+        }
+        state.bulkGoalPreview = null;
+        document.getElementById('bulkGoalText').value = '';
+        document.getElementById('bulkGoalPreview').innerHTML = '';
+        document.getElementById('saveBulkGoals').disabled = true;
+        await refreshGoalManagerData();
+        toast(`${result.goalCount} goals and ${result.phaseCount} phases saved.`);
+      } catch (error) {
+        openDialog('bulkGoalDialog');
+        toast(error.message, true);
+      }
     }
 
     async function toggleClock() {
@@ -2156,6 +2717,10 @@
 
     function bindStaticForms() {
       document.getElementById('refreshFullSchedule').addEventListener('click', showWeeklySchedule);
+      document.getElementById('previewBulkObservations').addEventListener('click', previewBulkObservations_);
+      document.getElementById('queueBulkObservations').addEventListener('click', queueBulkObservations_);
+      document.getElementById('previewBulkGoals').addEventListener('click', previewBulkGoals_);
+      document.getElementById('saveBulkGoals').addEventListener('click', saveBulkGoals_);
       document.getElementById('callOffForm').addEventListener('submit', async event => {
         event.preventDefault();
         const payload = formObject(event.currentTarget);
@@ -2275,7 +2840,11 @@
       const chart = document.getElementById('goalProgressChart');
       const legend = document.getElementById('goalLegend');
       if (!workspace || !chart || !legend) return;
+      state.currentGoalWorkspace = data;
       renderGoalProgressChart(goals, chart, legend);
+      document.getElementById('openGoalReport')?.addEventListener('click', () =>
+        openGoalProgressReport(data)
+      );
       workspace.innerHTML = goals.length ? goals.map((goal, goalIndex) => {
         const metrics = goal.metrics || {};
         const benchmarks = safeArray(goal.benchmarks);
@@ -2294,6 +2863,8 @@
               <span class="chip">Average ${metrics.averagePercent == null ? '—' : escapeHtml(String(metrics.averagePercent)) + '%'}</span>
               <span class="chip">${escapeHtml(String(metrics.entryCount || 0))} entries</span>
               <span class="chip">Trend ${metrics.trend == null ? '—' : (metrics.trend > 0 ? '+' : '') + escapeHtml(String(metrics.trend)) + '%'}</span>
+              <span class="chip">Current phase last 3 ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
+              <span class="chip">Highest independence ${metrics.highestIndependence ? escapeHtml(metrics.highestIndependence.promptLevel + ' · ' + metrics.highestIndependence.promptCount + ' prompts') : '—'}</span>
             </div>
             <div class="toolbar">
               <button class="btn ${goal.critical ? 'ghost' : 'danger'} small-btn" data-goal-critical="${escapeAttr(goal.id)}" data-critical="${goal.critical ? 'false' : 'true'}">${goal.critical ? 'Remove critical status' : 'Mark goal critical'}</button>
@@ -2351,27 +2922,95 @@
       }));
     }
 
+    function openGoalProgressReport(data) {
+      const content = document.getElementById('goalReportContent');
+      if (!content) return;
+      const goals = safeArray(data && data.goals);
+      content.innerHTML = `
+        <article class="card">
+          <div class="eyebrow">V.O.I.C.E.S 2.0 progress summary</div>
+          <h1>${escapeHtml(data.student ? data.student.name : 'Student')}</h1>
+          <p class="muted">Generated ${escapeHtml(new Date().toLocaleDateString())}</p>
+        </article>
+        ${goals.map((goal, index) => {
+          const metrics = goal.metrics || {};
+          return `<article class="card">
+            <div class="eyebrow">Goal ${index + 1}${goal.domain ? ' · ' + escapeHtml(goal.domain) : ''}</div>
+            <h2>${escapeHtml(goal.goal)}</h2>
+            <div class="checks">
+              <span class="chip">Current phase: ${escapeHtml(metrics.currentPhase || 'Not selected')}</span>
+              <span class="chip">Latest 3 combined: ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
+              <span class="chip">Current-phase trials: ${escapeHtml(String(metrics.currentPhaseTrialCount || 0))}</span>
+              <span class="chip">Highest independence: ${metrics.highestIndependence ? escapeHtml(metrics.highestIndependence.promptLevel + ' · ' + metrics.highestIndependence.promptCount + ' prompts') : '—'}</span>
+            </div>
+            <div class="list" style="margin-top:14px">${safeArray(goal.progressStatements).length
+              ? goal.progressStatements.map(item => `<div class="message">${escapeHtml(item.statement)}</div>`).join('')
+              : '<div class="empty">No observations in this report range.</div>'}</div>
+          </article>`;
+        }).join('')}
+        <article class="card">
+          <div class="eyebrow">Phase-line graph</div>
+          <div id="goalReportLegend" class="legend"></div>
+          <div id="goalReportChart" class="chart"></div>
+        </article>`;
+      renderGoalProgressChart(
+        goals,
+        document.getElementById('goalReportChart'),
+        document.getElementById('goalReportLegend')
+      );
+      document.getElementById('printGoalReport').onclick = () => window.print();
+      openDialog('goalReportDialog');
+    }
+
     function renderGoalProgressChart(goals, chart, legend) {
       const colors = ['#ff453a', '#64d2ff', '#ffd60a', '#bf5af2', '#30d158', '#ff9f0a', '#5e5ce6', '#ff375f'];
+      const promptColors = {
+        Independent: '#30d158',
+        Verbal: '#64d2ff',
+        'Gestural/Visual': '#ffd60a',
+        Model: '#bf5af2',
+        Physical: '#ff453a'
+      };
+      goals.forEach(goal => {
+        if (state.goalVisibility[goal.id] === undefined) state.goalVisibility[goal.id] = true;
+      });
       const series = goals.map((goal, index) => ({
         goal,
         color: colors[index % colors.length],
         points: safeArray(goal.points).map(point => ({
           ...point,
-          time: new Date(point.timestamp).getTime()
+          time: new Date((point.observationDate || point.timestamp) + (
+            point.observationDate ? 'T12:00:00' : ''
+          )).getTime()
         })).filter(point => Number.isFinite(point.time))
-      }));
+      })).filter(item => state.goalVisibility[item.goal.id]);
       const allPoints = series.flatMap(item => item.points);
-      legend.innerHTML = series.map((item, index) => `
+      legend.innerHTML = `
+        <div class="toolbar"><button class="btn ghost small-btn" type="button" data-show-all-goals>Show all</button></div>
+        ${goals.map((goal, index) => `
         <span class="goal-legend-item">
-          <span class="goal-legend-dot" style="background:${item.color}"></span>
-          Goal ${index + 1}: ${escapeHtml(item.goal.goal)}
-        </span>`).join('');
+          <input type="checkbox" data-goal-visibility="${escapeAttr(goal.id)}" ${state.goalVisibility[goal.id] ? 'checked' : ''} aria-label="Show Goal ${index + 1}">
+          <span class="goal-legend-dot" style="background:${colors[index % colors.length]}"></span>
+          Goal ${index + 1}: ${escapeHtml(goal.goal)}
+          <button class="btn ghost small-btn" type="button" data-show-only-goal="${escapeAttr(goal.id)}">Only</button>
+        </span>`).join('')}`;
+      legend.querySelectorAll('[data-goal-visibility]').forEach(input => input.addEventListener('change', () => {
+        state.goalVisibility[input.dataset.goalVisibility] = input.checked;
+        renderGoalProgressChart(goals, chart, legend);
+      }));
+      legend.querySelectorAll('[data-show-only-goal]').forEach(button => button.addEventListener('click', () => {
+        goals.forEach(goal => { state.goalVisibility[goal.id] = goal.id === button.dataset.showOnlyGoal; });
+        renderGoalProgressChart(goals, chart, legend);
+      }));
+      legend.querySelector('[data-show-all-goals]')?.addEventListener('click', () => {
+        goals.forEach(goal => { state.goalVisibility[goal.id] = true; });
+        renderGoalProgressChart(goals, chart, legend);
+      });
       if (!allPoints.length) {
-        chart.innerHTML = '<div class="empty">No entries have been recorded for this student’s goals.</div>';
+        chart.innerHTML = '<div class="empty">No visible goal has recorded entries.</div>';
         return;
       }
-      const width = 980, height = 340, left = 48, right = 24, top = 24, bottom = 62;
+      const width = 980, height = 390, left = 48, right = 24, top = 72, bottom = 62;
       const plotBottom = height - bottom;
       const minTime = Math.min(...allPoints.map(point => point.time));
       const maxTime = Math.max(...allPoints.map(point => point.time));
@@ -2385,12 +3024,48 @@
       const dateTicks = Array.from({ length: 5 }, (_, index) =>
         minTime + (maxTime - minTime) * (index / 4)
       );
+      const phaseAnnotations = series.map(item => {
+        const benchmarks = safeArray(item.goal.benchmarks);
+        return safeArray(item.goal.phaseHistory)
+          .slice()
+          .sort((a, b) =>
+            String(a.activatedAt).localeCompare(String(b.activatedAt)) ||
+            Number(a.orderIndex || 0) - Number(b.orderIndex || 0)
+          )
+          .map(history => {
+            const benchmark = benchmarks.find(row =>
+              String(row.id) === String(history.benchmarkId)
+            );
+            if (!benchmark || !history.activatedAt) return '';
+            const startTime = new Date(history.activatedAt + 'T12:00:00').getTime();
+            if (!Number.isFinite(startTime) || startTime > maxTime) return '';
+            const endTime = history.endedAt
+              ? Math.min(maxTime, new Date(history.endedAt + 'T12:00:00').getTime())
+              : maxTime;
+            const lineX = x(Math.max(minTime, startTime));
+            const target = benchmark.targetAccuracyPct === null ||
+              benchmark.targetAccuracyPct === '' ||
+              benchmark.targetAccuracyPct === undefined
+              ? null
+              : Number(benchmark.targetAccuracyPct);
+            const targetLine = target !== null && Number.isFinite(target)
+              ? `<line x1="${lineX}" y1="${y(target)}" x2="${x(Math.max(startTime, endTime))}" y2="${y(target)}" stroke="${item.color}" stroke-width="2" stroke-dasharray="9 6" opacity=".75"/>`
+              : '';
+            return `<line x1="${lineX}" y1="${top}" x2="${lineX}" y2="${plotBottom}" stroke="${item.color}" stroke-width="2" stroke-dasharray="5 5" opacity=".8"/>
+              <text x="${lineX + 4}" y="${36 + (Number(history.orderIndex || 1) % 3) * 11}" fill="${item.color}" font-size="10">Phase ${escapeHtml(String(history.orderIndex || ''))}: ${escapeHtml(String(benchmark.taskDemandDescription || '').slice(0, 34))}</text>
+              ${targetLine}`;
+          }).join('');
+      }).join('');
       chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Annual goal progress line chart">
         ${grid}
+        ${phaseAnnotations}
         ${series.map(item => {
-          const line = item.points.map(point => `${x(point.time)},${y(point.percent)}`).join(' ');
+          const ordered = item.points.slice().sort((a, b) =>
+            a.time - b.time || Number(a.phaseOrder || 0) - Number(b.phaseOrder || 0)
+          );
+          const line = ordered.map(point => `${x(point.time)},${y(point.percent)}`).join(' ');
           return `<polyline points="${line}" fill="none" stroke="${item.color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            ${item.points.map(point => `<circle cx="${x(point.time)}" cy="${y(point.percent)}" r="4" fill="#111318" stroke="${item.color}" stroke-width="3"><title>${escapeHtml(formatChartDate(point.timestamp))}: ${escapeHtml(String(point.percent))}%</title></circle>`).join('')}`;
+            ${ordered.map(point => `<circle cx="${x(point.time)}" cy="${y(point.percent)}" r="5" fill="${promptColors[point.actualPromptLevel] || '#111318'}" stroke="${item.color}" stroke-width="3"><title>${escapeHtml(formatChartDate(point.observationDate || point.timestamp))}: ${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))} · ${escapeHtml(String(point.percent))}% · ${escapeHtml(point.actualPromptLevel || 'Prompt not recorded')}${point.actualPromptCount == null ? '' : ' · ' + escapeHtml(String(point.actualPromptCount)) + ' prompts'} · ${escapeHtml(point.benchmark || '')} · ${escapeHtml(point.staffEmail || '')}</title></circle>`).join('')}`;
         }).join('')}
         ${dateTicks.map((time, index) => `<text x="${x(time)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="${index === 0 ? 'start' : index === 4 ? 'end' : 'middle'}">${escapeHtml(formatChartDate(new Date(time).toISOString()))}</text>`).join('')}
       </svg>`;
@@ -2400,7 +3075,7 @@
       const dialog = document.getElementById('benchmarkHistoryDialog');
       const content = document.getElementById('benchmarkHistoryContent');
       content.innerHTML = '<div class="empty">Loading entries…</div>';
-      dialog.showModal();
+      openDialog('benchmarkHistoryDialog');
       try {
         const data = state.benchmarkEntryCache[benchmarkId] ||
           await server('getBenchmarkEntryDetails', benchmarkId);
@@ -2561,7 +3236,12 @@
     function showFatal(error) {
       const root = document.getElementById('fatalError');
       root.classList.remove('hidden');
-      root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p><p class="muted">Ask a case manager or the Apps Script owner to confirm database setup, deployment access, and the Staff whitelist.</p>`;
+      const chooser = 'https://accounts.google.com/AccountChooser?continue=' +
+        encodeURIComponent(window.location.href);
+      root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p>
+        <p class="muted">Google Apps Script cannot reliably select among multiple signed-in accounts. Choose your hbuhsd.edu account below, or open this page in a private window signed into only that account.</p>
+        <div class="toolbar"><a class="btn primary" href="${escapeAttr(chooser)}">Choose school Google account</a></div>
+        <p class="muted small">If the school account is already active, ask a case manager or the Apps Script owner to confirm deployment access and the Staff whitelist.</p>`;
     }
 
     function safeArray(value) { return Array.isArray(value) ? value : []; }
@@ -2629,13 +3309,157 @@
       });
     }
 
+    function requestDialog(options) {
+      options = options || {};
+      const dialog = document.getElementById('appDecisionDialog');
+      const title = document.getElementById('appDecisionTitle');
+      const description = document.getElementById('appDecisionDescription');
+      const inputWrap = document.getElementById('appDecisionInputWrap');
+      const inputLabel = document.getElementById('appDecisionInputLabel');
+      const input = document.getElementById('appDecisionInput');
+      const checkboxWrap = document.getElementById('appDecisionCheckboxWrap');
+      const checkboxLabel = document.getElementById('appDecisionCheckboxLabel');
+      const checkbox = document.getElementById('appDecisionCheckbox');
+      const cancel = document.getElementById('appDecisionCancel');
+      const confirm = document.getElementById('appDecisionConfirm');
+      title.textContent = options.title || 'Confirm';
+      description.textContent = options.message || '';
+      description.style.whiteSpace = 'pre-line';
+      inputWrap.hidden = !options.inputLabel;
+      inputLabel.textContent = options.inputLabel || 'Value';
+      input.value = options.value || '';
+      checkboxWrap.hidden = !options.checkboxLabel;
+      checkboxLabel.textContent = options.checkboxLabel || '';
+      checkbox.checked = Boolean(options.checked);
+      cancel.textContent = options.cancelLabel || 'Cancel';
+      confirm.textContent = options.confirmLabel || 'Confirm';
+      cancel.hidden = options.cancellable === false;
+      return new Promise(resolve => {
+        let settled = false;
+        const settle = confirmed => {
+          if (settled) return;
+          settled = true;
+          closeAccessibleDialog_(dialog);
+          resolve({ confirmed, value: input.value, checked: checkbox.checked });
+        };
+        cancel.onclick = () => settle(false);
+        confirm.onclick = () => settle(true);
+        input.onkeydown = event => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            settle(true);
+          }
+        };
+        dialog._onAccessibleCancel = () => settle(false);
+        showAccessibleDialog_(dialog, { cancellable: options.cancellable !== false });
+        requestAnimationFrame(() => (options.inputLabel ? input : confirm).focus());
+      });
+    }
+
+    async function confirmDialog(options) {
+      const result = await requestDialog(options);
+      return result.confirmed;
+    }
+
+    function showAccessibleDialog_(dialog, options) {
+      if (!dialog) return;
+      options = options || {};
+      const title = dialog.querySelector('h1, h2, [data-dialog-title]');
+      if (title) {
+        if (!title.id) title.id = dialog.id + 'Title';
+        dialog.setAttribute('aria-labelledby', title.id);
+      }
+      const description = dialog.querySelector('p, [data-dialog-description]');
+      if (description) {
+        if (!description.id) description.id = dialog.id + 'Description';
+        dialog.setAttribute('aria-describedby', description.id);
+      }
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog._returnFocus = document.activeElement;
+      document.body.classList.add('dialog-open');
+      Array.from(document.body.children).forEach(element => {
+        if (element === dialog || element.id === 'dialogFallbackBackdrop' || element.tagName === 'SCRIPT') return;
+        element.dataset.dialogAriaHidden = element.getAttribute('aria-hidden') || '';
+        element.setAttribute('aria-hidden', 'true');
+        if ('inert' in element) element.inert = true;
+      });
+      const trap = event => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (options.cancellable !== false && dialog._onAccessibleCancel) dialog._onAccessibleCancel();
+          else if (options.cancellable !== false) closeAccessibleDialog_(dialog);
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = Array.from(dialog.querySelectorAll(
+          'button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )).filter(element => element.offsetParent !== null);
+        if (!focusable.length) {
+          event.preventDefault();
+          dialog.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      };
+      dialog._dialogTrap = trap;
+      dialog.addEventListener('keydown', trap);
+      const cancelHandler = event => {
+        event.preventDefault();
+        if (options.cancellable !== false && dialog._onAccessibleCancel) dialog._onAccessibleCancel();
+        else if (options.cancellable !== false) closeAccessibleDialog_(dialog);
+      };
+      dialog._dialogCancelHandler = cancelHandler;
+      dialog.addEventListener('cancel', cancelHandler);
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else {
+        dialog.setAttribute('open', '');
+        dialog.classList.add('dialog-fallback-open');
+      }
+    }
+
+    function closeAccessibleDialog_(dialog) {
+      if (!dialog) return;
+      if (dialog._dialogTrap) dialog.removeEventListener('keydown', dialog._dialogTrap);
+      if (dialog._dialogCancelHandler) {
+        dialog.removeEventListener('cancel', dialog._dialogCancelHandler);
+      }
+      dialog._dialogTrap = null;
+      dialog._dialogCancelHandler = null;
+      if (typeof dialog.close === 'function' && dialog.open) dialog.close();
+      else {
+        dialog.removeAttribute('open');
+        dialog.classList.remove('dialog-fallback-open');
+      }
+      document.body.classList.remove('dialog-open');
+      Array.from(document.body.children).forEach(element => {
+        if (!Object.prototype.hasOwnProperty.call(element.dataset, 'dialogAriaHidden')) return;
+        const prior = element.dataset.dialogAriaHidden;
+        if (prior) element.setAttribute('aria-hidden', prior);
+        else element.removeAttribute('aria-hidden');
+        delete element.dataset.dialogAriaHidden;
+        if ('inert' in element) element.inert = false;
+      });
+      const returnFocus = dialog._returnFocus;
+      dialog._onAccessibleCancel = null;
+      if (returnFocus && typeof returnFocus.focus === 'function') returnFocus.focus();
+    }
+
     function openDialog(id) {
       const dialog = document.getElementById(id);
       const today = state.data ? state.data.today : '';
       dialog.querySelectorAll('input[type="date"]').forEach(input => { if (!input.value) input.value = today; });
-      dialog.showModal();
+      showAccessibleDialog_(dialog, { cancellable: true });
     }
-    function closeDialog(id) { document.getElementById(id).close(); }
+    function closeDialog(id) { closeAccessibleDialog_(document.getElementById(id)); }
     function fileAsDataUrl(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();

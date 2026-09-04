@@ -37,6 +37,12 @@ function generateIep(payload) {
   const benchmarks = rows_('Benchmarks')
     .filter(row => goalIds.has(String(row.GoalId)));
   const subjects = indexBy_(activeRows_('Subjects'), 'Id');
+  const progress = getStudentGoalWorkspace(student.Id, {
+    entryLimit: 2000,
+    startDate: payload.startDate,
+    endDate: payload.endDate
+  });
+  const progressByGoal = indexBy_(progress.goals || [], 'id');
   const title = 'IEP - ' + student.Name + ' - ' + payload.startDate;
   const document = DocumentApp.create(title);
   const body = document.getBody();
@@ -52,7 +58,7 @@ function generateIep(payload) {
     body.appendParagraph('No active annual goals were assigned when this document was generated.');
   } else {
     goals.forEach(goal => {
-      body.appendParagraph(String(goal.Goal))
+      body.appendParagraph(String(goal.Goal || 'Goal description not recorded'))
         .setHeading(DocumentApp.ParagraphHeading.HEADING3);
       benchmarks
         .filter(benchmark => String(benchmark.GoalId) === String(goal.Id))
@@ -61,14 +67,48 @@ function generateIep(payload) {
             .map(id => subjects[id] ? subjects[id].Name : '')
             .filter(Boolean);
           body.appendParagraph(
-            benchmark.Category + (subjectNames.length ? ' — ' + subjectNames.join(', ') : '')
+            String(benchmark.Category || 'Phase') +
+            (subjectNames.length ? ' — ' + subjectNames.join(', ') : '')
           ).setHeading(DocumentApp.ParagraphHeading.HEADING4);
-          body.appendParagraph(String(benchmark.Skill));
+          body.appendParagraph(String(
+            benchmark.TaskDemandDescription || benchmark.Skill || benchmark.Description ||
+            'Task demand not recorded'
+          ));
+          const conditions = [];
+          if (benchmark.TargetAccuracyPct !== '' && benchmark.TargetAccuracyPct != null) {
+            conditions.push('target accuracy ' + benchmark.TargetAccuracyPct + '%');
+          } else if (benchmark.TargetCorrect !== '' && benchmark.TargetCorrect != null &&
+              benchmark.TargetAttempts !== '' && benchmark.TargetAttempts != null) {
+            conditions.push(
+              'target accuracy ' + benchmark.TargetCorrect + '/' + benchmark.TargetAttempts
+            );
+          }
+          if (benchmark.TargetPromptLevel) {
+            conditions.push(
+              'prompt target ' + benchmark.TargetPromptLevel +
+              (benchmark.TargetPromptCount === '' || benchmark.TargetPromptCount == null
+                ? ''
+                : ' (' + benchmark.TargetPromptCount + ')')
+            );
+          }
+          if (benchmark.TargetConsecutiveSessions !== '' &&
+              benchmark.TargetConsecutiveSessions != null) {
+            conditions.push(
+              benchmark.TargetConsecutiveSessions + ' consecutive qualifying sessions'
+            );
+          }
           body.appendParagraph(
-            'Metric: ' + benchmark.TargetCorrect + '/' + benchmark.TargetAttempts +
-            ' correct; ' + benchmark.RequiredTrials + '/' + benchmark.TotalTrials + ' trials.'
+            conditions.length ? 'Conditions: ' + conditions.join('; ') + '.' :
+              'Conditions: mastery targets not fully recorded.'
           );
         });
+      const goalProgress = progressByGoal[String(goal.Id)];
+      const statements = goalProgress && Array.isArray(goalProgress.progressStatements)
+        ? goalProgress.progressStatements
+        : [];
+      statements.forEach(statement => body.appendParagraph(
+        String(statement.statement || '')
+      ));
     });
   }
   body.appendHorizontalRule();
@@ -78,7 +118,10 @@ function generateIep(payload) {
 
   const file = DriveApp.getFileById(document.getId());
   const viewers = activeRows_('Staff')
-    .filter(row => row.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(row.IsAdmin))
+    .filter(row =>
+      toBoolean_(row.IsAdmin) ||
+      normalizeEmail_(row.Email) === normalizeEmail_(student.CaseManagerEmail)
+    )
     .map(row => normalizeEmail_(row.Email))
     .filter(email => email && email !== normalizeEmail_(staff.Email));
   if (viewers.length) file.addViewers(viewers);

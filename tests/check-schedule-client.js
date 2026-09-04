@@ -12,7 +12,7 @@ const context = {
     getElementById() { return null; },
     querySelectorAll() { return []; }
   },
-  window: {}
+  window: { addEventListener() {} }
 };
 
 vm.createContext(context);
@@ -30,6 +30,13 @@ const result = vm.runInContext(`
       ],
       assignments: []
     },
+    dailyHours: [{
+      aideEmail: 'aide@example.org',
+      startTime: '08:00',
+      endTime: '14:00',
+      lunchStartTime: '13:00',
+      lunchMinutes: 30
+    }],
     week: {
       summary: {
         aides: [{
@@ -44,7 +51,7 @@ const result = vm.runInContext(`
     { periodId: 'P1', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' },
     { periodId: 'P2', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' }
   ];
-  const hours = scheduleLiveHoursForAide_('aide@example.org', assignments);
+  const hours = scheduleLiveHoursForAide_('aide@example.org');
   if (hours.dailyHours !== 5.5 || !hours.lunchDeducted) {
     throw new Error('Six-hour day did not deduct a half-hour lunch.');
   }
@@ -52,7 +59,14 @@ const result = vm.runInContext(`
     throw new Error('Projected weekly hours did not replace the selected day.');
   }
   state.scheduleData.schedule.periods = [{ periodId: 'P1', startTime: '08:00', endTime: '13:00' }];
-  const fiveHours = scheduleLiveHoursForAide_('aide@example.org', [assignments[0]]);
+  state.scheduleData.dailyHours = [{
+    aideEmail: 'aide@example.org',
+    startTime: '08:00',
+    endTime: '13:00',
+    lunchStartTime: '',
+    lunchMinutes: 0
+  }];
+  const fiveHours = scheduleLiveHoursForAide_('aide@example.org');
   if (fiveHours.dailyHours !== 5 || fiveHours.lunchDeducted) {
     throw new Error('A five-hour day incorrectly deducted lunch.');
   }

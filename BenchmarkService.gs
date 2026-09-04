@@ -47,9 +47,10 @@ function getStudentsForStaff_(staff) {
 }
 
 function getStudentsForClass(classId) {
-  requireAuthorizedStaff_(getCurrentUserEmail_());
+  const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
   const classRow = findOne_('Classes', row => String(row.Id) === String(classId) && toBoolean_(row.Active));
   if (!classRow) throw new Error('Class was not found.');
+  assertClassAccess_(staff, classRow);
   const ids = new Set(
     rows_('ClassStudents')
       .filter(row => String(row.ClassId) === String(classId))
@@ -60,7 +61,7 @@ function getStudentsForClass(classId) {
     .map(publicStudent_);
 }
 
-function getBenchmarkLookupContext_(currentAssignment) {
+function getBenchmarkLookupContext_(staffMember, currentAssignment) {
   const staffRows = activeRows_('Staff');
   const staff = staffRows.reduce((map, row) => {
     map[normalizeEmail_(row.Email)] = publicStaff_(row);
@@ -69,7 +70,12 @@ function getBenchmarkLookupContext_(currentAssignment) {
   const subjects = indexBy_(activeRows_('Subjects'), 'Id');
   const students = indexBy_(activeRows_('Students'), 'Id');
   const enrollment = rows_('ClassStudents');
-  const classes = activeRows_('Classes').map(row => ({
+  const allowedClassIds = new Set(
+    getClassesForStaff_(staffMember).map(row => String(row.id))
+  );
+  const classes = activeRows_('Classes')
+    .filter(row => allowedClassIds.has(String(row.Id)))
+    .map(row => ({
     id: row.Id,
     name: row.Name,
     teacherEmail: normalizeEmail_(row.TeacherEmail),
@@ -101,6 +107,7 @@ function publicStudent_(row) {
   return {
     id: row.Id,
     name: row.Name,
+    grade: row.Grade,
     caseManagerEmail: row.CaseManagerEmail,
     isOneToOne: toBoolean_(row.IsOneToOne),
     active: toBoolean_(row.Active)
@@ -120,11 +127,12 @@ function getTrainedStudents_(email) {
 
 function lookupBenchmarks(filters) {
   filters = filters || {};
-  requireAuthorizedStaff_(getCurrentUserEmail_());
+  const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
   assertRequired_(filters, ['classId', 'studentIds']);
   const studentIds = Array.isArray(filters.studentIds) ? filters.studentIds.map(String) : [String(filters.studentIds)];
   const classRow = findOne_('Classes', row => String(row.Id) === String(filters.classId) && toBoolean_(row.Active));
   if (!classRow) throw new Error('Class was not found.');
+  assertClassAccess_(staff, classRow);
 
   const enrolled = new Set(
     rows_('ClassStudents')
@@ -145,94 +153,434 @@ function lookupBenchmarks(filters) {
     .map(row => {
       const benchmarkEntries = entries.filter(entry => String(entry.BenchmarkId) === String(row.Id));
       const last = benchmarkEntries.sort((a, b) => String(b.Timestamp).localeCompare(String(a.Timestamp)))[0];
-      return publicBenchmark_(row, students[row.StudentId], last, benchmarkEntries.length);
+      return publicBenchmark_(row, students[row.StudentId], last, benchmarkEntries.length, benchmarkEntries);
     })
     .sort((a, b) => Number(b.critical) - Number(a.critical) || a.studentName.localeCompare(b.studentName));
 }
 
 function saveBenchmarkEntry(payload) {
   payload = payload || {};
-  const email = getCurrentUserEmail_();
-  requireAuthorizedStaff_(email);
-  assertRequired_(payload, ['benchmarkId', 'classId', 'correct', 'attempts']);
-
-  const benchmark = findOne_('Benchmarks', row =>
-    String(row.Id) === String(payload.benchmarkId) && toBoolean_(row.Active)
-  );
-  if (!benchmark) throw new Error('Benchmark was not found or is inactive.');
-
-  const classRow = findOne_('Classes', row => String(row.Id) === String(payload.classId));
-  if (!classRow) throw new Error('Class was not found.');
-  if (!benchmarkMatchesSubject_(benchmark, classRow.SubjectId)) {
-    throw new Error('This benchmark is not relevant to the selected class subject.');
-  }
-
-  const correct = toNumber_(payload.correct, -1);
-  const attempts = toNumber_(payload.attempts, -1);
-  if (correct < 0 || attempts <= 0 || correct > attempts) {
-    throw new Error('Correct answers must be between 0 and the total attempts.');
-  }
-
-  const entry = {
-    Id: uuid_(),
-    Timestamp: new Date(),
-    BenchmarkId: benchmark.Id,
-    StudentId: benchmark.StudentId,
-    StaffEmail: email,
-    ClassId: classRow.Id,
-    Correct: correct,
-    Attempts: attempts,
-    Percent: Math.round((correct / attempts) * 1000) / 10,
-    Notes: sanitizeText_(payload.notes, 1000)
-  };
-  appendRow_('BenchmarkEntries', entry);
+  const result = saveBenchmarkEntriesBatch({
+    submissionBatchId: payload.submissionBatchId || uuid_(),
+    entries: [payload]
+  });
+  if (!result.ok) return result;
   return {
     ok: true,
-    entryId: entry.Id,
-    percent: entry.Percent,
+    entryId: result.entryIds[0],
+    percent: result.entries[0].percent,
+    submissionBatchId: result.submissionBatchId,
     message: 'Benchmark input saved.'
   };
+}
+
+function saveBenchmarkEntriesBatch(payload) {
+  payload = payload || {};
+  const email = getCurrentUserEmail_();
+  const staff = requireAuthorizedStaff_(email);
+  const batchId = sanitizeText_(payload.submissionBatchId, 100);
+  if (!batchId) throw new Error('A submission batch ID is required.');
+  if (!Array.isArray(payload.entries) || !payload.entries.length) {
+    throw new Error('At least one observation is required.');
+  }
+  if (payload.entries.length > 200) {
+    throw new Error('Submit no more than 200 observations in one batch.');
+  }
+  const fingerprint = observationBatchFingerprint_(payload.entries);
+
+  const existing = getCompletedObservationBatch_(batchId);
+  if (existing.length) {
+    return completedObservationBatchResult_(
+      batchId,
+      existing,
+      payload.entries.length,
+      fingerprint
+    );
+  }
+
+  const initial = validateObservationBatch_(payload.entries, staff, batchId, fingerprint);
+  if (!initial.ok) return initial;
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      submissionBatchId: batchId,
+      message: 'Observation saving is busy. Your queue is still intact; retry shortly.'
+    };
+  }
+  try {
+    [
+      'BenchmarkEntries',
+      'Benchmarks',
+      'BenchmarkSubjects',
+      'Classes',
+      'GoalPhaseHistory'
+    ].forEach(invalidateRowsCache_);
+    const completed = getCompletedObservationBatch_(batchId);
+    if (completed.length) {
+      return completedObservationBatchResult_(
+        batchId,
+        completed,
+        payload.entries.length,
+        fingerprint
+      );
+    }
+    const validated = validateObservationBatch_(payload.entries, staff, batchId, fingerprint);
+    if (!validated.ok) return validated;
+    appendRows_('BenchmarkEntries', validated.records);
+    return completedObservationBatchResult_(batchId, validated.records);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function previewBenchmarkEntriesBatch(payload) {
+  payload = payload || {};
+  const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
+  if (!Array.isArray(payload.entries) || !payload.entries.length) {
+    throw new Error('Paste at least one observation row.');
+  }
+  if (payload.entries.length > 200) {
+    throw new Error('Preview no more than 200 observations at a time.');
+  }
+  const result = validateObservationBatch_(
+    payload.entries,
+    staff,
+    sanitizeText_(payload.submissionBatchId || 'preview', 100)
+  );
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    count: result.records.length,
+    rows: result.records.map((row, index) => ({
+      row: index + 1,
+      benchmarkId: row.BenchmarkId,
+      studentId: row.StudentId,
+      observationDate: row.ObservationDate,
+      score: row.Correct + '/' + row.Attempts,
+      prompt: row.ActualPromptLevel + ' · ' + row.ActualPromptCount
+    }))
+  };
+}
+
+function validateObservationBatch_(items, staff, batchId, fingerprint) {
+  const errors = [];
+  const conflicts = [];
+  const records = [];
+  const benchmarks = indexBy_(rows_('Benchmarks'), 'Id');
+  const classes = indexBy_(activeRows_('Classes'), 'Id');
+  const today = formatDate_(new Date());
+  items.forEach((item, index) => {
+    try {
+      item = item || {};
+      assertRequired_(item, [
+        'benchmarkId', 'classId', 'correct', 'attempts',
+        'observationDate', 'actualPromptLevel', 'actualPromptCount'
+      ]);
+      let benchmark = benchmarks[String(item.benchmarkId)];
+      if (!benchmark) throw new Error('Benchmark was not found.');
+      const observationDate = formatDate_(item.observationDate);
+      if (!observationDate || observationDate > today) {
+        throw new Error('Observation date must be today or earlier.');
+      }
+      if (benchmark.GoalId) {
+        const datedPhase = getPhaseForObservationDate_(benchmark.GoalId, observationDate);
+        if (datedPhase && String(datedPhase.BenchmarkId) !== String(benchmark.Id)) {
+          if (item.phaseDateResolution === 'USE_HISTORICAL_PHASE') {
+            benchmark = benchmarks[String(datedPhase.BenchmarkId)];
+            if (!benchmark) throw new Error('The historical phase is no longer available.');
+          } else {
+            conflicts.push({
+              row: index + 1,
+              code: 'PHASE_DATE_CONFLICT',
+              observationDate: observationDate,
+              selectedBenchmarkId: item.benchmarkId,
+              suggestedBenchmarkId: datedPhase.BenchmarkId,
+              message: 'A different phase was active on this observation date.'
+            });
+            return;
+          }
+        } else if (!datedPhase && !toBoolean_(benchmark.Active)) {
+          throw new Error('This phase was not active on the observation date.');
+        }
+      } else if (!toBoolean_(benchmark.Active)) {
+        throw new Error('Benchmark was not found or is inactive.');
+      }
+      const classRow = classes[String(item.classId)];
+      if (!classRow) throw new Error('Class was not found.');
+      assertClassAccess_(staff, classRow);
+      if (!benchmarkMatchesSubject_(benchmark, classRow.SubjectId)) {
+        throw new Error('This benchmark is not relevant to the selected class subject.');
+      }
+      const correct = optionalInteger_(item.correct);
+      const attempts = optionalInteger_(item.attempts);
+      if (correct === null || attempts === null ||
+          correct < 0 || attempts <= 0 || correct > attempts) {
+        throw new Error('Successes must be between 0 and the total raw trials.');
+      }
+      const actualPromptLevel = normalizePromptLevel_(item.actualPromptLevel);
+      const actualPromptCount = optionalInteger_(item.actualPromptCount);
+      if (!actualPromptLevel || actualPromptCount === null || actualPromptCount < 0) {
+        throw new Error('Prompt level and prompt count are required.');
+      }
+      if (actualPromptLevel === 'Independent' && actualPromptCount !== 0) {
+        throw new Error('Independent observations must use a prompt count of 0.');
+      }
+      records.push({
+        Id: uuid_(),
+        Timestamp: new Date(),
+        BenchmarkId: benchmark.Id,
+        StudentId: benchmark.StudentId,
+        StaffEmail: staff.Email,
+        ClassId: classRow.Id,
+        Correct: correct,
+        Attempts: attempts,
+        Percent: Math.round(correct / attempts * 1000) / 10,
+        Notes: sanitizeText_(item.notes, 1000),
+        ObservationDate: observationDate,
+        ActualPromptLevel: actualPromptLevel,
+        ActualPromptCount: actualPromptCount,
+        SubmissionBatchId: batchId,
+        SubmissionFingerprint: fingerprint || observationBatchFingerprint_(items),
+        Status: 'ACTIVE',
+        CorrectionOfEntryId: '',
+        CorrectionReason: '',
+        CorrectedBy: '',
+        CorrectedAt: ''
+      });
+    } catch (error) {
+      errors.push({ row: index + 1, message: error.message });
+    }
+  });
+  if (conflicts.length) {
+    return {
+      ok: false,
+      code: 'PHASE_DATE_CONFLICT',
+      retryable: false,
+      conflicts: conflicts,
+      message: 'Resolve phase/date conflicts before saving.'
+    };
+  }
+  if (errors.length) {
+    return {
+      ok: false,
+      code: 'VALIDATION_FAILED',
+      retryable: false,
+      errors: errors,
+      message: 'Fix the listed observations before saving.'
+    };
+  }
+  return { ok: true, records: records };
+}
+
+function getCompletedObservationBatch_(batchId) {
+  return rows_('BenchmarkEntries')
+    .filter(row => String(row.SubmissionBatchId) === String(batchId))
+    .sort((a, b) => a._row - b._row);
+}
+
+function completedObservationBatchResult_(batchId, entries, expectedCount, fingerprint) {
+  const savedFingerprints = Array.from(new Set(
+    entries.map(entry => String(entry.SubmissionFingerprint || '')).filter(Boolean)
+  ));
+  if ((expectedCount !== undefined && entries.length !== expectedCount) ||
+      (fingerprint && savedFingerprints.length &&
+        (savedFingerprints.length !== 1 || savedFingerprints[0] !== fingerprint))) {
+    return {
+      ok: false,
+      code: 'BATCH_MISMATCH',
+      retryable: false,
+      submissionBatchId: batchId,
+      message: 'This batch ID was already used for a different observation set.'
+    };
+  }
+  return {
+    ok: true,
+    idempotent: entries.some(entry => entry._row),
+    submissionBatchId: batchId,
+    entryIds: entries.map(entry => entry.Id),
+    entries: entries.map(entry => ({
+      id: entry.Id,
+      benchmarkId: entry.BenchmarkId,
+      percent: toNumber_(entry.Percent)
+    })),
+    message: entries.length + ' observation' + (entries.length === 1 ? '' : 's') + ' saved.'
+  };
+}
+
+function observationBatchFingerprint_(items) {
+  const normalized = (items || []).map(item => ({
+    benchmarkId: String(item && item.benchmarkId || ''),
+    classId: String(item && item.classId || ''),
+    observationDate: formatDate_(item && item.observationDate),
+    correct: optionalInteger_(item && item.correct),
+    attempts: optionalInteger_(item && item.attempts),
+    actualPromptLevel: String(item && item.actualPromptLevel || ''),
+    actualPromptCount: optionalInteger_(item && item.actualPromptCount),
+    notes: String(item && item.notes || ''),
+    phaseDateResolution: String(item && item.phaseDateResolution || '')
+  }));
+  return Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    JSON.stringify(normalized)
+  ).map(value => ((value + 256) % 256).toString(16).padStart(2, '0')).join('');
+}
+
+function correctBenchmarkEntry(payload) {
+  payload = payload || {};
+  const staff = requireCaseManager_();
+  assertRequired_(payload, ['entryId', 'reason', 'replacement']);
+  const original = findOne_('BenchmarkEntries', row =>
+    String(row.Id) === String(payload.entryId)
+  );
+  if (!original) throw new Error('Observation was not found.');
+  if (String(original.Status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+    throw new Error('This observation has already been corrected.');
+  }
+  requireManagedStudent_(staff, original.StudentId);
+  const replacementPayload = Object.assign({}, payload.replacement, {
+    benchmarkId: payload.replacement.benchmarkId || original.BenchmarkId,
+    classId: payload.replacement.classId || original.ClassId
+  });
+  const batchId = sanitizeText_(payload.submissionBatchId || uuid_(), 100);
+  const fingerprint = observationBatchFingerprint_([replacementPayload]);
+  let validated = validateObservationBatch_(
+    [replacementPayload],
+    staff,
+    batchId,
+    fingerprint
+  );
+  if (!validated.ok) return validated;
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Observation saving is busy. Retry the correction shortly.'
+    };
+  }
+  try {
+    [
+      'BenchmarkEntries',
+      'Benchmarks',
+      'BenchmarkSubjects',
+      'Classes',
+      'GoalPhaseHistory'
+    ].forEach(invalidateRowsCache_);
+    validated = validateObservationBatch_(
+      [replacementPayload],
+      staff,
+      batchId,
+      fingerprint
+    );
+    if (!validated.ok) return validated;
+    const current = findOne_('BenchmarkEntries', row =>
+      String(row.Id) === String(payload.entryId)
+    );
+    if (!current || String(current.Status || 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+      throw new Error('This observation was changed before your correction could be saved.');
+    }
+    const now = new Date();
+    const replacement = validated.records[0];
+    replacement.CorrectionOfEntryId = current.Id;
+    replacement.CorrectionReason = sanitizeText_(payload.reason, 1000);
+    appendRow_('BenchmarkEntries', replacement);
+    updateRow_('BenchmarkEntries', current._row, {
+      Status: 'CORRECTED',
+      CorrectedBy: staff.Email,
+      CorrectedAt: now
+    });
+    return {
+      ok: true,
+      originalEntryId: current.Id,
+      replacementEntryId: replacement.Id,
+      message: 'Observation correction saved with its audit history.'
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function saveBenchmark(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
-  assertRequired_(payload, [
-    'studentId', 'subjectId', 'category', 'skill',
-    'targetCorrect', 'targetAttempts', 'requiredTrials', 'totalTrials'
-  ]);
+  assertRequired_(payload, ['studentId', 'subjectId']);
+  if (!String(payload.taskDemandDescription || payload.skill || payload.description || '').trim()) {
+    throw new Error('A task demand description is required.');
+  }
   const student = findOne_('Students', row => String(row.Id) === String(payload.studentId));
   if (!student) throw new Error('Student was not found.');
+  const subject = findOne_('Subjects', row =>
+    String(row.Id) === String(payload.subjectId) && toBoolean_(row.Active)
+  );
+  if (!subject) throw new Error('Subject was not found.');
   if (!toBoolean_(staff.IsAdmin) && normalizeEmail_(student.CaseManagerEmail) !== normalizeEmail_(staff.Email)) {
     throw new Error('You can only manage benchmarks for your assigned students.');
   }
 
+  const targetAccuracy = optionalNumber_(payload.targetAccuracyPct);
+  const targetPromptLevel = normalizePromptLevel_(payload.targetPromptLevel);
+  const targetPromptCount = optionalInteger_(payload.targetPromptCount);
+  const targetConsecutive = optionalInteger_(payload.targetConsecutiveSessions);
+  const targetCorrect = optionalNumber_(payload.targetCorrect);
+  const targetAttempts = optionalNumber_(payload.targetAttempts);
+  const requiredTrials = optionalNumber_(payload.requiredTrials);
+  const totalTrials = optionalNumber_(payload.totalTrials);
+  if (targetAccuracy !== null && (targetAccuracy < 0 || targetAccuracy > 100)) {
+    throw new Error('Target accuracy must be from 0 to 100.');
+  }
+  if (targetPromptCount !== null && targetPromptCount < 0) {
+    throw new Error('Target prompt count cannot be negative.');
+  }
+  if (targetConsecutive !== null && targetConsecutive <= 0) {
+    throw new Error('Target consecutive sessions must be positive.');
+  }
+  if ((targetCorrect === null) !== (targetAttempts === null) ||
+      (targetAttempts !== null &&
+        (targetCorrect < 0 || targetAttempts <= 0 || targetCorrect > targetAttempts))) {
+    throw new Error('The correctness metric is invalid.');
+  }
+  if ((requiredTrials === null) !== (totalTrials === null) ||
+      (totalTrials !== null &&
+        (requiredTrials <= 0 || totalTrials <= 0 || requiredTrials > totalTrials))) {
+    throw new Error('The legacy trial metric is invalid.');
+  }
+  const taskDemand = sanitizeText_(
+    payload.taskDemandDescription || payload.skill || payload.description,
+    5000
+  );
   const record = {
     StudentId: student.Id,
     SubjectId: sanitizeText_(payload.subjectId, 100),
-    Category: sanitizeText_(payload.category, 120),
-    Skill: sanitizeText_(payload.skill, 500),
-    TargetCorrect: toNumber_(payload.targetCorrect),
-    TargetAttempts: toNumber_(payload.targetAttempts),
-    RequiredTrials: toNumber_(payload.requiredTrials),
-    TotalTrials: toNumber_(payload.totalTrials),
+    GoalId: sanitizeText_(payload.goalId, 100),
+    Category: sanitizeText_(payload.category || 'Phase', 120),
+    Skill: taskDemand,
+    TargetCorrect: targetCorrect === null ? '' : targetCorrect,
+    TargetAttempts: targetAttempts === null ? '' : targetAttempts,
+    RequiredTrials: requiredTrials === null ? '' : requiredTrials,
+    TotalTrials: totalTrials === null ? '' : totalTrials,
     StartDate: payload.startDate || '',
     DueDate: payload.dueDate || '',
     Critical: Boolean(payload.critical),
     Active: payload.active === undefined ? true : Boolean(payload.active),
-    Description: sanitizeText_(payload.description, 1500)
+    Description: sanitizeText_(payload.description || taskDemand, 5000),
+    OrderIndex: optionalInteger_(payload.orderIndex) || 1,
+    TaskDemandDescription: taskDemand,
+    TargetPromptLevel: targetPromptLevel,
+    TargetPromptCount: targetPromptCount === null ? '' : targetPromptCount,
+    TargetAccuracyPct: targetAccuracy === null ? '' : targetAccuracy,
+    TargetConsecutiveSessions: targetConsecutive === null ? '' : targetConsecutive
   };
-
-  if (record.TargetCorrect < 0 || record.TargetAttempts <= 0 || record.TargetCorrect > record.TargetAttempts) {
-    throw new Error('The correctness metric is invalid.');
-  }
-  if (record.RequiredTrials <= 0 || record.TotalTrials <= 0 || record.RequiredTrials > record.TotalTrials) {
-    throw new Error('The trial metric is invalid.');
-  }
 
   if (payload.id) {
     const existing = findOne_('Benchmarks', row => String(row.Id) === String(payload.id));
     if (!existing) throw new Error('Benchmark was not found.');
+    if (payload.goalId === undefined) delete record.GoalId;
     updateRow_('Benchmarks', existing._row, record);
     return { ok: true, id: existing.Id, message: 'Benchmark updated.' };
   }
@@ -265,14 +613,24 @@ function getBenchmarkProgress(benchmarkId) {
   }
   const entries = rows_('BenchmarkEntries')
     .filter(row => String(row.BenchmarkId) === String(benchmarkId))
-    .sort((a, b) => String(a.Timestamp).localeCompare(String(b.Timestamp)));
+    .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+    .sort(compareObservationEntries_);
   return {
-    benchmark: publicBenchmark_(benchmark, student),
+    benchmark: publicBenchmark_(
+      benchmark,
+      student,
+      entries[entries.length - 1],
+      entries.length,
+      entries
+    ),
     points: entries.map(row => ({
       timestamp: row.Timestamp,
+      observationDate: formatDate_(row.ObservationDate || row.Timestamp),
       percent: toNumber_(row.Percent),
       correct: toNumber_(row.Correct),
       attempts: toNumber_(row.Attempts),
+      actualPromptLevel: row.ActualPromptLevel || '',
+      actualPromptCount: optionalInteger_(row.ActualPromptCount),
       notes: row.Notes,
       staffEmail: row.StaffEmail
     }))
@@ -291,12 +649,31 @@ function getCriticalBenchmarks_(staff) {
     .slice(0, 12);
 }
 
-function publicBenchmark_(row, student, lastEntry, entryCount) {
+function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   const subjects = getSubjectIndex_();
   const subjectIds = Array.from(new Set(
     getBenchmarkSubjectIds_(row.Id).concat(row.SubjectId ? [String(row.SubjectId)] : [])
   )).filter(id => subjects[id]);
   const subjectNames = subjectIds.map(id => subjects[id].Name);
+  const targetAccuracy = optionalNumber_(row.TargetAccuracyPct);
+  const targetCorrect = optionalNumber_(row.TargetCorrect);
+  const targetAttempts = optionalNumber_(row.TargetAttempts);
+  const requiredTrials = optionalNumber_(row.RequiredTrials);
+  const totalTrials = optionalNumber_(row.TotalTrials);
+  const targetPromptCount = optionalInteger_(row.TargetPromptCount);
+  const targetConsecutiveSessions = optionalInteger_(row.TargetConsecutiveSessions);
+  const taskDemand = row.TaskDemandDescription || row.Skill || row.Description || '';
+  const targetParts = [
+    targetAccuracy === null ? '' : targetAccuracy + '% accuracy',
+    row.TargetPromptLevel
+      ? row.TargetPromptLevel + (targetPromptCount === null ? '' : ' · ' + targetPromptCount + ' prompt' +
+        (targetPromptCount === 1 ? '' : 's'))
+      : '',
+    targetConsecutiveSessions === null
+      ? ''
+      : targetConsecutiveSessions + ' consecutive session' +
+        (targetConsecutiveSessions === 1 ? '' : 's')
+  ].filter(Boolean);
   return {
     id: row.Id,
     goalId: row.GoalId,
@@ -308,21 +685,29 @@ function publicBenchmark_(row, student, lastEntry, entryCount) {
     subjectNames: subjectNames,
     category: row.Category,
     skill: row.Skill,
-    targetCorrect: toNumber_(row.TargetCorrect),
-    targetAttempts: toNumber_(row.TargetAttempts),
-    requiredTrials: toNumber_(row.RequiredTrials),
-    totalTrials: toNumber_(row.TotalTrials),
+    orderIndex: optionalInteger_(row.OrderIndex) || 1,
+    taskDemandDescription: taskDemand,
+    targetCorrect: targetCorrect,
+    targetAttempts: targetAttempts,
+    requiredTrials: requiredTrials,
+    totalTrials: totalTrials,
+    targetAccuracyPct: targetAccuracy,
+    targetPromptLevel: row.TargetPromptLevel || '',
+    targetPromptCount: targetPromptCount,
+    targetConsecutiveSessions: targetConsecutiveSessions,
     startDate: row.StartDate,
     dueDate: row.DueDate,
     critical: toBoolean_(row.Critical),
     active: toBoolean_(row.Active),
     description: row.Description,
-    display: row.Category + ' – ' + row.Skill + ': student will get ' +
-      row.TargetCorrect + ' out of ' + row.TargetAttempts + ' correct in ' +
-      row.RequiredTrials + ' / ' + row.TotalTrials + ' trials',
+    display: [row.Category, taskDemand, targetParts.join(' · ')].filter(Boolean).join(' — '),
+    mastery: Array.isArray(entries) ? summarizeBenchmarkMastery_(row, entries) : null,
     lastEntry: lastEntry ? {
       timestamp: lastEntry.Timestamp,
-      percent: toNumber_(lastEntry.Percent)
+      observationDate: formatDate_(lastEntry.ObservationDate || lastEntry.Timestamp),
+      percent: toNumber_(lastEntry.Percent),
+      actualPromptLevel: lastEntry.ActualPromptLevel || '',
+      actualPromptCount: optionalInteger_(lastEntry.ActualPromptCount)
     } : null,
     entryCount: entryCount || 0
   };

@@ -18,7 +18,8 @@ const tables = {
   Availability: [
     { AideEmail: 'partial@example.org', DayOfWeek: 'TUESDAY', Available: true, StartTime: '08:30', EndTime: '12:00', Status: 'APPROVED' },
     { AideEmail: 'availability@example.org', DayOfWeek: 'TUESDAY', Available: false, Status: 'PENDING' }
-  ]
+  ],
+  AideDailyHours: []
 };
 
 const context = {
@@ -37,6 +38,7 @@ const context = {
   normalizeEmail_: value => String(value || '').trim().toLowerCase(),
   normalizeTime_: value => String(value || '').slice(0, 5),
   toBoolean_: value => value === true || String(value).toLowerCase() === 'true',
+  toNumber_: value => Number(value) || 0,
   formatDate_: value => typeof value === 'string' ? value.slice(0, 10) : value.toISOString().slice(0, 10),
   parseDate_(value) {
     const parts = String(value).slice(0, 10).split('-').map(Number);
@@ -75,8 +77,10 @@ const result = vm.runInContext(`
   const pendingAvailability = getAideConflict_('availability@example.org', date, period);
   if (!approved.startsWith('Approved time off')) throw new Error('Approved request conflict is incorrect.');
   if (!pending.startsWith('Pending time off request')) throw new Error('Pending request warning is incorrect.');
-  if (partial !== 'Outside approved hours') throw new Error('Partial availability conflict is incorrect.');
-  if (pendingAvailability !== 'Pending availability request') throw new Error('Pending availability warning is incorrect.');
+  if (partial !== '') throw new Error('Partial-period overlap should be allowed.');
+  if (pendingAvailability !== 'Shift hours are not configured for this date') {
+    throw new Error('Missing shift hours should block before pending availability warnings.');
+  }
   return { unavailable: unavailable.length, approved, pending, partial, pendingAvailability };
 })()
 `, context);

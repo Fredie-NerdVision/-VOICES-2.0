@@ -7,20 +7,19 @@ const html = fs.readFileSync(path.join(projectRoot, 'Index.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const context = {
   console,
-  confirm() { return true; },
   document: {
     addEventListener() {},
     getElementById() { return null; },
     querySelectorAll() { return []; }
   },
-  window: {}
+  window: { addEventListener() {} }
 };
 
 vm.createContext(context);
 vm.runInContext(script, context);
 
 const result = vm.runInContext(`
-(() => {
+(async () => {
   state.scheduleData = {
     aides: [{ email: 'aide@example.org', displayName: 'Test Aide' }]
   };
@@ -44,7 +43,8 @@ const result = vm.runInContext(`
   let notice = '';
   scheduleDraftChanged = () => { changed = true; };
   toast = message => { notice = message; };
-  markScheduleAideOff_('aide@example.org');
+  confirmDialog = async () => true;
+  await markScheduleAideOff_('aide@example.org');
   if (!changed) throw new Error('The schedule draft was not updated.');
   if (fields.classId.value || fields.studentId.value || fields.note.value) {
     throw new Error('Existing assignments were not cleared.');
@@ -55,4 +55,9 @@ const result = vm.runInContext(`
 })()
 `, context);
 
-console.log('Schedule aide-off behavior passed:', JSON.stringify(result));
+result.then(value => {
+  console.log('Schedule aide-off behavior passed:', JSON.stringify(value));
+}).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
