@@ -1,3 +1,38 @@
+function normalizeGoalArchetype_(value) {
+  const archetype = String(value || '').trim().toUpperCase();
+  return VOICES.GOAL_ARCHETYPES.includes(archetype) ? archetype : '';
+}
+
+function normalizeEvaluationWindowUnit_(value) {
+  const unit = String(value || '').trim().toUpperCase();
+  return VOICES.EVALUATION_WINDOW_UNITS.includes(unit) ? unit : '';
+}
+
+function inferBenchmarkArchetype_(text) {
+  const value = String(text || '');
+  if (/\b(?:school days?|grading periods?|per quarter|quarterly|yearly attendance|daily checklist)\b/i.test(value)) {
+    return 'FREQUENCY_QUOTA';
+  }
+  if (/\b(?:prompts?|redirection|personal space|hands to self|initiat(?:e|ion)|timer)\b/i.test(value)) {
+    return 'PROMPT_FADE';
+  }
+  if (/\([^)]*(?:,| and )[^)]*\)|\b(?:containing|including|adds?|expands?|street address|phone number|zip code|date of birth|DOB)\b/i.test(value)) {
+    return 'TASK_EXPANSION';
+  }
+  return 'DISCRETE_TRIAL';
+}
+
+function inferEvaluationWindowUnit_(text, archetype) {
+  const value = String(text || '');
+  if (/\b(?:two|2)[ -]?weeks?\b|\bbiweekly\b/i.test(value)) return 'TWO_WEEK';
+  if (/\b(?:grading period|quarter|quarterly)\b/i.test(value)) return 'GRADING_PERIOD';
+  if (/\b(?:data days?|school days?|daily)\b/i.test(value) ||
+      archetype === 'FREQUENCY_QUOTA') {
+    return 'DATA_DAY';
+  }
+  return 'SESSION';
+}
+
 function parseGoalObjectives_(value) {
   const text = sanitizeText_(value, 20000);
   if (!text) return [];
@@ -23,34 +58,62 @@ function parseObjectiveRecord_(objective, index) {
   if (!objective) {
     throw new Error('Benchmark ' + (index + 1) + ' has no task description.');
   }
-  const ratios = extractObjectiveRatios_(objective);
-  const percentageMatch = String(objective).match(/(\d+(?:\.\d+)?)\s*%/);
-  const promptLevel = parsePromptLevel_(objective);
-  const promptCount = parsePromptCount_(objective, promptLevel);
-  const consecutiveMatch = String(objective).match(
-    /(\d+)\s+consecutive\s+(?:sessions?|observations?)\b/i
-  ) || String(objective).match(
-    /(?:for|across|in)\s+(\d+)\s+(?:sessions?|observations?)\b/i
+  const text = String(objective);
+  const archetype = inferBenchmarkArchetype_(text);
+  const percentageMatch = text.match(
+    /\b(\d+(?:\.\d+)?)\s*%\s*(?:accuracy|accurate|correct(?:ly)?)\b/i
   );
-  const correctness = ratios[0] || null;
-  const trials = ratios[1] || null;
-  const targetAccuracy = percentageMatch
-    ? Number(percentageMatch[1])
-    : (correctness ? Math.round(correctness.numerator / correctness.denominator * 1000) / 10 : null);
+  const consistencyMatch = text.match(
+    /\b(\d+)\s*(?:\/|out\s+of|of)\s*(\d+)\s*(opportunities|trials|trial days|data days|school days|tasks)\b/i
+  );
+  const promptLevel = parsePromptLevel_(text);
+  const promptCeiling = parsePromptCount_(text, promptLevel);
+  const consecutiveMatch = String(objective).match(
+    /(\d+)\s+consecutive\s+(sessions?|trials?|data days?)\b/i
+  ) || String(objective).match(
+    /(?:for|across|over|in)\s+(\d+)\s+(sessions?|observations?|data days?)\b/i
+  );
+  const parentheticalMatch = text.match(/\(([^)]+)\)/);
+  const targetAccuracy = percentageMatch ? Number(percentageMatch[1]) : null;
+  const consistencyPassed = consistencyMatch ? Number(consistencyMatch[1]) : null;
+  const consistencyWindow = consistencyMatch ? Number(consistencyMatch[2]) : null;
+  if (consistencyWindow !== null &&
+      (consistencyWindow <= 0 || consistencyPassed < 0 ||
+       consistencyPassed > consistencyWindow)) {
+    throw new Error('Benchmark consistency metrics must be between 0 and the window size.');
+  }
+  const evaluationWindowUnit = inferEvaluationWindowUnit_(
+    consistencyMatch ? consistencyMatch[3] + ' ' + text : text,
+    archetype
+  );
+  const taskDemand = parentheticalMatch
+    ? parentheticalMatch[1].trim()
+    : text.slice(0, 120).trim();
   return {
     index: index,
     orderIndex: index + 1,
-    text: objective,
-    taskDemandDescription: objective,
-    targetCorrect: correctness ? correctness.numerator : null,
-    targetAttempts: correctness ? correctness.denominator : null,
-    requiredTrials: trials ? trials.numerator : null,
-    totalTrials: trials ? trials.denominator : null,
+    text: text,
+    rawText: text,
+    goalArchetype: archetype,
+    taskDemandDescription: taskDemand,
+    targetCorrect: null,
+    targetAttempts: null,
+    requiredTrials: consistencyPassed,
+    totalTrials: consistencyWindow,
     targetAccuracyPct: targetAccuracy,
     targetPromptLevel: promptLevel,
-    targetPromptCount: promptCount,
-    targetConsecutiveSessions: consecutiveMatch ? Number(consecutiveMatch[1]) : null,
-    metric: targetAccuracy === null ? '' : targetAccuracy + '%'
+    targetPromptCount: promptCeiling,
+    targetPromptCeiling: promptCeiling,
+    consistencyTrialsPassed: consistencyPassed,
+    consistencyTrialsWindow: consistencyWindow,
+    targetConsecutiveSessions: consecutiveMatch ? Number(consecutiveMatch[1]) : 1,
+    evaluationWindowUnit: evaluationWindowUnit,
+    metric: targetAccuracy !== null
+      ? targetAccuracy + '%'
+      : (consistencyPassed !== null
+        ? consistencyPassed + ' of ' + consistencyWindow + ' ' +
+          String(consistencyMatch[3]).toLowerCase()
+        : '')
   };
 }
 
@@ -82,9 +145,11 @@ function parsePromptLevel_(text) {
 function parsePromptCount_(text, promptLevel) {
   if (promptLevel === 'Independent') return 0;
   const matches = Array.from(String(text || '').matchAll(
-    /(?:no\s+more\s+than|maximum\s+of|up\s+to|with|using)?\s*(\d+)\s+(?:\w+\s+)?prompts?\b/gi
+    /(?:no\s+more\s+than|at\s+most|maximum\s+of|up\s+to|given|with|using)\s+(\d+)(?:\s*-\s*(\d+))?\s*(?:(?:verbal|visual|gestural|model|physical)(?:\s*\/\s*(?:verbal|visual|gestural|model|physical))?)?\s*prompts?\b/gi
   ));
-  return matches.length ? Number(matches[matches.length - 1][1]) : null;
+  if (!matches.length) return null;
+  const match = matches[matches.length - 1];
+  return Number(match[2] || match[1]);
 }
 
 function previewGoalPhases(payload) {
@@ -232,7 +297,12 @@ function createGoal(payload) {
           TargetPromptLevel: phase.targetPromptLevel,
           TargetPromptCount: phase.targetPromptCount,
           TargetAccuracyPct: phase.targetAccuracyPct,
-          TargetConsecutiveSessions: phase.targetConsecutiveSessions
+          TargetConsecutiveSessions: phase.targetConsecutiveSessions,
+          GoalArchetype: phase.goalArchetype,
+          TargetPromptCeiling: phase.targetPromptCeiling,
+          ConsistencyTrialsPassed: phase.consistencyTrialsPassed,
+          ConsistencyTrialsWindow: phase.consistencyTrialsWindow,
+          EvaluationWindowUnit: phase.evaluationWindowUnit
         };
       });
       appendRows_('Benchmarks', benchmarkRows);
@@ -325,15 +395,23 @@ function previewBulkGoals(payload) {
         }
       }
       if (row.taskDemandDescription || row.phaseOrder || row.targetAccuracyPct ||
-          row.targetPromptLevel || row.targetPromptCount || row.targetConsecutiveSessions ||
+          row.goalArchetype || row.targetPromptLevel || row.targetPromptCeiling ||
+          row.targetPromptCount || row.consistencyTrialsPassed ||
+          row.consistencyTrialsWindow || row.targetConsecutiveSessions ||
+          row.evaluationWindowUnit ||
           row.benchmarkStartDate || row.benchmarkDueDate) {
         groups[key].phases.push(normalizeGoalPhase_({
           orderIndex: row.phaseOrder,
           taskDemandDescription: row.taskDemandDescription,
+          goalArchetype: row.goalArchetype,
           targetAccuracyPct: row.targetAccuracyPct,
           targetPromptLevel: row.targetPromptLevel,
+          targetPromptCeiling: row.targetPromptCeiling,
           targetPromptCount: row.targetPromptCount,
+          consistencyTrialsPassed: row.consistencyTrialsPassed,
+          consistencyTrialsWindow: row.consistencyTrialsWindow,
           targetConsecutiveSessions: row.targetConsecutiveSessions,
+          evaluationWindowUnit: row.evaluationWindowUnit,
           startDate: row.benchmarkStartDate,
           dueDate: row.benchmarkDueDate,
           active: toBoolean_(row.active)
@@ -420,9 +498,13 @@ function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
     throw new Error('Benchmark ' + (index + 1) + ' target accuracy must be from 0 to 100.');
   }
   const targetPromptLevel = normalizePromptLevel_(phase.targetPromptLevel);
-  const targetPromptCount = optionalInteger_(phase.targetPromptCount);
-  if (targetPromptCount !== null && targetPromptCount < 0) {
-    throw new Error('Benchmark ' + (index + 1) + ' prompt count cannot be negative.');
+  const targetPromptCeiling = optionalInteger_(
+    phase.targetPromptCeiling === undefined
+      ? phase.targetPromptCount
+      : phase.targetPromptCeiling
+  );
+  if (targetPromptCeiling !== null && targetPromptCeiling < 0) {
+    throw new Error('Benchmark ' + (index + 1) + ' prompt ceiling cannot be negative.');
   }
   const consecutive = optionalInteger_(phase.targetConsecutiveSessions);
   if (consecutive !== null && consecutive <= 0) {
@@ -435,13 +517,34 @@ function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
         (targetCorrect < 0 || targetAttempts <= 0 || targetCorrect > targetAttempts))) {
     throw new Error('Benchmark ' + (index + 1) + ' correctness ratio is invalid.');
   }
-  const requiredTrials = optionalNumber_(phase.requiredTrials);
-  const totalTrials = optionalNumber_(phase.totalTrials);
-  if ((requiredTrials === null) !== (totalTrials === null) ||
-      (totalTrials !== null &&
-        (requiredTrials <= 0 || totalTrials <= 0 || requiredTrials > totalTrials))) {
-    throw new Error('Benchmark ' + (index + 1) + ' legacy trial ratio is invalid.');
+  const consistencyPassed = optionalInteger_(
+    phase.consistencyTrialsPassed === undefined
+      ? phase.requiredTrials
+      : phase.consistencyTrialsPassed
+  );
+  const consistencyWindow = optionalInteger_(
+    phase.consistencyTrialsWindow === undefined
+      ? phase.totalTrials
+      : phase.consistencyTrialsWindow
+  );
+  if ((consistencyPassed === null) !== (consistencyWindow === null) ||
+      (consistencyWindow !== null &&
+        (consistencyPassed <= 0 || consistencyWindow <= 0 ||
+         consistencyPassed > consistencyWindow))) {
+    throw new Error('Benchmark ' + (index + 1) + ' consistency window is invalid.');
   }
+  const sourceText = phase.text || taskDemand;
+  if (phase.goalArchetype && !normalizeGoalArchetype_(phase.goalArchetype)) {
+    throw new Error('Benchmark ' + (index + 1) + ' goal archetype is invalid.');
+  }
+  if (phase.evaluationWindowUnit &&
+      !normalizeEvaluationWindowUnit_(phase.evaluationWindowUnit)) {
+    throw new Error('Benchmark ' + (index + 1) + ' evaluation window is invalid.');
+  }
+  const goalArchetype = normalizeGoalArchetype_(phase.goalArchetype) ||
+    inferBenchmarkArchetype_(sourceText);
+  const evaluationWindowUnit = normalizeEvaluationWindowUnit_(phase.evaluationWindowUnit) ||
+    inferEvaluationWindowUnit_(sourceText, goalArchetype);
   const startDate = formatDate_(phase.startDate || defaultStartDate);
   const dueDate = formatDate_(phase.dueDate || defaultDueDate);
   if (!startDate || !dueDate) {
@@ -456,12 +559,17 @@ function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
     taskDemandDescription: taskDemand,
     targetCorrect: targetCorrect === null ? '' : targetCorrect,
     targetAttempts: targetAttempts === null ? '' : targetAttempts,
-    requiredTrials: requiredTrials === null ? '' : requiredTrials,
-    totalTrials: totalTrials === null ? '' : totalTrials,
+    requiredTrials: consistencyPassed === null ? '' : consistencyPassed,
+    totalTrials: consistencyWindow === null ? '' : consistencyWindow,
     targetAccuracyPct: targetAccuracy === null ? '' : targetAccuracy,
     targetPromptLevel: targetPromptLevel,
-    targetPromptCount: targetPromptCount === null ? '' : targetPromptCount,
+    targetPromptCount: targetPromptCeiling === null ? '' : targetPromptCeiling,
+    targetPromptCeiling: targetPromptCeiling === null ? '' : targetPromptCeiling,
+    consistencyTrialsPassed: consistencyPassed === null ? '' : consistencyPassed,
+    consistencyTrialsWindow: consistencyWindow === null ? '' : consistencyWindow,
     targetConsecutiveSessions: consecutive === null ? '' : consecutive,
+    goalArchetype: goalArchetype,
+    evaluationWindowUnit: evaluationWindowUnit,
     startDate: startDate,
     dueDate: dueDate,
     active: toBoolean_(phase.active)
@@ -591,6 +699,15 @@ function getStudentGoalWorkspace(studentId, options) {
         const ids = new Set(goalBenchmarks.map(row => String(row.Id)));
         const goalEntries = entries.filter(row => ids.has(String(row.BenchmarkId)));
         const displayedEntries = goalEntries.slice(-entryLimit);
+        const frequencyChartValues = goalBenchmarks.reduce((index, benchmark) => {
+          Object.assign(index, buildFrequencyChartValueIndex_(
+            benchmark,
+            displayedEntries.filter(entry =>
+              String(entry.BenchmarkId) === String(benchmark.Id)
+            )
+          ));
+          return index;
+        }, {});
         const phaseHistory = goalUsesDateDrivenBenchmarks_(goal)
           ? buildDateDrivenBenchmarkHistory_(goal, goalBenchmarks, options.endDate || formatDate_(new Date()))
           : history
@@ -639,6 +756,33 @@ function getStudentGoalWorkspace(studentId, options) {
             classId: row.ClassId,
             notes: row.Notes,
             benchmarkId: row.BenchmarkId,
+            frequencyQuotaProgress: frequencyChartValues[row.Id] === undefined
+              ? null
+              : frequencyChartValues[row.Id],
+            goalArchetype: benchmarkIndex[row.BenchmarkId]
+              ? normalizeGoalArchetype_(benchmarkIndex[row.BenchmarkId].GoalArchetype) ||
+                inferBenchmarkArchetype_(
+                  benchmarkIndex[row.BenchmarkId].Description ||
+                  benchmarkIndex[row.BenchmarkId].TaskDemandDescription
+                )
+              : 'DISCRETE_TRIAL',
+            targetAccuracyPct: benchmarkIndex[row.BenchmarkId]
+              ? optionalNumber_(benchmarkIndex[row.BenchmarkId].TargetAccuracyPct)
+              : null,
+            targetPromptCeiling: benchmarkIndex[row.BenchmarkId]
+              ? optionalInteger_(
+                  benchmarkIndex[row.BenchmarkId].TargetPromptCeiling === '' ||
+                  benchmarkIndex[row.BenchmarkId].TargetPromptCeiling === undefined
+                    ? benchmarkIndex[row.BenchmarkId].TargetPromptCount
+                    : benchmarkIndex[row.BenchmarkId].TargetPromptCeiling
+                )
+              : null,
+            consistencyTrialsPassed: benchmarkIndex[row.BenchmarkId]
+              ? optionalInteger_(benchmarkIndex[row.BenchmarkId].ConsistencyTrialsPassed)
+              : null,
+            consistencyTrialsWindow: benchmarkIndex[row.BenchmarkId]
+              ? optionalInteger_(benchmarkIndex[row.BenchmarkId].ConsistencyTrialsWindow)
+              : null,
             phaseOrder: benchmarkIndex[row.BenchmarkId]
               ? optionalInteger_(benchmarkIndex[row.BenchmarkId].OrderIndex) || 1
               : 1,
@@ -1335,60 +1479,281 @@ function promptLevelRank_(value) {
   return VOICES.PROMPT_LEVELS.indexOf(normalizePromptLevel_(value));
 }
 
-function entryMeetsBenchmarkTarget_(entry, benchmark) {
+function benchmarkMasteryConfig_(benchmark) {
+  const sourceText = benchmark.Description || benchmark.TaskDemandDescription ||
+    benchmark.Skill || '';
+  const archetype = normalizeGoalArchetype_(benchmark.GoalArchetype) ||
+    inferBenchmarkArchetype_(sourceText);
   const targetAccuracy = optionalNumber_(benchmark.TargetAccuracyPct);
   const targetPromptLevel = normalizePromptLevel_(benchmark.TargetPromptLevel);
-  const targetPromptCount = optionalInteger_(benchmark.TargetPromptCount);
-  const actualPromptLevel = normalizePromptLevel_(entry.ActualPromptLevel);
-  const actualPromptCount = optionalInteger_(entry.ActualPromptCount);
-  if (targetAccuracy === null || !targetPromptLevel || targetPromptCount === null ||
-      !actualPromptLevel || actualPromptCount === null) {
+  const targetPromptCeiling = optionalInteger_(
+    benchmark.TargetPromptCeiling === '' ||
+    benchmark.TargetPromptCeiling === undefined
+      ? benchmark.TargetPromptCount
+      : benchmark.TargetPromptCeiling
+  );
+  const consistencyPassed = optionalInteger_(
+    benchmark.ConsistencyTrialsPassed === '' ||
+    benchmark.ConsistencyTrialsPassed === undefined
+      ? benchmark.RequiredTrials
+      : benchmark.ConsistencyTrialsPassed
+  );
+  const consistencyWindow = optionalInteger_(
+    benchmark.ConsistencyTrialsWindow === '' ||
+    benchmark.ConsistencyTrialsWindow === undefined
+      ? benchmark.TotalTrials
+      : benchmark.ConsistencyTrialsWindow
+  );
+  const requiredConsecutive = optionalInteger_(benchmark.TargetConsecutiveSessions);
+  const evaluationWindowUnit =
+    normalizeEvaluationWindowUnit_(benchmark.EvaluationWindowUnit) ||
+    inferEvaluationWindowUnit_(sourceText, archetype);
+  const consistencyConfigured = consistencyPassed !== null &&
+    consistencyWindow !== null && consistencyPassed > 0 &&
+    consistencyWindow >= consistencyPassed;
+  const performanceConfigured = targetAccuracy !== null ||
+    Boolean(targetPromptLevel) || targetPromptCeiling !== null;
+  const archetypeConfigured = archetype === 'FREQUENCY_QUOTA'
+    ? consistencyConfigured
+    : performanceConfigured || consistencyConfigured;
+  return {
+    archetype: archetype,
+    targetAccuracy: targetAccuracy,
+    targetPromptLevel: targetPromptLevel,
+    targetPromptCeiling: targetPromptCeiling,
+    consistencyPassed: consistencyPassed,
+    consistencyWindow: consistencyWindow,
+    consistencyConfigured: consistencyConfigured,
+    requiredConsecutive: requiredConsecutive,
+    evaluationWindowUnit: evaluationWindowUnit,
+    available: archetypeConfigured && requiredConsecutive !== null &&
+      requiredConsecutive > 0
+  };
+}
+
+function aggregateMasteryEntries_(entries) {
+  const promptLevels = entries
+    .map(row => normalizePromptLevel_(row.ActualPromptLevel))
+    .filter(Boolean);
+  const promptCounts = entries
+    .map(row => optionalInteger_(row.ActualPromptCount))
+    .filter(value => value !== null);
+  const correct = entries.reduce((sum, row) => sum + toNumber_(row.Correct), 0);
+  const attempts = entries.reduce((sum, row) => sum + toNumber_(row.Attempts), 0);
+  return {
+    correct: correct,
+    attempts: attempts,
+    percent: attempts > 0 ? correct / attempts * 100 : null,
+    actualPromptLevel: promptLevels.sort((a, b) =>
+      promptLevelRank_(b) - promptLevelRank_(a)
+    )[0] || '',
+    actualPromptCount: promptCounts.length ? Math.max.apply(null, promptCounts) : null
+  };
+}
+
+function aggregateMeetsBenchmarkTarget_(aggregate, config, includeConsistency) {
+  const checks = [];
+  if (config.targetAccuracy !== null) {
+    checks.push(aggregate.percent !== null &&
+      aggregate.percent >= config.targetAccuracy);
+  }
+  if (config.targetPromptLevel) {
+    checks.push(Boolean(aggregate.actualPromptLevel) &&
+      promptLevelRank_(aggregate.actualPromptLevel) <=
+        promptLevelRank_(config.targetPromptLevel));
+  }
+  if (config.targetPromptCeiling !== null) {
+    checks.push(aggregate.actualPromptCount !== null &&
+      aggregate.actualPromptCount <= config.targetPromptCeiling);
+  }
+  if (includeConsistency && config.consistencyConfigured) {
+    checks.push(aggregate.attempts >= config.consistencyWindow &&
+      aggregate.correct >= config.consistencyPassed);
+  }
+  return checks.length ? checks.every(Boolean) : null;
+}
+
+function entryMeetsBenchmarkTarget_(entry, benchmark) {
+  const config = benchmarkMasteryConfig_(benchmark);
+  if (!config.available) {
     return null;
   }
-  return toNumber_(entry.Percent) >= targetAccuracy &&
-    promptLevelRank_(actualPromptLevel) <= promptLevelRank_(targetPromptLevel) &&
-    actualPromptCount <= targetPromptCount;
+  return aggregateMeetsBenchmarkTarget_(
+    aggregateMasteryEntries_([entry]),
+    config,
+    config.archetype !== 'FREQUENCY_QUOTA'
+  );
+}
+
+function gradingPeriodKey_(date) {
+  const value = formatDate_(date);
+  const boundaries = getSchoolQuarterBoundaries_();
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    if (value >= boundaries[index] && value < boundaries[index + 1]) {
+      return boundaries[index] + '|' + boundaries[index + 1];
+    }
+  }
+  const parsed = parseDate_(value);
+  const quarter = Math.floor(parsed.getMonth() / 3);
+  return parsed.getFullYear() + '-Q' + (quarter + 1);
+}
+
+function masteryWindowKey_(entry, benchmark, config, firstDate) {
+  const date = formatDate_(entry.ObservationDate || entry.Timestamp);
+  if (config.evaluationWindowUnit === 'TWO_WEEK') {
+    const anchor = parseDate_(formatDate_(benchmark.StartDate) || firstDate || date);
+    const current = parseDate_(date);
+    const windowIndex = Math.max(
+      0,
+      Math.floor((current.getTime() - anchor.getTime()) / (14 * 86400000))
+    );
+    return 'TWO_WEEK|' + windowIndex;
+  }
+  if (config.evaluationWindowUnit === 'GRADING_PERIOD') {
+    return 'GRADING_PERIOD|' + gradingPeriodKey_(date);
+  }
+  return config.evaluationWindowUnit + '|' + date;
+}
+
+function buildMasteryWindows_(benchmark, entries, config) {
+  const activeEntries = entries
+    .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+    .sort(compareObservationEntries_);
+  const firstDate = activeEntries.length
+    ? formatDate_(activeEntries[0].ObservationDate || activeEntries[0].Timestamp)
+    : '';
+  const grouped = activeEntries.reduce((map, row) => {
+    const key = masteryWindowKey_(row, benchmark, config, firstDate);
+    if (!map[key]) {
+      map[key] = {
+        date: formatDate_(row.ObservationDate || row.Timestamp),
+        entries: []
+      };
+    }
+    map[key].entries.push(row);
+    return map;
+  }, {});
+  return Object.keys(grouped).map(key => ({
+    key: key,
+    date: grouped[key].date,
+    entries: grouped[key].entries,
+    aggregate: aggregateMasteryEntries_(grouped[key].entries)
+  })).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function frequencyWindowAggregate_(window) {
+  const entries = window.entries || [];
+  const binaryEntries = entries.length && entries.every(row =>
+    toNumber_(row.Attempts) === 1 &&
+    [0, 1].includes(toNumber_(row.Correct))
+  );
+  if (!binaryEntries) return window.aggregate;
+  const days = entries.reduce((index, row) => {
+    const date = formatDate_(row.ObservationDate || row.Timestamp);
+    if (!index[date]) index[date] = false;
+    if (toNumber_(row.Correct) > 0) index[date] = true;
+    return index;
+  }, {});
+  const dates = Object.keys(days);
+  return {
+    correct: dates.filter(date => days[date]).length,
+    attempts: dates.length,
+    percent: dates.length
+      ? dates.filter(date => days[date]).length / dates.length * 100
+      : null,
+    actualPromptLevel: window.aggregate.actualPromptLevel,
+    actualPromptCount: window.aggregate.actualPromptCount
+  };
+}
+
+function evaluateMasteryWindows_(windows, config) {
+  if (config.archetype !== 'FREQUENCY_QUOTA') {
+    return windows.map(window =>
+      aggregateMeetsBenchmarkTarget_(window.aggregate, config, true)
+    );
+  }
+  if (!['SESSION', 'DATA_DAY'].includes(config.evaluationWindowUnit)) {
+    return windows.map(window =>
+      aggregateMeetsBenchmarkTarget_(
+        frequencyWindowAggregate_(window),
+        config,
+        true
+      )
+    );
+  }
+  return windows.map((window, index) => {
+    if (index + 1 < config.consistencyWindow) return null;
+    const candidates = windows.slice(index + 1 - config.consistencyWindow, index + 1);
+    const qualifying = candidates.filter(candidate => {
+      const baseResult = aggregateMeetsBenchmarkTarget_(
+        candidate.aggregate,
+        config,
+        false
+      );
+      return baseResult !== false && candidate.aggregate.correct > 0;
+    }).length;
+    return qualifying >= config.consistencyPassed;
+  });
+}
+
+function buildFrequencyChartValueIndex_(benchmark, entries) {
+  const config = benchmarkMasteryConfig_(benchmark);
+  if (config.archetype !== 'FREQUENCY_QUOTA' || !entries.length) return {};
+  const activeEntries = entries
+    .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+    .sort(compareObservationEntries_);
+  const firstDate = activeEntries.length
+    ? formatDate_(activeEntries[0].ObservationDate || activeEntries[0].Timestamp)
+    : '';
+  const windows = buildMasteryWindows_(benchmark, activeEntries, config);
+  const valueByWindow = {};
+  windows.forEach((window, index) => {
+    if (['SESSION', 'DATA_DAY'].includes(config.evaluationWindowUnit) &&
+        config.consistencyWindow) {
+      valueByWindow[window.key] = windows
+        .slice(Math.max(0, index + 1 - config.consistencyWindow), index + 1)
+        .filter(candidate => candidate.aggregate.correct > 0)
+        .length;
+    } else {
+      valueByWindow[window.key] = frequencyWindowAggregate_(window).correct;
+    }
+  });
+  return activeEntries.reduce((index, row) => {
+    const key = masteryWindowKey_(row, benchmark, config, firstDate);
+    index[row.Id] = valueByWindow[key];
+    return index;
+  }, {});
 }
 
 function summarizeBenchmarkMastery_(benchmark, entries) {
-  const required = optionalInteger_(benchmark.TargetConsecutiveSessions);
-  const targetConfigured = optionalNumber_(benchmark.TargetAccuracyPct) !== null &&
-    Boolean(normalizePromptLevel_(benchmark.TargetPromptLevel)) &&
-    optionalInteger_(benchmark.TargetPromptCount) !== null &&
-    required !== null;
-  if (!targetConfigured) {
+  const config = benchmarkMasteryConfig_(benchmark);
+  if (!config.available) {
     return {
       available: false,
-      requiredConsecutiveSessions: required,
+      archetype: config.archetype,
+      evaluationWindowUnit: config.evaluationWindowUnit,
+      requiredConsecutiveSessions: config.requiredConsecutive,
       consecutiveSessionsMet: 0,
       mastered: false
     };
   }
-  const datedResults = entries
-    .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
-    .sort(compareObservationEntries_)
-    .reduce((map, row) => {
-      const date = formatDate_(row.ObservationDate || row.Timestamp);
-      if (!date) return map;
-      if (!map[date]) map[date] = [];
-      map[date].push(entryMeetsBenchmarkTarget_(row, benchmark));
-      return map;
-    }, {});
-  const results = Object.keys(datedResults).sort().map(date => {
-    const observations = datedResults[date];
-    if (!observations.some(result => result !== null)) return null;
-    return observations.every(result => result === true);
-  });
+  const windows = buildMasteryWindows_(benchmark, entries, config);
+  const results = evaluateMasteryWindows_(windows, config);
   let consecutive = 0;
   for (let index = results.length - 1; index >= 0 && results[index] === true; index -= 1) {
     consecutive += 1;
   }
   return {
     available: true,
-    requiredConsecutiveSessions: required,
+    archetype: config.archetype,
+    evaluationWindowUnit: config.evaluationWindowUnit,
+    consistencyTrialsPassed: config.consistencyPassed,
+    consistencyTrialsWindow: config.consistencyWindow,
+    requiredConsecutiveSessions: config.requiredConsecutive,
     consecutiveSessionsMet: consecutive,
-    mastered: consecutive >= required,
-    recordedSessions: results.filter(result => result !== null).length
+    mastered: consecutive >= config.requiredConsecutive,
+    recordedSessions: results.filter(result => result !== null).length,
+    recordedWindows: windows.length
   };
 }
 

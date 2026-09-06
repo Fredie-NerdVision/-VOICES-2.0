@@ -17,7 +17,9 @@ const SHEET_SCHEMAS = Object.freeze({
     'Id', 'StudentId', 'SubjectId', 'Category', 'Skill', 'TargetCorrect', 'TargetAttempts',
     'RequiredTrials', 'TotalTrials', 'StartDate', 'DueDate', 'Critical', 'Active', 'Description',
     'GoalId', 'OrderIndex', 'TaskDemandDescription', 'TargetPromptLevel',
-    'TargetPromptCount', 'TargetAccuracyPct', 'TargetConsecutiveSessions'
+    'TargetPromptCount', 'TargetAccuracyPct', 'TargetConsecutiveSessions',
+    'GoalArchetype', 'TargetPromptCeiling', 'ConsistencyTrialsPassed',
+    'ConsistencyTrialsWindow', 'EvaluationWindowUnit'
   ],
   BenchmarkSubjects: ['BenchmarkId', 'SubjectId'],
   BenchmarkEntries: [
@@ -313,21 +315,65 @@ function migrateVoices23Data_() {
       }
     });
     ordered.forEach((benchmark, index) => {
+      const sourceText = [
+        benchmark.Description,
+        benchmark.TaskDemandDescription,
+        benchmark.Skill,
+        benchmark.Category
+      ].filter(Boolean).join(' ');
       const targetCorrect = optionalNumber_(benchmark.TargetCorrect);
       const targetAttempts = optionalNumber_(benchmark.TargetAttempts);
       const targetAccuracy = optionalNumber_(benchmark.TargetAccuracyPct);
-      const derivedAccuracy = targetAccuracy === null &&
-          targetCorrect !== null && targetAttempts !== null && targetAttempts > 0
-        ? Math.round(targetCorrect / targetAttempts * 1000) / 10
-        : targetAccuracy;
+      const requiredTrials = optionalInteger_(benchmark.RequiredTrials);
+      const totalTrials = optionalInteger_(benchmark.TotalTrials);
+      const hasExplicitAccuracy = /\b\d+(?:\.\d+)?\s*%\s*(?:accuracy|accurate|correct)?\b/i
+        .test(sourceText);
+      let consistencyPassed = optionalInteger_(benchmark.ConsistencyTrialsPassed);
+      let consistencyWindow = optionalInteger_(benchmark.ConsistencyTrialsWindow);
+      if (consistencyPassed === null && consistencyWindow === null &&
+          requiredTrials !== null && totalTrials !== null && totalTrials > 0) {
+        consistencyPassed = requiredTrials;
+        consistencyWindow = totalTrials;
+      } else if (consistencyPassed === null && consistencyWindow === null &&
+          !hasExplicitAccuracy && targetCorrect !== null && targetAttempts !== null &&
+          targetAttempts > 0) {
+        consistencyPassed = Math.round(targetCorrect);
+        consistencyWindow = Math.round(targetAttempts);
+      }
+      const archetype = normalizeGoalArchetype_(benchmark.GoalArchetype) ||
+        inferBenchmarkArchetype_(sourceText);
       const patch = {};
       if (optionalNumber_(benchmark.OrderIndex) === null) patch.OrderIndex = index + 1;
       if (!String(benchmark.TaskDemandDescription || '').trim()) {
         patch.TaskDemandDescription = benchmark.Description || benchmark.Skill || '';
       }
-      if (derivedAccuracy !== null &&
-          optionalNumber_(benchmark.TargetAccuracyPct) !== derivedAccuracy) {
-        patch.TargetAccuracyPct = derivedAccuracy;
+      if (!benchmark.GoalArchetype) patch.GoalArchetype = archetype;
+      if (!benchmark.EvaluationWindowUnit) {
+        patch.EvaluationWindowUnit = inferEvaluationWindowUnit_(sourceText, archetype);
+      }
+      if (optionalInteger_(benchmark.TargetPromptCeiling) === null &&
+          optionalInteger_(benchmark.TargetPromptCount) !== null) {
+        patch.TargetPromptCeiling = optionalInteger_(benchmark.TargetPromptCount);
+      }
+      if (optionalInteger_(benchmark.ConsistencyTrialsPassed) === null &&
+          consistencyPassed !== null) {
+        patch.ConsistencyTrialsPassed = consistencyPassed;
+      }
+      if (optionalInteger_(benchmark.ConsistencyTrialsWindow) === null &&
+          consistencyWindow !== null) {
+        patch.ConsistencyTrialsWindow = consistencyWindow;
+      }
+      if (optionalInteger_(benchmark.TargetConsecutiveSessions) === null &&
+          (targetAccuracy !== null || consistencyPassed !== null ||
+           optionalInteger_(benchmark.TargetPromptCount) !== null ||
+           normalizePromptLevel_(benchmark.TargetPromptLevel))) {
+        patch.TargetConsecutiveSessions = 1;
+      }
+      if (!hasExplicitAccuracy && consistencyPassed !== null &&
+          consistencyWindow !== null && targetAccuracy !== null &&
+          targetCorrect !== null && targetAttempts !== null &&
+          Math.abs(targetAccuracy - targetCorrect / targetAttempts * 100) < 0.01) {
+        patch.TargetAccuracyPct = '';
       }
       if (Object.keys(patch).length) updateRow_('Benchmarks', benchmark._row, patch);
     });
@@ -421,6 +467,12 @@ function validateVoices23Database_() {
       !benchmarkIds.has(String(row.BenchmarkId)) ||
       String(benchmarkIndex[String(row.BenchmarkId)].GoalId) !== String(row.GoalId)
     ).length;
+  const invalidArchetypes = benchmarks.filter(row =>
+    !normalizeGoalArchetype_(row.GoalArchetype)
+  ).length;
+  const invalidEvaluationWindowUnits = benchmarks.filter(row =>
+    !normalizeEvaluationWindowUnit_(row.EvaluationWindowUnit)
+  ).length;
   const duplicateCount = rows => rows.length -
     new Set(rows.map(row => String(row.Id))).size;
   const invalidActivePhaseCounts = goals.filter(goal => {
@@ -447,7 +499,9 @@ function validateVoices23Database_() {
     duplicateGoalIds: duplicateCount(goals),
     duplicateBenchmarkIds: duplicateCount(benchmarks),
     duplicateEntryIds: duplicateCount(entries),
-    invalidActivePhaseCounts: invalidActivePhaseCounts
+    invalidActivePhaseCounts: invalidActivePhaseCounts,
+    invalidArchetypes: invalidArchetypes,
+    invalidEvaluationWindowUnits: invalidEvaluationWindowUnits
   };
 }
 

@@ -132,11 +132,27 @@ if (!html.includes('activeEntryAverage') ||
     !html.includes('entryBadgeClass') ||
     !benchmarkService.includes('Benchmark observation overdue') ||
     !benchmarkService.includes('function applicationBenchmarkText_') ||
-    !benchmarkService.includes("'Benchmark ' + orderIndex + ': '") ||
+    !benchmarkService.includes("replace(") ||
     !html.includes('Benchmark ${escapeHtml(String(history.orderIndex') ||
     html.includes('STO ${escapeHtml(String(history.orderIndex') ||
     html.includes("slice(0, 34)")) {
   throw new Error('Entry-count badges or benchmark chart cleanup is incomplete.');
+}
+[
+  "'GoalArchetype'",
+  "'TargetPromptCeiling'",
+  "'ConsistencyTrialsPassed'",
+  "'ConsistencyTrialsWindow'",
+  "'EvaluationWindowUnit'"
+].forEach(field => {
+  if (!database.includes(field)) throw new Error('Missing benchmark schema field ' + field);
+});
+if (!goalService.includes('function benchmarkMasteryConfig_') ||
+    !goalService.includes('function evaluateMasteryWindows_') ||
+    !html.includes("label: 'Prompt count (lower is better)'") ||
+    !html.includes("label: 'Recorded occurrences / quota progress'") ||
+    /chart\.js|recharts|plotly/i.test(html)) {
+  throw new Error('Archetype mastery or pure SVG metric panels are incomplete.');
 }
 
 const tables = {
@@ -149,7 +165,9 @@ const tables = {
 const context = {
   console,
   VOICES: {
-    PROMPT_LEVELS: ['Independent', 'Verbal', 'Gestural/Visual', 'Model', 'Physical']
+    PROMPT_LEVELS: ['Independent', 'Verbal', 'Gestural/Visual', 'Model', 'Physical'],
+    GOAL_ARCHETYPES: ['DISCRETE_TRIAL', 'PROMPT_FADE', 'TASK_EXPANSION', 'FREQUENCY_QUOTA'],
+    EVALUATION_WINDOW_UNITS: ['SESSION', 'DATA_DAY', 'TWO_WEEK', 'GRADING_PERIOD']
   },
   sanitizeText_: (value, max) => String(value || '').trim().slice(0, max),
   optionalNumber_(value) {
@@ -160,6 +178,8 @@ const context = {
   toNumber_: value => Number(value) || 0,
   toBoolean_: value => value === true || String(value).toLowerCase() === 'true',
   formatDate_: value => String(value || '').slice(0, 10),
+  parseDate_: value => new Date(String(value).slice(0, 10) + 'T12:00:00'),
+  settingsMap_: () => ({ SchoolQuarterBoundaries: '[]' }),
   rows_: name => (tables[name] || []).map(row => ({ ...row })),
   findOne_: (name, predicate) =>
     (tables[name] || []).map(row => ({ ...row })).find(predicate) || null
@@ -170,17 +190,43 @@ vm.runInContext(goalService, context);
 const result = vm.runInContext(`
 (() => {
   const parsed = parseGoalObjectives_(
-    'Phase 1: State address 4 out of 5 times with 2 verbal prompts for 3 sessions.\\n' +
-    'Benchmark 2: State address and phone independently at 80% accuracy.'
+    'Phase 1: State address in 4 out of 5 opportunities with 2 verbal prompts for 3 sessions.\\n' +
+    'Benchmark 2: State street address and phone number independently at 80% accuracy.'
   );
   if (parsed.length !== 2) throw new Error('Variable phase parsing failed.');
-  if (parsed[0].targetAccuracyPct !== 80 || parsed[0].targetPromptLevel !== 'Verbal' ||
-      parsed[0].targetPromptCount !== 2 || parsed[0].targetConsecutiveSessions !== 3) {
-    throw new Error('Ratio, prompt, or consecutive-session parsing failed.');
+  if (parsed[0].targetAccuracyPct !== null ||
+      parsed[0].consistencyTrialsPassed !== 4 ||
+      parsed[0].consistencyTrialsWindow !== 5 ||
+      parsed[0].targetPromptLevel !== 'Verbal' ||
+      parsed[0].targetPromptCeiling !== 2 ||
+      parsed[0].targetConsecutiveSessions !== 3 ||
+      parsed[0].goalArchetype !== 'PROMPT_FADE') {
+    throw new Error('Consistency, prompt, archetype, or consecutive parsing failed.');
   }
   if (parsed[1].targetAccuracyPct !== 80 || parsed[1].targetPromptLevel !== 'Independent' ||
-      parsed[1].targetPromptCount !== 0) {
+      parsed[1].targetPromptCeiling !== 0 ||
+      parsed[1].goalArchetype !== 'TASK_EXPANSION') {
     throw new Error('Percentage or independent prompt parsing failed.');
+  }
+  const frequency = parseObjectiveRecord_(
+    'Complete the checklist on 4 of 5 school days per grading period.',
+    0
+  );
+  if (frequency.goalArchetype !== 'FREQUENCY_QUOTA' ||
+      frequency.targetAccuracyPct !== null ||
+      frequency.consistencyTrialsPassed !== 4 ||
+      frequency.consistencyTrialsWindow !== 5 ||
+      frequency.evaluationWindowUnit !== 'GRADING_PERIOD') {
+    throw new Error('Frequency-quota parsing failed.');
+  }
+  const rangedPrompt = parseObjectiveRecord_(
+    'Initiate the task given 1-2 visual prompts over 3 consecutive data days.',
+    0
+  );
+  if (rangedPrompt.targetPromptCeiling !== 2 ||
+      rangedPrompt.evaluationWindowUnit !== 'DATA_DAY' ||
+      rangedPrompt.targetConsecutiveSessions !== 3) {
+    throw new Error('Prompt range or data-day parsing failed.');
   }
   const noPhases = parseGoalObjectives_('');
   if (noPhases.length !== 0) throw new Error('Zero-phase goals are not supported.');
@@ -189,9 +235,13 @@ const result = vm.runInContext(`
     Id: 'B2',
     Active: true,
     TaskDemandDescription: 'State address',
+    GoalArchetype: 'DISCRETE_TRIAL',
     TargetAccuracyPct: 80,
     TargetPromptLevel: 'Verbal',
-    TargetPromptCount: 1,
+    TargetPromptCeiling: 1,
+    ConsistencyTrialsPassed: 4,
+    ConsistencyTrialsWindow: 5,
+    EvaluationWindowUnit: 'SESSION',
     TargetConsecutiveSessions: 3
   };
   const entries = [
@@ -204,25 +254,82 @@ const result = vm.runInContext(`
     throw new Error('Consecutive mastery reset failed.');
   }
   const mastered = summarizeBenchmarkMastery_(benchmark, entries.concat([
-    { Id: 'E4', BenchmarkId: 'B2', ObservationDate: '2026-09-04', Percent: 80, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' },
-    { Id: 'E5', BenchmarkId: 'B2', ObservationDate: '2026-09-05', Percent: 85, ActualPromptLevel: 'Independent', ActualPromptCount: 0, Status: 'ACTIVE' },
-    { Id: 'E6', BenchmarkId: 'B2', ObservationDate: '2026-09-06', Percent: 90, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' }
+    { Id: 'E4', BenchmarkId: 'B2', ObservationDate: '2026-09-04', Correct: 4, Attempts: 5, Percent: 80, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' },
+    { Id: 'E5', BenchmarkId: 'B2', ObservationDate: '2026-09-05', Correct: 9, Attempts: 10, Percent: 90, ActualPromptLevel: 'Independent', ActualPromptCount: 0, Status: 'ACTIVE' },
+    { Id: 'E6', BenchmarkId: 'B2', ObservationDate: '2026-09-06', Correct: 5, Attempts: 5, Percent: 100, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' }
   ]));
   if (!mastered.mastered || mastered.consecutiveSessionsMet !== 3) {
     throw new Error('Accuracy and prompt-based mastery failed.');
   }
-  const unavailable = summarizeBenchmarkMastery_({ ...benchmark, TargetPromptCount: '' }, entries);
+  const unavailable = summarizeBenchmarkMastery_({
+    GoalArchetype: 'DISCRETE_TRIAL',
+    TargetConsecutiveSessions: 1,
+    EvaluationWindowUnit: 'SESSION'
+  }, entries);
   if (unavailable.available) throw new Error('Incomplete targets should make mastery unavailable.');
   const sameDate = summarizeBenchmarkMastery_(
     { ...benchmark, TargetConsecutiveSessions: 3 },
     [
-      { ObservationDate: '2026-09-10', Percent: 80, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' },
-      { ObservationDate: '2026-09-10', Percent: 90, ActualPromptLevel: 'Independent', ActualPromptCount: 0, Status: 'ACTIVE' },
-      { ObservationDate: '2026-09-10', Percent: 85, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' }
+      { ObservationDate: '2026-09-10', Correct: 4, Attempts: 5, Percent: 80, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' },
+      { ObservationDate: '2026-09-10', Correct: 9, Attempts: 10, Percent: 90, ActualPromptLevel: 'Independent', ActualPromptCount: 0, Status: 'ACTIVE' },
+      { ObservationDate: '2026-09-10', Correct: 5, Attempts: 5, Percent: 100, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' }
     ]
   );
   if (sameDate.mastered || sameDate.consecutiveSessionsMet !== 1) {
     throw new Error('Multiple observations on one date counted as separate mastery sessions.');
+  }
+  const promptFade = summarizeBenchmarkMastery_({
+    GoalArchetype: 'PROMPT_FADE',
+    TargetPromptLevel: 'Verbal',
+    TargetPromptCeiling: 1,
+    TargetConsecutiveSessions: 2,
+    EvaluationWindowUnit: 'SESSION'
+  }, [
+    { ObservationDate: '2026-09-01', Correct: 1, Attempts: 1, ActualPromptLevel: 'Verbal', ActualPromptCount: 2, Status: 'ACTIVE' },
+    { ObservationDate: '2026-09-02', Correct: 1, Attempts: 1, ActualPromptLevel: 'Verbal', ActualPromptCount: 1, Status: 'ACTIVE' },
+    { ObservationDate: '2026-09-03', Correct: 1, Attempts: 1, ActualPromptLevel: 'Independent', ActualPromptCount: 0, Status: 'ACTIVE' }
+  ]);
+  if (!promptFade.mastered || promptFade.consecutiveSessionsMet !== 2) {
+    throw new Error('Prompt-fade mastery failed.');
+  }
+  const frequencyMastery = summarizeBenchmarkMastery_({
+    GoalArchetype: 'FREQUENCY_QUOTA',
+    ConsistencyTrialsPassed: 4,
+    ConsistencyTrialsWindow: 5,
+    TargetConsecutiveSessions: 1,
+    EvaluationWindowUnit: 'DATA_DAY'
+  }, [1, 1, 0, 1, 1].map((correct, index) => ({
+    ObservationDate: '2026-09-0' + (index + 1),
+    Correct: correct,
+    Attempts: 1,
+    Status: 'ACTIVE'
+  })));
+  if (!frequencyMastery.mastered || frequencyMastery.recordedSessions !== 1) {
+    throw new Error('Frequency-quota rolling-window mastery failed.');
+  }
+  const duplicateDayQuota = summarizeBenchmarkMastery_({
+    GoalArchetype: 'FREQUENCY_QUOTA',
+    StartDate: '2026-09-01',
+    ConsistencyTrialsPassed: 4,
+    ConsistencyTrialsWindow: 5,
+    TargetConsecutiveSessions: 1,
+    EvaluationWindowUnit: 'TWO_WEEK'
+  }, [
+    ['2026-09-01', 1],
+    ['2026-09-01', 1],
+    ['2026-09-02', 1],
+    ['2026-09-03', 0],
+    ['2026-09-04', 1],
+    ['2026-09-05', 0]
+  ].map((item, index) => ({
+    Id: 'Q' + index,
+    ObservationDate: item[0],
+    Correct: item[1],
+    Attempts: 1,
+    Status: 'ACTIVE'
+  })));
+  if (duplicateDayQuota.mastered) {
+    throw new Error('Duplicate binary entries inflated qualifying-day mastery.');
   }
   if (isActiveGoal_({ Active: false, Status: 'DRAFT' }) ||
       isActiveGoal_({ Active: false, Status: 'COMPLETED' }) ||

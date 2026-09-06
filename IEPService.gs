@@ -85,11 +85,29 @@ function generateIep(payload) {
             );
           }
           if (benchmark.TargetPromptLevel) {
+            const promptCeiling = benchmark.TargetPromptCeiling === '' ||
+                benchmark.TargetPromptCeiling == null
+              ? benchmark.TargetPromptCount
+              : benchmark.TargetPromptCeiling;
             conditions.push(
               'prompt target ' + benchmark.TargetPromptLevel +
-              (benchmark.TargetPromptCount === '' || benchmark.TargetPromptCount == null
+              (promptCeiling === '' || promptCeiling == null
                 ? ''
-                : ' (' + benchmark.TargetPromptCount + ')')
+                : ' (' + promptCeiling + ')')
+            );
+          }
+          const consistencyPassed = benchmark.ConsistencyTrialsPassed === '' ||
+              benchmark.ConsistencyTrialsPassed == null
+            ? benchmark.RequiredTrials
+            : benchmark.ConsistencyTrialsPassed;
+          const consistencyWindow = benchmark.ConsistencyTrialsWindow === '' ||
+              benchmark.ConsistencyTrialsWindow == null
+            ? benchmark.TotalTrials
+            : benchmark.ConsistencyTrialsWindow;
+          if (consistencyPassed !== '' && consistencyPassed != null &&
+              consistencyWindow !== '' && consistencyWindow != null) {
+            conditions.push(
+              consistencyPassed + ' of ' + consistencyWindow + ' consistency window'
             );
           }
           if (benchmark.TargetConsecutiveSessions !== '' &&

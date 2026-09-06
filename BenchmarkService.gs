@@ -588,17 +588,29 @@ function saveBenchmark(payload) {
 
   const targetAccuracy = optionalNumber_(payload.targetAccuracyPct);
   const targetPromptLevel = normalizePromptLevel_(payload.targetPromptLevel);
-  const targetPromptCount = optionalInteger_(payload.targetPromptCount);
+  const targetPromptCeiling = optionalInteger_(
+    payload.targetPromptCeiling === undefined
+      ? payload.targetPromptCount
+      : payload.targetPromptCeiling
+  );
   const targetConsecutive = optionalInteger_(payload.targetConsecutiveSessions);
   const targetCorrect = optionalNumber_(payload.targetCorrect);
   const targetAttempts = optionalNumber_(payload.targetAttempts);
-  const requiredTrials = optionalNumber_(payload.requiredTrials);
-  const totalTrials = optionalNumber_(payload.totalTrials);
+  const consistencyPassed = optionalInteger_(
+    payload.consistencyTrialsPassed === undefined
+      ? payload.requiredTrials
+      : payload.consistencyTrialsPassed
+  );
+  const consistencyWindow = optionalInteger_(
+    payload.consistencyTrialsWindow === undefined
+      ? payload.totalTrials
+      : payload.consistencyTrialsWindow
+  );
   if (targetAccuracy !== null && (targetAccuracy < 0 || targetAccuracy > 100)) {
     throw new Error('Target accuracy must be from 0 to 100.');
   }
-  if (targetPromptCount !== null && targetPromptCount < 0) {
-    throw new Error('Target prompt count cannot be negative.');
+  if (targetPromptCeiling !== null && targetPromptCeiling < 0) {
+    throw new Error('Target prompt ceiling cannot be negative.');
   }
   if (targetConsecutive !== null && targetConsecutive <= 0) {
     throw new Error('Target consecutive sessions must be positive.');
@@ -608,15 +620,27 @@ function saveBenchmark(payload) {
         (targetCorrect < 0 || targetAttempts <= 0 || targetCorrect > targetAttempts))) {
     throw new Error('The correctness metric is invalid.');
   }
-  if ((requiredTrials === null) !== (totalTrials === null) ||
-      (totalTrials !== null &&
-        (requiredTrials <= 0 || totalTrials <= 0 || requiredTrials > totalTrials))) {
-    throw new Error('The legacy trial metric is invalid.');
+  if ((consistencyPassed === null) !== (consistencyWindow === null) ||
+      (consistencyWindow !== null &&
+        (consistencyPassed <= 0 || consistencyWindow <= 0 ||
+         consistencyPassed > consistencyWindow))) {
+    throw new Error('The consistency window is invalid.');
   }
   const taskDemand = sanitizeText_(
     payload.taskDemandDescription || payload.skill || payload.description,
     5000
   );
+  if (payload.goalArchetype && !normalizeGoalArchetype_(payload.goalArchetype)) {
+    throw new Error('Goal archetype is invalid.');
+  }
+  if (payload.evaluationWindowUnit &&
+      !normalizeEvaluationWindowUnit_(payload.evaluationWindowUnit)) {
+    throw new Error('Evaluation window is invalid.');
+  }
+  const goalArchetype = normalizeGoalArchetype_(payload.goalArchetype) ||
+    inferBenchmarkArchetype_(payload.description || taskDemand);
+  const evaluationWindowUnit = normalizeEvaluationWindowUnit_(payload.evaluationWindowUnit) ||
+    inferEvaluationWindowUnit_(payload.description || taskDemand, goalArchetype);
   const record = {
     StudentId: student.Id,
     SubjectId: sanitizeText_(payload.subjectId, 100),
@@ -625,8 +649,8 @@ function saveBenchmark(payload) {
     Skill: taskDemand,
     TargetCorrect: targetCorrect === null ? '' : targetCorrect,
     TargetAttempts: targetAttempts === null ? '' : targetAttempts,
-    RequiredTrials: requiredTrials === null ? '' : requiredTrials,
-    TotalTrials: totalTrials === null ? '' : totalTrials,
+    RequiredTrials: consistencyPassed === null ? '' : consistencyPassed,
+    TotalTrials: consistencyWindow === null ? '' : consistencyWindow,
     StartDate: payload.startDate || '',
     DueDate: payload.dueDate || '',
     Critical: Boolean(payload.critical),
@@ -635,9 +659,14 @@ function saveBenchmark(payload) {
     OrderIndex: optionalInteger_(payload.orderIndex) || 1,
     TaskDemandDescription: taskDemand,
     TargetPromptLevel: targetPromptLevel,
-    TargetPromptCount: targetPromptCount === null ? '' : targetPromptCount,
+    TargetPromptCount: targetPromptCeiling === null ? '' : targetPromptCeiling,
     TargetAccuracyPct: targetAccuracy === null ? '' : targetAccuracy,
-    TargetConsecutiveSessions: targetConsecutive === null ? '' : targetConsecutive
+    TargetConsecutiveSessions: targetConsecutive === null ? '' : targetConsecutive,
+    GoalArchetype: goalArchetype,
+    TargetPromptCeiling: targetPromptCeiling === null ? '' : targetPromptCeiling,
+    ConsistencyTrialsPassed: consistencyPassed === null ? '' : consistencyPassed,
+    ConsistencyTrialsWindow: consistencyWindow === null ? '' : consistencyWindow,
+    EvaluationWindowUnit: evaluationWindowUnit
   };
 
   if (payload.id) {
@@ -678,6 +707,7 @@ function getBenchmarkProgress(benchmarkId) {
     .filter(row => String(row.BenchmarkId) === String(benchmarkId))
     .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
     .sort(compareObservationEntries_);
+  const frequencyChartValues = buildFrequencyChartValueIndex_(benchmark, entries);
   return {
     benchmark: publicBenchmark_(
       benchmark,
@@ -694,6 +724,9 @@ function getBenchmarkProgress(benchmarkId) {
       attempts: toNumber_(row.Attempts),
       actualPromptLevel: row.ActualPromptLevel || '',
       actualPromptCount: optionalInteger_(row.ActualPromptCount),
+      frequencyQuotaProgress: frequencyChartValues[row.Id] === undefined
+        ? null
+        : frequencyChartValues[row.Id],
       notes: row.Notes,
       staffEmail: row.StaffEmail
     }))
@@ -721,9 +754,21 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   const targetAccuracy = optionalNumber_(row.TargetAccuracyPct);
   const targetCorrect = optionalNumber_(row.TargetCorrect);
   const targetAttempts = optionalNumber_(row.TargetAttempts);
-  const requiredTrials = optionalNumber_(row.RequiredTrials);
-  const totalTrials = optionalNumber_(row.TotalTrials);
-  const targetPromptCount = optionalInteger_(row.TargetPromptCount);
+  const consistencyPassed = optionalInteger_(
+    row.ConsistencyTrialsPassed === '' || row.ConsistencyTrialsPassed === undefined
+      ? row.RequiredTrials
+      : row.ConsistencyTrialsPassed
+  );
+  const consistencyWindow = optionalInteger_(
+    row.ConsistencyTrialsWindow === '' || row.ConsistencyTrialsWindow === undefined
+      ? row.TotalTrials
+      : row.ConsistencyTrialsWindow
+  );
+  const targetPromptCeiling = optionalInteger_(
+    row.TargetPromptCeiling === '' || row.TargetPromptCeiling === undefined
+      ? row.TargetPromptCount
+      : row.TargetPromptCeiling
+  );
   const targetConsecutiveSessions = optionalInteger_(row.TargetConsecutiveSessions);
   const orderIndex = optionalInteger_(row.OrderIndex) || 1;
   const label = 'Benchmark ' + orderIndex;
@@ -738,9 +783,12 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   const targetParts = [
     targetAccuracy === null ? '' : targetAccuracy + '% accuracy',
     row.TargetPromptLevel
-      ? row.TargetPromptLevel + (targetPromptCount === null ? '' : ' · ' + targetPromptCount + ' prompt' +
-        (targetPromptCount === 1 ? '' : 's'))
+      ? row.TargetPromptLevel + (targetPromptCeiling === null ? '' : ' · ' + targetPromptCeiling + ' prompt' +
+        (targetPromptCeiling === 1 ? '' : 's'))
       : '',
+    consistencyPassed === null
+      ? ''
+      : consistencyPassed + ' of ' + consistencyWindow + ' consistency',
     targetConsecutiveSessions === null
       ? ''
       : targetConsecutiveSessions + ' consecutive session' +
@@ -762,12 +810,19 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
     taskDemandDescription: taskDemand,
     targetCorrect: targetCorrect,
     targetAttempts: targetAttempts,
-    requiredTrials: requiredTrials,
-    totalTrials: totalTrials,
+    requiredTrials: consistencyPassed,
+    totalTrials: consistencyWindow,
+    goalArchetype: normalizeGoalArchetype_(row.GoalArchetype) ||
+      inferBenchmarkArchetype_(row.Description || taskDemand),
     targetAccuracyPct: targetAccuracy,
     targetPromptLevel: row.TargetPromptLevel || '',
-    targetPromptCount: targetPromptCount,
+    targetPromptCount: targetPromptCeiling,
+    targetPromptCeiling: targetPromptCeiling,
+    consistencyTrialsPassed: consistencyPassed,
+    consistencyTrialsWindow: consistencyWindow,
     targetConsecutiveSessions: targetConsecutiveSessions,
+    evaluationWindowUnit: normalizeEvaluationWindowUnit_(row.EvaluationWindowUnit) ||
+      inferEvaluationWindowUnit_(row.Description || taskDemand, row.GoalArchetype),
     startDate: row.StartDate,
     dueDate: row.DueDate,
     critical: toBoolean_(row.Critical),
@@ -794,7 +849,7 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
 function applicationBenchmarkText_(value, orderIndex) {
   return String(value || '').replace(
     /^\s*(?:STO|Short\s*[-–—]?\s*Term\s+Objective|Objective|Phase|Benchmark)\s*#?\s*\d+\s*[:\-–—.]?\s*/i,
-    'Benchmark ' + orderIndex + ': '
+    ''
   );
 }
 

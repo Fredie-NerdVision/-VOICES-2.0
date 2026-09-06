@@ -11,6 +11,18 @@ const VOICES = Object.freeze({
     'Model',
     'Physical'
   ]),
+  GOAL_ARCHETYPES: Object.freeze([
+    'DISCRETE_TRIAL',
+    'PROMPT_FADE',
+    'TASK_EXPANSION',
+    'FREQUENCY_QUOTA'
+  ]),
+  EVALUATION_WINDOW_UNITS: Object.freeze([
+    'SESSION',
+    'DATA_DAY',
+    'TWO_WEEK',
+    'GRADING_PERIOD'
+  ]),
   ROLES: Object.freeze({
     AIDE: 'AIDE',
     TEACHER: 'TEACHER',

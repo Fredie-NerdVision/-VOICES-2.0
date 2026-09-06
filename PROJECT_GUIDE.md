@@ -173,9 +173,10 @@ The parser:
 - matches `Short-Term Objective`, `Benchmark`, `Objective`, and `Phase` without case sensitivity;
 - accepts common hyphen variants;
 - takes the text after each heading until the next heading or end of text;
-- finds metrics written as `4/5` or `4 out of 5`;
-- recognizes percentages, prompt level/count, and consecutive-session conditions;
-- preserves source text when structured values are absent;
+- classifies discrete-trial, prompt-fade, task-expansion, and frequency-quota benchmarks;
+- separates explicit accuracy percentages from consistency gates such as `4/5` or `4 out of 5`;
+- recognizes prompt ceilings/levels, consecutive requirements, evaluation windows, and parenthetical task demands;
+- preserves original source text while exposing every extracted field for review;
 - requires an editable preview before save.
 
 Creation is protected by a script lock. It creates one annual `Goals` row, ordered benchmark rows with individual start/due dates, subject relationships, and an initial date-selection history boundary. The active benchmark is the currently eligible record with the nearest due date; if no date window is open, the next upcoming benchmark is selected. Draft and completed lifecycle states are retained for management but excluded from active lookup, analytics, and IEP export.
@@ -210,7 +211,7 @@ Multiple students may be selected. Each saved entry records:
 
 Staff may queue individual entries or paste up to 200 tab-separated rows. One submission batch ID and normalized fingerprint are reused across retries; reusing an ID with different data is rejected. Validation runs before and after a 25-second script lock; `WRITE_BUSY` and validation responses leave the browser queue intact. Historical-phase choices are persisted into that queue before retrying so a lost response can be submitted with the same fingerprint. Staff can download a tab-separated backup before retrying or navigating away. Backdated phase conflicts require an explicit historical-phase choice.
 
-Case-manager analytics preserve raw counts, calculate latest-three current-benchmark accuracy from combined successes/trials, and evaluate mastery only when accuracy and prompt targets are complete. Consecutive mastery counts distinct observation dates; if a date has multiple observations, every observation on that date must meet the benchmark target for that date to qualify. Goal and benchmark cards show valid-entry totals; active counts are green at/above the student’s active-goal average, yellow from 50% to below average, and red below 50% (a zero average is green). Charts support local goal visibility, prompt-colored points, neutral benchmark dividers, and labeled target lines. Printable progress summaries provide standardized IEP statements.
+Case-manager analytics preserve raw counts and calculate latest-three current-benchmark accuracy from combined successes/trials. Mastery uses each benchmark’s archetype: explicit accuracy and trial consistency for discrete/task benchmarks, prompt ceilings/levels for prompt-fade benchmarks, and rolling or period-based raw occurrence quotas for frequency benchmarks. Evaluation units may be observation dates, two-week windows, or configured grading periods; corrected entries never count, and incomplete targets report mastery as unavailable. Goal and benchmark cards show valid-entry totals; active counts are green at/above the student’s active-goal average, yellow from 50% to below average, and red below 50% (a zero average is green). Pure SVG charts retain local goal visibility and neutral benchmark dividers while separating percentage accuracy, prompt counts, and frequency quotas into compatible metric panels. Printable progress summaries provide standardized IEP statements.
 
 ## 10. Schedule builder
 
@@ -356,7 +357,7 @@ The local tests:
 - parse every `.gs` file;
 - extract and parse the browser JavaScript from `Index.html`;
 - validate deterministic demo relationships and counts;
-- validate 2.3 migration/schema safeguards, flexible parsing, prompts, mastery, phase chronology, batch locking, accessible dialogs, bulk tools, and IEP null handling;
+- validate 2.3 migration/schema safeguards, archetype parsing, mastery windows, pure SVG metric panels, phase chronology, batch locking, accessible dialogs, bulk tools, and IEP null handling;
 - validate Monday-Sunday weekly calculations;
 - validate shift-based hours, fixed lunch deductions, and partial-period overlap;
 - validate availability/time-off scheduling signals;
@@ -433,7 +434,7 @@ Added a realistic isolated training database, weekly aide capacities, Monday-Sun
 
 ### 2.3
 
-Added flexible goal phases, separate task/prompt/accuracy conditions, raw-trial observations, prompt-aware mastery, phase chronology, idempotent queued and bulk writes, visibility-controlled phase charts, printable progress summaries, correction audit fields, date-specific aide shifts and lunches, partial-period coverage, schedule revision protection, accessible branded dialogs, and Google multi-account guidance.
+Added flexible goal phases, four benchmark archetypes, separate accuracy/prompt/task/consistency conditions, raw-trial observations, window-aware mastery, phase chronology, idempotent queued and bulk writes, visibility-controlled pure SVG metric panels, printable progress summaries, correction audit fields, date-specific aide shifts and lunches, partial-period coverage, schedule revision protection, accessible branded dialogs, and Google multi-account guidance.
 
 ## 21. Current status
 

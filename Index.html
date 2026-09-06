@@ -589,7 +589,7 @@
       <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk goals and benchmarks</h2></div>
       <button class="btn ghost small-btn" type="button" onclick="closeDialog('bulkGoalDialog')">Close</button>
     </div>
-    <p class="muted">Columns: GoalKey, StudentId, Goal, Domain, Status, StartDate, DueDate, SubjectIds, BenchmarkOrder, TaskDemand, TargetAccuracyPct, TargetPromptLevel, TargetPromptCount, TargetConsecutiveSessions, BenchmarkStartDate, BenchmarkDueDate. Use one row per benchmark and repeat the goal fields; separate multiple subject IDs with commas.</p>
+    <p class="muted">Columns: GoalKey, StudentId, Goal, Domain, Status, StartDate, DueDate, SubjectIds, BenchmarkOrder, TaskDemand, GoalArchetype, TargetAccuracyPct, TargetPromptLevel, TargetPromptCeiling, ConsistencyTrialsPassed, ConsistencyTrialsWindow, TargetConsecutiveSessions, EvaluationWindowUnit, BenchmarkStartDate, BenchmarkDueDate. Use one row per benchmark and repeat the goal fields; separate multiple subject IDs with commas.</p>
     <div class="field"><label for="bulkGoalText">Copied rows</label><textarea id="bulkGoalText" style="min-height:240px"></textarea></div>
     <div id="bulkGoalPreview" class="list" style="margin-top:12px"></div>
     <div class="dialog-actions"><button id="previewBulkGoals" class="btn ghost" type="button">Preview</button><button id="saveBulkGoals" class="btn primary" type="button" disabled>Save previewed goals</button></div>
@@ -1765,11 +1765,15 @@
       ).map((row, index) => ({
         orderIndex: index + 1,
         taskDemandDescription: row.querySelector('[data-phase-task]').value,
-        text: row.querySelector('[data-phase-task]').value,
+        text: row.querySelector('[data-phase-source]').value,
+        goalArchetype: row.querySelector('[data-phase-archetype]').value,
         targetAccuracyPct: row.querySelector('[data-phase-accuracy]').value,
         targetPromptLevel: row.querySelector('[data-phase-prompt-level]').value,
-        targetPromptCount: row.querySelector('[data-phase-prompt-count]').value,
+        targetPromptCeiling: row.querySelector('[data-phase-prompt-ceiling]').value,
+        consistencyTrialsPassed: row.querySelector('[data-phase-consistency-passed]').value,
+        consistencyTrialsWindow: row.querySelector('[data-phase-consistency-window]').value,
         targetConsecutiveSessions: row.querySelector('[data-phase-consecutive]').value,
+        evaluationWindowUnit: row.querySelector('[data-phase-window-unit]').value,
         startDate: row.querySelector('[data-phase-start]').value,
         dueDate: row.querySelector('[data-phase-due]').value,
         targetCorrect: row.dataset.targetCorrect || '',
@@ -1815,18 +1819,24 @@
       return sections.map((section, index) => {
         const objective = section.replace(/^[\s:;#\d.)\]-]+/, '').trim();
         if (!objective) throw new Error(`Benchmark ${index + 1} has no task description.`);
-        const ratios = [];
-        const ratioPattern = /(\d+)\s*(?:\/|out\s+of)\s*(\d+)/gi;
-        let ratio;
-        while ((ratio = ratioPattern.exec(objective)) !== null) {
-          const numerator = Number(ratio[1]);
-          const denominator = Number(ratio[2]);
-          if (denominator <= 0 || numerator < 0 || numerator > denominator) {
-            throw new Error(`Benchmark ${index + 1} has an invalid ratio.`);
-          }
-          ratios.push({ numerator, denominator });
+        const goalArchetype = /\b(?:school days?|grading periods?|per quarter|quarterly|yearly attendance|daily checklist)\b/i.test(objective)
+          ? 'FREQUENCY_QUOTA'
+          : /\b(?:prompts?|redirection|personal space|hands to self|initiat(?:e|ion)|timer)\b/i.test(objective)
+            ? 'PROMPT_FADE'
+            : /\([^)]*(?:,| and )[^)]*\)|\b(?:containing|including|adds?|expands?|street address|phone number|zip code|date of birth|DOB)\b/i.test(objective)
+              ? 'TASK_EXPANSION'
+              : 'DISCRETE_TRIAL';
+        const percent = objective.match(
+          /\b(\d+(?:\.\d+)?)\s*%\s*(?:accuracy|accurate|correct(?:ly)?)\b/i
+        );
+        const consistency = objective.match(
+          /\b(\d+)\s*(?:\/|out\s+of|of)\s*(\d+)\s*(opportunities|trials|trial days|data days|school days|tasks)\b/i
+        );
+        if (consistency &&
+            (Number(consistency[2]) <= 0 || Number(consistency[1]) < 0 ||
+             Number(consistency[1]) > Number(consistency[2]))) {
+          throw new Error(`Benchmark ${index + 1} has an invalid consistency window.`);
         }
-        const percent = objective.match(/(\d+(?:\.\d+)?)\s*%/);
         const promptLevel = /\bindependent(?:ly)?\b/i.test(objective) ? 'Independent'
           : /\bverbal\b/i.test(objective) ? 'Verbal'
           : /\b(?:gestural|visual)\b/i.test(objective) ? 'Gestural/Visual'
@@ -1834,28 +1844,48 @@
           : /\bphysical\b/i.test(objective) ? 'Physical'
           : '';
         const promptMatches = Array.from(objective.matchAll(
-          /(?:no\s+more\s+than|maximum\s+of|up\s+to|with|using)?\s*(\d+)\s+(?:\w+\s+)?prompts?\b/gi
+          /(?:no\s+more\s+than|at\s+most|maximum\s+of|up\s+to|given|with|using)\s+(\d+)(?:\s*-\s*(\d+))?\s*(?:(?:verbal|visual|gestural|model|physical)(?:\s*\/\s*(?:verbal|visual|gestural|model|physical))?)?\s*prompts?\b/gi
         ));
-        const consecutive = objective.match(/(\d+)\s+consecutive\s+(?:sessions?|observations?)\b/i) ||
-          objective.match(/(?:for|across|in)\s+(\d+)\s+(?:sessions?|observations?)\b/i);
-        const targetAccuracyPct = percent
-          ? Number(percent[1])
-          : (ratios[0] ? Math.round(ratios[0].numerator / ratios[0].denominator * 1000) / 10 : '');
+        const consecutive = objective.match(/(\d+)\s+consecutive\s+(sessions?|trials?|data days?)\b/i) ||
+          objective.match(/(?:for|across|over|in)\s+(\d+)\s+(sessions?|observations?|data days?)\b/i);
+        const parenthetical = objective.match(/\(([^)]+)\)/);
+        const targetAccuracyPct = percent ? Number(percent[1]) : '';
+        const consistencyTrialsPassed = consistency ? Number(consistency[1]) : '';
+        const consistencyTrialsWindow = consistency ? Number(consistency[2]) : '';
+        const evaluationWindowUnit = /\b(?:two|2)[ -]?weeks?\b|\bbiweekly\b/i.test(objective)
+          ? 'TWO_WEEK'
+          : /\b(?:grading period|quarter|quarterly)\b/i.test(objective)
+            ? 'GRADING_PERIOD'
+            : /\b(?:data days?|school days?|daily)\b/i.test(objective) ||
+                goalArchetype === 'FREQUENCY_QUOTA'
+              ? 'DATA_DAY'
+              : 'SESSION';
+        const promptMatch = promptMatches[promptMatches.length - 1];
+        const targetPromptCeiling = promptLevel === 'Independent'
+          ? 0
+          : (promptMatch ? Number(promptMatch[2] || promptMatch[1]) : '');
         return {
           index,
           text: objective,
-          taskDemandDescription: objective,
+          rawText: objective,
+          goalArchetype,
+          taskDemandDescription: parenthetical
+            ? parenthetical[1].trim()
+            : objective.slice(0, 120).trim(),
           targetAccuracyPct,
           targetPromptLevel: promptLevel,
-          targetPromptCount: promptLevel === 'Independent'
-            ? 0
-            : (promptMatches.length ? Number(promptMatches[promptMatches.length - 1][1]) : ''),
-          targetConsecutiveSessions: consecutive ? Number(consecutive[1]) : '',
-          targetCorrect: ratios[0] ? ratios[0].numerator : '',
-          targetAttempts: ratios[0] ? ratios[0].denominator : '',
-          requiredTrials: ratios[1] ? ratios[1].numerator : '',
-          totalTrials: ratios[1] ? ratios[1].denominator : '',
-          metric: targetAccuracyPct === '' ? 'Targets incomplete' : `${targetAccuracyPct}%`
+          targetPromptCeiling,
+          consistencyTrialsPassed,
+          consistencyTrialsWindow,
+          targetConsecutiveSessions: consecutive ? Number(consecutive[1]) : 1,
+          evaluationWindowUnit,
+          targetCorrect: '',
+          targetAttempts: '',
+          requiredTrials: consistencyTrialsPassed,
+          totalTrials: consistencyTrialsWindow,
+          metric: targetAccuracyPct !== ''
+            ? `${targetAccuracyPct}%`
+            : (consistency ? `${consistency[1]} of ${consistency[2]} ${consistency[3]}` : 'Targets incomplete')
         };
       });
     }
@@ -1875,6 +1905,7 @@
             data-target-attempts="${escapeAttr(item.targetAttempts)}"
             data-required-trials="${escapeAttr(item.requiredTrials)}"
             data-total-trials="${escapeAttr(item.totalTrials)}">
+            <textarea data-phase-source hidden>${escapeHtml(item.rawText || item.text)}</textarea>
             <div class="row" style="justify-content:space-between">
               <strong>Benchmark ${item.index + 1}</strong>
               <span class="chip">${escapeHtml(item.metric)}</span>
@@ -1884,10 +1915,24 @@
               <textarea data-phase-task style="min-height:100px">${escapeHtml(item.taskDemandDescription)}</textarea>
             </div>
             <div class="form-grid">
+              <div class="field"><label>Goal archetype</label><select data-phase-archetype>${[
+                ['DISCRETE_TRIAL', 'Academic / discrete trial'],
+                ['PROMPT_FADE', 'Behavioral / prompt fade'],
+                ['TASK_EXPANSION', 'Cumulative task expansion'],
+                ['FREQUENCY_QUOTA', 'Frequency quota / checklist']
+              ].map(([value, label]) => `<option value="${value}" ${value === item.goalArchetype ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
               <div class="field"><label>Target accuracy %</label><input data-phase-accuracy type="number" min="0" max="100" step="0.1" value="${escapeAttr(item.targetAccuracyPct)}"></div>
               <div class="field"><label>Target prompt level</label><select data-phase-prompt-level><option value="">Not specified</option>${['Independent','Verbal','Gestural/Visual','Model','Physical'].map(level => `<option ${level === item.targetPromptLevel ? 'selected' : ''}>${escapeHtml(level)}</option>`).join('')}</select></div>
-              <div class="field"><label>Maximum prompt count</label><input data-phase-prompt-count type="number" min="0" step="1" value="${escapeAttr(item.targetPromptCount)}"></div>
+              <div class="field"><label>Maximum prompt count</label><input data-phase-prompt-ceiling type="number" min="0" step="1" value="${escapeAttr(item.targetPromptCeiling)}"></div>
+              <div class="field"><label>Consistency successes</label><input data-phase-consistency-passed type="number" min="1" step="1" value="${escapeAttr(item.consistencyTrialsPassed)}"></div>
+              <div class="field"><label>Consistency window</label><input data-phase-consistency-window type="number" min="1" step="1" value="${escapeAttr(item.consistencyTrialsWindow)}"></div>
               <div class="field"><label>Consecutive sessions</label><input data-phase-consecutive type="number" min="1" step="1" value="${escapeAttr(item.targetConsecutiveSessions)}"></div>
+              <div class="field"><label>Evaluation window</label><select data-phase-window-unit>${[
+                ['SESSION', 'Session'],
+                ['DATA_DAY', 'Data day'],
+                ['TWO_WEEK', 'Two-week window'],
+                ['GRADING_PERIOD', 'Grading period']
+              ].map(([value, label]) => `<option value="${value}" ${value === item.evaluationWindowUnit ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
               <div class="field"><label>Benchmark start date</label><input data-phase-start type="date" value="${escapeAttr(form.elements.startDate.value)}" required></div>
               <div class="field"><label>Benchmark due date</label><input data-phase-due type="date" value="${escapeAttr(form.elements.dueDate.value)}" required></div>
               <div class="message full">The active benchmark is selected automatically from these dates.</div>
@@ -2728,13 +2773,21 @@
         { header: 'SubjectIds', key: 'subjectIds', required: true },
         { header: 'BenchmarkOrder', key: 'phaseOrder', required: false },
         { header: 'TaskDemand', key: 'taskDemandDescription', required: false },
+        { header: 'GoalArchetype', key: 'goalArchetype', required: false },
         { header: 'TargetAccuracyPct', key: 'targetAccuracyPct', required: false },
         { header: 'TargetPromptLevel', key: 'targetPromptLevel', required: false },
-        { header: 'TargetPromptCount', key: 'targetPromptCount', required: false },
+        { header: 'TargetPromptCeiling', key: 'targetPromptCeiling', required: false },
+        { header: 'TargetPromptCount', key: 'legacyTargetPromptCount', required: false },
+        { header: 'ConsistencyTrialsPassed', key: 'consistencyTrialsPassed', required: false },
+        { header: 'ConsistencyTrialsWindow', key: 'consistencyTrialsWindow', required: false },
         { header: 'TargetConsecutiveSessions', key: 'targetConsecutiveSessions', required: false },
+        { header: 'EvaluationWindowUnit', key: 'evaluationWindowUnit', required: false },
         { header: 'BenchmarkStartDate', key: 'benchmarkStartDate', required: true },
         { header: 'BenchmarkDueDate', key: 'benchmarkDueDate', required: true }
-      ]);
+      ]).map(row => ({
+        ...row,
+        targetPromptCeiling: row.targetPromptCeiling || row.legacyTargetPromptCount
+      }));
     }
 
     async function previewBulkGoals_() {
@@ -2977,16 +3030,58 @@
       }
       const width = 760, height = 310, left = 46, right = 20, top = 20, bottom = 62;
       const plotBottom = height - bottom;
+      const benchmark = progress.benchmark || {};
+      const archetype = benchmark.goalArchetype || 'DISCRETE_TRIAL';
+      const metric = archetype === 'PROMPT_FADE'
+        ? 'PROMPT'
+        : archetype === 'FREQUENCY_QUOTA' ? 'FREQUENCY' : 'ACCURACY';
+      const values = points.map(point => metric === 'PROMPT'
+        ? point.actualPromptCount
+        : metric === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent
+      ).filter(value => value !== null && value !== '' && Number.isFinite(Number(value)));
+      if (!values.length) {
+        root.innerHTML = '<div class="empty">Entries exist, but this benchmark’s graph metric was not recorded.</div>';
+        return;
+      }
+      const target = metric === 'PROMPT'
+        ? benchmark.targetPromptCeiling
+        : metric === 'FREQUENCY'
+          ? benchmark.consistencyTrialsPassed
+          : benchmark.targetAccuracyPct;
+      const maxValue = metric === 'ACCURACY'
+        ? 100
+        : Math.max(1, ...values.map(Number), Number(target || 0));
       const x = index => points.length === 1 ? (left + width - right) / 2 : left + index * ((width - left - right) / (points.length - 1));
-      const y = value => plotBottom - (Number(value || 0) / 100) * (plotBottom - top);
-      const line = points.map((point, index) => `${x(index)},${y(point.percent)}`).join(' ');
+      const y = value => plotBottom - (Number(value || 0) / maxValue) * (plotBottom - top);
+      const line = points.map((point, index) => {
+        const value = metric === 'PROMPT'
+          ? point.actualPromptCount
+          : metric === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent;
+        return value === null || value === '' ? '' : `${x(index)},${y(value)}`;
+      }).filter(Boolean).join(' ');
       const labelEvery = Math.max(1, Math.ceil(points.length / 7));
-      const grid = [0, 25, 50, 75, 100].map(value => `
+      const ticks = metric === 'ACCURACY'
+        ? [0, 25, 50, 75, 100]
+        : Array.from(new Set([0, Math.ceil(maxValue / 2), Math.ceil(maxValue)]));
+      const suffix = metric === 'ACCURACY' ? '%' : '';
+      const metricLabel = metric === 'PROMPT'
+        ? 'Prompt count (lower is better)'
+        : metric === 'FREQUENCY' ? 'Recorded occurrences' : 'Accuracy';
+      const grid = ticks.map(value => `
         <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
-        <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}%</text>`).join('');
+        <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}${suffix}</text>`).join('');
       root.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Benchmark progress line chart">
-        ${grid}<polyline points="${line}" fill="none" stroke="#e10600" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-        ${points.map((point, index) => `<circle cx="${x(index)}" cy="${y(point.percent)}" r="5" fill="#fff" stroke="#e10600" stroke-width="3"><title>${escapeHtml(formatChartDate(point.timestamp))}: ${escapeHtml(String(point.percent))}% (${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))})</title></circle>`).join('')}
+        <text x="${left}" y="14" fill="#b8bbc2" font-size="11">${metricLabel}</text>
+        ${grid}
+        ${target === null || target === '' || target === undefined ? '' : `<line x1="${left}" y1="${y(target)}" x2="${width-right}" y2="${y(target)}" stroke="#ffd60a" stroke-width="2" stroke-dasharray="8 6"/><text x="${width-right}" y="${y(target)-5}" fill="#b8bbc2" font-size="10" text-anchor="end">Target ${escapeHtml(String(target))}${suffix}</text>`}
+        <polyline points="${line}" fill="none" stroke="#e10600" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        ${points.map((point, index) => {
+          const value = metric === 'PROMPT'
+            ? point.actualPromptCount
+            : metric === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent;
+          if (value === null || value === '') return '';
+          return `<circle cx="${x(index)}" cy="${y(value)}" r="5" fill="#fff" stroke="#e10600" stroke-width="3"><title>${escapeHtml(formatChartDate(point.timestamp))}: ${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))} · ${escapeHtml(String(point.percent))}%${point.actualPromptCount == null ? '' : ' · ' + escapeHtml(String(point.actualPromptCount)) + ' prompts'} · ${escapeHtml(point.actualPromptLevel || 'Prompt not recorded')}</title></circle>`;
+        }).join('')}
         ${points.map((point, index) => (index % labelEvery === 0 || index === points.length - 1)
           ? `<text x="${x(index)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="middle">${escapeHtml(formatChartDate(point.timestamp))}</text>`
           : '').join('')}
@@ -3225,66 +3320,123 @@
         chart.innerHTML = '<div class="empty">No visible goal has recorded entries.</div>';
         return;
       }
-      const width = 980, height = 390, left = 48, right = 24, top = 72, bottom = 62;
-      const plotBottom = height - bottom;
       const minTime = Math.min(...allPoints.map(point => point.time));
       const maxTime = Math.max(...allPoints.map(point => point.time));
+      const width = 980, height = 390, left = 48, right = 24, top = 72, bottom = 62;
+      const plotBottom = height - bottom;
       const x = time => minTime === maxTime
         ? (left + width - right) / 2
         : left + ((time - minTime) / (maxTime - minTime)) * (width - left - right);
-      const y = value => plotBottom - (Number(value || 0) / 100) * (plotBottom - top);
-      const grid = [0, 25, 50, 75, 100].map(value => `
-        <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
-        <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}%</text>`).join('');
       const dateTicks = Array.from({ length: 5 }, (_, index) =>
         minTime + (maxTime - minTime) * (index / 4)
       );
-      const phaseAnnotations = series.map(item => {
-        const benchmarks = safeArray(item.goal.benchmarks);
-        return safeArray(item.goal.phaseHistory)
-          .slice()
-          .sort((a, b) =>
-            String(a.activatedAt).localeCompare(String(b.activatedAt)) ||
-            Number(a.orderIndex || 0) - Number(b.orderIndex || 0)
+      const metricKey = archetype => archetype === 'PROMPT_FADE'
+        ? 'PROMPT'
+        : archetype === 'FREQUENCY_QUOTA' ? 'FREQUENCY' : 'ACCURACY';
+      const panels = [
+        { key: 'ACCURACY', label: 'Accuracy', suffix: '%' },
+        { key: 'PROMPT', label: 'Prompt count (lower is better)', suffix: '' },
+        { key: 'FREQUENCY', label: 'Recorded occurrences / quota progress', suffix: '' }
+      ].filter(panel => allPoints.some(point =>
+        metricKey(point.goalArchetype || 'DISCRETE_TRIAL') === panel.key
+      ));
+      chart.innerHTML = panels.map(panel => {
+        const panelSeries = series.map(item => ({
+          ...item,
+          points: item.points.filter(point =>
+            metricKey(point.goalArchetype || 'DISCRETE_TRIAL') === panel.key
           )
-          .map(history => {
-            const benchmark = benchmarks.find(row =>
-              String(row.id) === String(history.benchmarkId)
-            );
-            if (!benchmark || !history.activatedAt) return '';
-            const startTime = new Date(history.activatedAt + 'T12:00:00').getTime();
-            if (!Number.isFinite(startTime) || startTime > maxTime) return '';
-            const endTime = history.endedAt
-              ? Math.min(maxTime, new Date(history.endedAt + 'T12:00:00').getTime())
-              : maxTime;
-            const lineX = x(Math.max(minTime, startTime));
-            const target = benchmark.targetAccuracyPct === null ||
-              benchmark.targetAccuracyPct === '' ||
-              benchmark.targetAccuracyPct === undefined
-              ? null
-              : Number(benchmark.targetAccuracyPct);
-            const targetLine = target !== null && Number.isFinite(target)
-              ? `<line x1="${lineX}" y1="${y(target)}" x2="${x(Math.max(startTime, endTime))}" y2="${y(target)}" stroke="${item.color}" stroke-width="2" stroke-dasharray="9 6" opacity=".75"/>
-                <text x="${Math.min(width - right - 4, x(Math.max(startTime, endTime)))}" y="${y(target) - 5}" fill="#b8bbc2" font-size="10" text-anchor="end">Benchmark ${escapeHtml(String(history.orderIndex || ''))} target ${escapeHtml(String(target))}%</text>`
-              : '';
-            return `<line x1="${lineX}" y1="${top}" x2="${lineX}" y2="${plotBottom}" stroke="#8f9299" stroke-width="2" stroke-dasharray="5 5" opacity=".8"/>
-              <text x="${lineX + 4}" y="${36 + (Number(history.orderIndex || 1) % 3) * 11}" fill="#b8bbc2" font-size="10">Benchmark ${escapeHtml(String(history.orderIndex || ''))}</text>
-              ${targetLine}`;
-          }).join('');
+        })).filter(item => item.points.length);
+        const valueFor = point => panel.key === 'PROMPT'
+          ? point.actualPromptCount
+          : panel.key === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent;
+        const values = panelSeries.flatMap(item => item.points)
+          .map(valueFor)
+          .filter(value => value !== null && value !== '' && Number.isFinite(Number(value)))
+          .map(Number);
+        if (!values.length) {
+          return `<div class="empty">${escapeHtml(panel.label)} data was not recorded.</div>`;
+        }
+        const targetValues = panelSeries.flatMap(item => safeArray(item.goal.benchmarks))
+          .filter(benchmark => metricKey(benchmark.goalArchetype || 'DISCRETE_TRIAL') === panel.key)
+          .map(benchmark => panel.key === 'PROMPT'
+            ? benchmark.targetPromptCeiling
+            : panel.key === 'FREQUENCY'
+              ? benchmark.consistencyTrialsPassed
+              : benchmark.targetAccuracyPct
+          )
+          .filter(value => value !== null && value !== '' && Number.isFinite(Number(value)))
+          .map(Number);
+        const maxValue = panel.key === 'ACCURACY'
+          ? 100
+          : Math.max(1, ...values, ...targetValues);
+        const y = value => plotBottom -
+          (Number(value || 0) / maxValue) * (plotBottom - top);
+        const ticks = panel.key === 'ACCURACY'
+          ? [0, 25, 50, 75, 100]
+          : Array.from(new Set([0, Math.ceil(maxValue / 2), Math.ceil(maxValue)]));
+        const grid = ticks.map(value => `
+          <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
+          <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}${panel.suffix}</text>`).join('');
+        const phaseAnnotations = panelSeries.map(item => {
+          const benchmarks = safeArray(item.goal.benchmarks);
+          return safeArray(item.goal.phaseHistory)
+            .slice()
+            .sort((a, b) =>
+              String(a.activatedAt).localeCompare(String(b.activatedAt)) ||
+              Number(a.orderIndex || 0) - Number(b.orderIndex || 0)
+            )
+            .map(history => {
+              const benchmark = benchmarks.find(row =>
+                String(row.id) === String(history.benchmarkId)
+              );
+              if (!benchmark || !history.activatedAt) return '';
+              const startTime = new Date(history.activatedAt + 'T12:00:00').getTime();
+              if (!Number.isFinite(startTime) || startTime > maxTime) return '';
+              const endTime = history.endedAt
+                ? Math.min(maxTime, new Date(history.endedAt + 'T12:00:00').getTime())
+                : maxTime;
+              const lineX = x(Math.max(minTime, startTime));
+              const benchmarkMetric = metricKey(
+                benchmark.goalArchetype || 'DISCRETE_TRIAL'
+              );
+              const target = benchmarkMetric !== panel.key
+                ? null
+                : panel.key === 'PROMPT'
+                  ? benchmark.targetPromptCeiling
+                  : panel.key === 'FREQUENCY'
+                    ? benchmark.consistencyTrialsPassed
+                    : benchmark.targetAccuracyPct;
+              const targetLine = target !== null && target !== '' &&
+                  target !== undefined && Number.isFinite(Number(target))
+                ? `<line x1="${lineX}" y1="${y(target)}" x2="${x(Math.max(startTime, endTime))}" y2="${y(target)}" stroke="${item.color}" stroke-width="2" stroke-dasharray="9 6" opacity=".75"/>
+                  <text x="${Math.min(width - right - 4, x(Math.max(startTime, endTime)))}" y="${y(target) - 5}" fill="#b8bbc2" font-size="10" text-anchor="end">Benchmark ${escapeHtml(String(history.orderIndex || ''))} target ${escapeHtml(String(target))}${panel.suffix}</text>`
+                : '';
+              return `<line x1="${lineX}" y1="${top}" x2="${lineX}" y2="${plotBottom}" stroke="#8f9299" stroke-width="2" stroke-dasharray="5 5" opacity=".8"/>
+                <text x="${lineX + 4}" y="${36 + (Number(history.orderIndex || 1) % 3) * 11}" fill="#b8bbc2" font-size="10">Benchmark ${escapeHtml(String(history.orderIndex || ''))}</text>
+                ${targetLine}`;
+            }).join('');
+        }).join('');
+        return `<div class="eyebrow" style="margin-top:14px">${escapeHtml(panel.label)}</div>
+          <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttr(panel.label)} annual goal progress chart">
+          ${grid}
+          ${phaseAnnotations}
+          ${panelSeries.map(item => {
+            const ordered = item.points.slice().sort((a, b) =>
+              a.time - b.time || Number(a.phaseOrder || 0) - Number(b.phaseOrder || 0)
+            ).filter(point => {
+              const value = valueFor(point);
+              return value !== null && value !== '' && Number.isFinite(Number(value));
+            });
+            const line = ordered.map(point =>
+              `${x(point.time)},${y(valueFor(point))}`
+            ).join(' ');
+            return `<polyline points="${line}" fill="none" stroke="${item.color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              ${ordered.map(point => `<circle cx="${x(point.time)}" cy="${y(valueFor(point))}" r="5" fill="${promptColors[point.actualPromptLevel] || '#111318'}" stroke="${item.color}" stroke-width="3"><title>${escapeHtml(formatChartDate(point.observationDate || point.timestamp))}: ${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))} · ${escapeHtml(String(point.percent))}% · ${escapeHtml(point.actualPromptLevel || 'Prompt not recorded')}${point.actualPromptCount == null ? '' : ' · ' + escapeHtml(String(point.actualPromptCount)) + ' prompts'} · ${escapeHtml(point.benchmark || '')} · ${escapeHtml(point.staffEmail || '')}</title></circle>`).join('')}`;
+          }).join('')}
+          ${dateTicks.map((time, index) => `<text x="${x(time)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="${index === 0 ? 'start' : index === 4 ? 'end' : 'middle'}">${escapeHtml(formatChartDate(new Date(time).toISOString()))}</text>`).join('')}
+        </svg>`;
       }).join('');
-      chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Annual goal progress line chart">
-        ${grid}
-        ${phaseAnnotations}
-        ${series.map(item => {
-          const ordered = item.points.slice().sort((a, b) =>
-            a.time - b.time || Number(a.phaseOrder || 0) - Number(b.phaseOrder || 0)
-          );
-          const line = ordered.map(point => `${x(point.time)},${y(point.percent)}`).join(' ');
-          return `<polyline points="${line}" fill="none" stroke="${item.color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            ${ordered.map(point => `<circle cx="${x(point.time)}" cy="${y(point.percent)}" r="5" fill="${promptColors[point.actualPromptLevel] || '#111318'}" stroke="${item.color}" stroke-width="3"><title>${escapeHtml(formatChartDate(point.observationDate || point.timestamp))}: ${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))} · ${escapeHtml(String(point.percent))}% · ${escapeHtml(point.actualPromptLevel || 'Prompt not recorded')}${point.actualPromptCount == null ? '' : ' · ' + escapeHtml(String(point.actualPromptCount)) + ' prompts'} · ${escapeHtml(point.benchmark || '')} · ${escapeHtml(point.staffEmail || '')}</title></circle>`).join('')}`;
-        }).join('')}
-        ${dateTicks.map((time, index) => `<text x="${x(time)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="${index === 0 ? 'start' : index === 4 ? 'end' : 'middle'}">${escapeHtml(formatChartDate(new Date(time).toISOString()))}</text>`).join('')}
-      </svg>`;
     }
 
     async function showBenchmarkHistory(benchmarkId) {

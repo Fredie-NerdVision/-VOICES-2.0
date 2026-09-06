@@ -64,13 +64,17 @@ Each benchmark row is an ordered task/condition phase associated with a goal thr
 
 - `OrderIndex`
 - `TaskDemandDescription`
+- `GoalArchetype`: `DISCRETE_TRIAL`, `PROMPT_FADE`, `TASK_EXPANSION`, or `FREQUENCY_QUOTA`
 - `TargetPromptLevel`
-- `TargetPromptCount`
+- `TargetPromptCeiling` (`TargetPromptCount` remains a compatibility alias)
 - `TargetAccuracyPct`
+- `ConsistencyTrialsPassed`
+- `ConsistencyTrialsWindow`
 - `TargetConsecutiveSessions`
+- `EvaluationWindowUnit`: `SESSION`, `DATA_DAY`, `TWO_WEEK`, or `GRADING_PERIOD`
 - benchmark-specific `StartDate` and `DueDate`
 
-`TargetCorrect`, `TargetAttempts`, `RequiredTrials`, and `TotalTrials` are retained for compatibility. Date-mode goals select the eligible benchmark with the nearest due date, fall forward to the next upcoming benchmark when no date window is currently open, and select none after all date ranges end.
+`TargetCorrect`, `TargetAttempts`, `RequiredTrials`, and `TotalTrials` are retained for compatibility. Ratios such as “3 of 4 opportunities” populate consistency fields and do not imply a 75% accuracy target. Date-mode goals select the eligible benchmark with the nearest due date, fall forward to the next upcoming benchmark when no date window is currently open, and select none after all date ranges end.
 
 ### GoalPhaseHistory
 
