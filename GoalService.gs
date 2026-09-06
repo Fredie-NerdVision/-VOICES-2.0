@@ -526,7 +526,7 @@ function rollbackGoalCreation_(goalId, benchmarkIds) {
 function getGoalManagerData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
-    tryReconcileDateDrivenBenchmarks_(new Date(), staff.Email);
+    tryReconcileDateDrivenBenchmarks_(new Date(), '');
     return getGoalManagerData_(staff);
   });
 }
@@ -556,7 +556,7 @@ function getStudentGoalWorkspace(studentId, options) {
   return withRowsCache_(() => {
     options = options || {};
     const staff = requireCaseManager_();
-    tryReconcileDateDrivenBenchmarks_(new Date(), staff.Email);
+    tryReconcileDateDrivenBenchmarks_(new Date(), '');
     const student = requireManagedStudent_(staff, studentId);
     const goals = rows_('Goals')
       .filter(isActiveGoal_)

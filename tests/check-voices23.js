@@ -131,6 +131,8 @@ if (!database.includes("'BenchmarkActivationMode'") ||
 if (!html.includes('activeEntryAverage') ||
     !html.includes('entryBadgeClass') ||
     !benchmarkService.includes('Benchmark observation overdue') ||
+    !benchmarkService.includes('function applicationBenchmarkText_') ||
+    !benchmarkService.includes("'Benchmark ' + orderIndex + ': '") ||
     !html.includes('Benchmark ${escapeHtml(String(history.orderIndex') ||
     html.includes('STO ${escapeHtml(String(history.orderIndex') ||
     html.includes("slice(0, 34)")) {

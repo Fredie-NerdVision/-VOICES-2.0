@@ -725,11 +725,16 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   const totalTrials = optionalNumber_(row.TotalTrials);
   const targetPromptCount = optionalInteger_(row.TargetPromptCount);
   const targetConsecutiveSessions = optionalInteger_(row.TargetConsecutiveSessions);
-  const taskDemand = row.TaskDemandDescription || row.Skill || row.Description || '';
   const orderIndex = optionalInteger_(row.OrderIndex) || 1;
+  const label = 'Benchmark ' + orderIndex;
+  const taskDemand = applicationBenchmarkText_(
+    row.TaskDemandDescription || row.Skill || row.Description || '',
+    orderIndex
+  );
   const category = /^(?:Phase|Short-Term Objective)\s+\d+$/i.test(
     String(row.Category || '').trim()
-  ) ? 'Benchmark ' + orderIndex : row.Category;
+  ) ? label : row.Category;
+  const description = applicationBenchmarkText_(row.Description, orderIndex);
   const targetParts = [
     targetAccuracy === null ? '' : targetAccuracy + '% accuracy',
     row.TargetPromptLevel
@@ -750,6 +755,7 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
     subjectName: subjectNames[0] || '',
     subjectIds: subjectIds,
     subjectNames: subjectNames,
+    label: label,
     category: category,
     skill: row.Skill,
     orderIndex: orderIndex,
@@ -766,8 +772,13 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
     dueDate: row.DueDate,
     critical: toBoolean_(row.Critical),
     active: toBoolean_(row.Active),
-    description: row.Description,
-    display: [category, taskDemand, targetParts.join(' · ')].filter(Boolean).join(' — '),
+    description: description,
+    display: [
+      label,
+      category === label ? '' : category,
+      taskDemand,
+      targetParts.join(' · ')
+    ].filter(Boolean).join(' — '),
     mastery: Array.isArray(entries) ? summarizeBenchmarkMastery_(row, entries) : null,
     lastEntry: lastEntry ? {
       timestamp: lastEntry.Timestamp,
@@ -778,6 +789,13 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
     } : null,
     entryCount: entryCount || 0
   };
+}
+
+function applicationBenchmarkText_(value, orderIndex) {
+  return String(value || '').replace(
+    /^\s*(?:STO|Short\s*[-–—]?\s*Term\s+Objective|Objective|Phase|Benchmark)\s*#?\s*\d+\s*[:\-–—.]?\s*/i,
+    'Benchmark ' + orderIndex + ': '
+  );
 }
 
 function canUseAnyObservationClass_(staff) {
