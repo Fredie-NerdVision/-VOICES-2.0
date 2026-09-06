@@ -4,7 +4,14 @@ const vm = require('vm');
 
 const projectRoot = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(projectRoot, 'Index.html'), 'utf8');
+const scheduleService = fs.readFileSync(path.join(projectRoot, 'ScheduleService.gs'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+if (!scheduleService.includes('function getScheduleTypeSummaries()') ||
+    !html.includes("serverQuiet('getScheduleTypeSummaries')") ||
+    !html.includes("serverQuiet('getScheduleBuilderData'") ||
+    /bindRefreshButtons\(root\);\s*loadScheduleBuilder\(\);/.test(html)) {
+  throw new Error('Schedule template loading or non-blocking on-demand schedule loading regressed.');
+}
 const context = {
   console,
   document: {

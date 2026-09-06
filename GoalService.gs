@@ -641,24 +641,71 @@ function rollbackGoalCreation_(goalId, benchmarkIds) {
     .forEach(row => deleteRow_('Goals', row._row));
 }
 
-function getGoalManagerData() {
+function getGoalManagerData(studentId) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
-    return getGoalManagerData_(staff);
+    return getGoalManagerData_(staff, studentId);
   });
 }
 
-function getGoalManagerData_(staff) {
+function getGoalManagerData_(staff, studentId, includeAllStudents) {
+  const selectedStudentId = String(studentId || '');
+  if (!selectedStudentId && !includeAllStudents) {
+    return {
+      goals: [],
+      benchmarks: [],
+      subjects: activeRows_('Subjects').map(row => ({
+        Id: row.Id,
+        Name: row.Name
+      }))
+    };
+  }
   const students = managedStudents_(staff);
   const studentIds = new Set(students.map(row => String(row.Id)));
   const studentIndex = indexBy_(students, 'Id');
-  const goals = rows_('Goals')
+  if (selectedStudentId && !studentIds.has(selectedStudentId)) {
+    throw new Error('You can only manage goals for your assigned students.');
+  }
+  const goals = (includeAllStudents
+    ? rows_('Goals')
+    : rowsByColumnValues_('Goals', 'StudentId', [selectedStudentId]))
     .filter(row => ['ACTIVE', 'DRAFT', 'COMPLETED'].includes(goalStatus_(row)))
-    .filter(row => studentIds.has(String(row.StudentId)));
+    .filter(row => includeAllStudents
+      ? studentIds.has(String(row.StudentId))
+      : String(row.StudentId) === selectedStudentId);
   const goalIds = new Set(goals.map(row => String(row.Id)));
+  const goalIdList = Array.from(goalIds);
+  if (VOICES_ROWS_CACHE) {
+    VOICES_ROWS_CACHE.GoalPhaseHistory = includeAllStudents
+      ? rows_('GoalPhaseHistory').filter(row => goalIds.has(String(row.GoalId)))
+      : rowsByColumnValues_('GoalPhaseHistory', 'GoalId', goalIdList);
+  }
+  const selectedBenchmarks = (includeAllStudents
+    ? rows_('Benchmarks')
+    : rowsByColumnValues_('Benchmarks', 'StudentId', [selectedStudentId]))
+    .filter(row => goalIds.has(String(row.GoalId)));
+  const selectedBenchmarkSubjects = includeAllStudents
+    ? rows_('BenchmarkSubjects').filter(row =>
+        selectedBenchmarks.some(benchmark =>
+          String(benchmark.Id) === String(row.BenchmarkId)
+        )
+      )
+    : rowsByColumnValues_(
+        'BenchmarkSubjects',
+        'BenchmarkId',
+        selectedBenchmarks.map(row => row.Id)
+      );
+  if (VOICES_INDEX_CACHE) {
+    VOICES_INDEX_CACHE.benchmarkSubjects = selectedBenchmarkSubjects.reduce((map, row) => {
+      const id = String(row.BenchmarkId);
+      if (!map[id]) map[id] = [];
+      map[id].push(String(row.SubjectId));
+      return map;
+    }, {});
+  }
   const benchmarks = effectiveBenchmarkRows_(
     goals,
-    rows_('Benchmarks').filter(row => goalIds.has(String(row.GoalId))),
+    selectedBenchmarks,
     new Date()
   );
   return {
@@ -668,7 +715,11 @@ function getGoalManagerData_(staff) {
       studentIndex[row.StudentId],
       benchmarks.filter(benchmark => String(benchmark.GoalId) === String(row.Id))
     )),
-    benchmarks: benchmarks.map(row => publicBenchmark_(row, studentIndex[row.StudentId]))
+    benchmarks: benchmarks.map(row => publicBenchmark_(row, studentIndex[row.StudentId])),
+    subjects: activeRows_('Subjects').map(row => ({
+      Id: row.Id,
+      Name: row.Name
+    }))
   };
 }
 

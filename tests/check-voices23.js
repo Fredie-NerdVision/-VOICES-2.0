@@ -137,7 +137,15 @@ if (/function getAppBootstrap\(\)[\s\S]{0,500}tryReconcileDateDrivenBenchmarks_/
     code.includes('response.students = students') ||
     !html.includes('caseManagerDataLoaded: {}') ||
     !html.includes("await ensureCaseManagerTabData('overview')") ||
+    !html.includes("serverQuiet('getCaseManagerEntryData')") ||
+    !html.includes("serverQuiet('getCaseManagerPeopleData')") ||
+    !html.includes("serverQuiet('getStaffRequestData')") ||
+    !html.includes("serverQuiet('getMessageManagementData')") ||
     !html.includes("serverQuiet('getStudentGoalWorkspace'") ||
+    !html.includes("serverQuiet(\n        'getGoalManagerData'") ||
+    !html.includes('Loading this student’s goal catalog') ||
+    !goalService.includes("rowsByColumnValues_('Goals', 'StudentId'") ||
+    !/rowsByColumnValues_\(\s*'Benchmarks',\s*'StudentId'/.test(goalService) ||
     html.includes('if (!state.goalStudentId && cm.students[0])') ||
     !html.includes('goalCatalogLoaded: false') ||
     !html.includes('state.goalVisibility[goal.id] = index === 0') ||

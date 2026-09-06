@@ -604,6 +604,47 @@ function rows_(name) {
   return records;
 }
 
+function rowsByColumnValues_(name, columnName, values) {
+  const selected = new Set((values || []).map(String).filter(Boolean));
+  if (!selected.size) return [];
+  if (VOICES_ROWS_CACHE && VOICES_ROWS_CACHE[name]) {
+    return VOICES_ROWS_CACHE[name]
+      .filter(row => selected.has(String(row[columnName])))
+      .map(row => Object.assign({}, row));
+  }
+  const headers = SHEET_SCHEMAS[name];
+  const column = headers ? headers.indexOf(columnName) : -1;
+  const target = sheet_(name);
+  const lastRow = target.getLastRow();
+  if (column < 0 || lastRow < 2) return [];
+  const matchingRows = target.getRange(2, column + 1, lastRow - 1, 1)
+    .getValues()
+    .reduce((rows, value, index) => {
+      const cell = value[0] instanceof Date ? formatDate_(value[0]) : String(value[0]);
+      if (selected.has(cell)) rows.push(index + 2);
+      return rows;
+    }, []);
+  if (!matchingRows.length) return [];
+  const firstRow = matchingRows[0];
+  const rowCount = matchingRows[matchingRows.length - 1] - firstRow + 1;
+  return target.getRange(firstRow, 1, rowCount, headers.length)
+    .getValues()
+    .reduce((records, row, index) => {
+      if (!row.some(value => value !== '')) return records;
+      const keyValue = row[column] instanceof Date
+        ? formatDate_(row[column])
+        : String(row[column]);
+      if (!selected.has(keyValue)) return records;
+      const record = { _row: firstRow + index };
+      headers.forEach((header, headerIndex) => {
+        const value = row[headerIndex];
+        record[header] = value instanceof Date ? formatDateTime_(value) : value;
+      });
+      records.push(record);
+      return records;
+    }, []);
+}
+
 function activeRows_(name) {
   return rows_(name).filter(row => row.Active === undefined || row.Active === '' || toBoolean_(row.Active));
 }

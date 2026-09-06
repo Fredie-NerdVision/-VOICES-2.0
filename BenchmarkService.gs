@@ -855,7 +855,7 @@ function getCaseManagerDashboard_(staff, options) {
         goals: [],
         benchmarks: []
       }
-    : getGoalManagerData_(staff);
+    : getGoalManagerData_(staff, '', true);
   const staffRows = activeRows_('Staff');
   const isAdmin = toBoolean_(staff.IsAdmin);
   return Object.assign({}, goalData, {

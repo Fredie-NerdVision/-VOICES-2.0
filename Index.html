@@ -823,7 +823,7 @@
         const data = await serverQuiet('getCaseManagerOverviewData');
         cm.toDos = safeArray(data && data.toDos);
       } else if (tab === 'entry') {
-        const data = await server('getCaseManagerEntryData');
+        const data = await serverQuiet('getCaseManagerEntryData');
         state.data.subjects = safeArray(data && data.subjects);
         state.data.classes = safeArray(data && data.classes);
         state.data.students = safeArray(data && data.students);
@@ -833,15 +833,15 @@
         state.data.benchmarkLookup.teachers = safeArray(state.data.benchmarkLookup.teachers);
         state.data.benchmarkLookup.classes = safeArray(state.data.benchmarkLookup.classes);
       } else if (tab === 'people') {
-        const data = await server('getCaseManagerPeopleData');
+        const data = await serverQuiet('getCaseManagerPeopleData');
         cm.students = safeArray(data && data.students);
         cm.staff = safeArray(data && data.staff);
         cm.caseManagers = safeArray(data && data.caseManagers);
         cm.aides = safeArray(data && data.aides);
       } else if (tab === 'requests') {
-        cm.requests = await server('getStaffRequestData');
+        cm.requests = await serverQuiet('getStaffRequestData');
       } else if (tab === 'admin') {
-        cm.messages = await server('getMessageManagementData');
+        cm.messages = await serverQuiet('getMessageManagementData');
       }
       state.caseManagerDataLoaded[tab] = true;
     }
@@ -945,7 +945,24 @@
       document.getElementById('previousScheduleWeek').addEventListener('click', () => shiftScheduleDate(-7));
       document.getElementById('nextScheduleWeek').addEventListener('click', () => shiftScheduleDate(7));
       bindRefreshButtons(root);
-      loadScheduleBuilder();
+      loadScheduleTypeSummaries();
+    }
+
+    async function loadScheduleTypeSummaries(force) {
+      const select = document.getElementById('scheduleTemplate');
+      if (!select) return;
+      if (!force && state.data.caseManager.scheduleTypes.length) return;
+      select.disabled = true;
+      try {
+        const types = safeArray(await serverQuiet('getScheduleTypeSummaries'));
+        state.data.caseManager.scheduleTypes = types;
+        const selected = select.value;
+        select.innerHTML = `<option value="">Current day</option>${options(types, 'id', 'name', selected)}`;
+      } catch (error) {
+        toast(safeErrorMessage(error), true);
+      } finally {
+        select.disabled = false;
+      }
     }
 
     function shiftScheduleDate(days) {
@@ -960,8 +977,13 @@
     async function loadScheduleBuilder() {
       const date = document.getElementById('scheduleDate').value;
       if (!date) return toast('Choose a date.', true);
+      const workspace = document.getElementById('scheduleWorkspace');
+      const button = document.getElementById('loadSchedule');
+      const templateId = document.getElementById('scheduleTemplate').value;
+      if (workspace) workspace.innerHTML = '<div class="card empty">Loading schedule data…</div>';
+      if (button) button.disabled = true;
       try {
-        state.scheduleData = await server('getScheduleBuilderData', date);
+        state.scheduleData = await serverQuiet('getScheduleBuilderData', date, templateId);
         if (!state.scheduleData || !state.scheduleData.schedule) throw new Error('The schedule response was incomplete.');
         state.scheduleData.aides = safeArray(state.scheduleData.aides);
         state.scheduleData.classes = safeArray(state.scheduleData.classes);
@@ -975,7 +997,6 @@
         state.scheduleData.schedule.periods = safeArray(state.scheduleData.schedule.periods);
         state.scheduleData.schedule.assignments = safeArray(state.scheduleData.schedule.assignments);
         state.scheduleData.week = normalizeWeekData(state.scheduleData.week);
-        const templateId = document.getElementById('scheduleTemplate').value;
         if (templateId) {
           const template = state.scheduleData.scheduleTypes.find(item => String(item.id) === templateId);
           if (template) {
@@ -987,7 +1008,12 @@
         }
         renderScheduleWorkspace();
         if (templateId) scheduleDraftChanged();
-      } catch (error) { toast(error.message, true); }
+      } catch (error) {
+        if (workspace) workspace.innerHTML = `<div class="card empty">${escapeHtml(error.message)}</div>`;
+        toast(error.message, true);
+      } finally {
+        if (button) button.disabled = false;
+      }
     }
 
     function renderScheduleWorkspace() {
@@ -1715,6 +1741,15 @@
             periods: state.scheduleData.schedule.periods.map(item => ({ ...item })),
             assignments: assignments.map(item => ({ ...item }))
           }]);
+        state.data.caseManager.scheduleTypes = state.scheduleData.scheduleTypes.map(item => ({
+          id: item.id,
+          name: item.name,
+          isDefault: item.isDefault
+        }));
+        const templateSelect = document.getElementById('scheduleTemplate');
+        if (templateSelect) {
+          templateSelect.innerHTML = `<option value="">Current day</option>${options(state.data.caseManager.scheduleTypes, 'id', 'name')}`;
+        }
         toast('Schedule type saved.');
       } catch (error) { toast(error.message, true); }
     }
@@ -1756,7 +1791,7 @@
       const goals = safeArray(cm.goals);
       const benchmarks = safeArray(cm.benchmarks);
       if (!students.some(item => String(item.id) === String(state.benchmarkStudentId))) {
-        state.benchmarkStudentId = students[0] ? students[0].id : '';
+        state.benchmarkStudentId = '';
       }
       const selectedStudent = students.find(item => String(item.id) === String(state.benchmarkStudentId));
       const selectedGoals = goals.filter(item =>
@@ -1822,7 +1857,10 @@
       });
       document.getElementById('benchmarkStudentFilter').addEventListener('change', event => {
         state.benchmarkStudentId = event.currentTarget.value;
-        renderBenchmarkManager(root);
+        root.innerHTML = '<article class="card empty">Loading this student’s goal catalog…</article>';
+        refreshGoalManagerData(state.benchmarkStudentId).catch(error => {
+          root.innerHTML = `<article class="card empty">${escapeHtml(error.message)}</article>`;
+        });
       });
       bindRefreshButtons(root);
       root.querySelectorAll('[data-deactivate-goal]').forEach(button => button.addEventListener('click', async () => {
@@ -2035,11 +2073,17 @@
       }
     }
 
-    async function refreshGoalManagerData() {
-      const data = await server('getGoalManagerData');
-      state.data.caseManager.students = safeArray(data.students);
+    async function refreshGoalManagerData(studentId) {
+      const data = await serverQuiet(
+        'getGoalManagerData',
+        studentId === undefined ? state.benchmarkStudentId : studentId
+      );
+      if (Array.isArray(data.students)) {
+        state.data.caseManager.students = data.students;
+      }
       state.data.caseManager.goals = safeArray(data.goals);
       state.data.caseManager.benchmarks = safeArray(data.benchmarks);
+      state.data.subjects = safeArray(data.subjects);
       state.goalCatalogLoaded = true;
       state.goalWorkspaceCache = {};
       renderBenchmarkManager(document.getElementById('cmContent'));
@@ -2048,7 +2092,7 @@
     async function renderIeps(root) {
       root.innerHTML = '<article class="card empty">Loading IEPs…</article>';
       try {
-        const ieps = safeArray(await server('getIepsForCurrentCaseManager'));
+        const ieps = safeArray(await serverQuiet('getIepsForCurrentCaseManager'));
         root.innerHTML = `
           <div class="grid two">
             <article class="card">
@@ -2443,7 +2487,7 @@
     }
 
     async function refreshMessageManagementData() {
-      const data = await server('getMessageManagementData');
+      const data = await serverQuiet('getMessageManagementData');
       state.data.caseManager.messages = data;
       state.data.dailyMessages = safeArray(data.activeToday);
       renderAdmin(document.getElementById('cmContent'));
@@ -3643,12 +3687,16 @@
             const section = button.dataset.refresh || state.selectedTab;
             if (section === 'benchmarks') {
               await refreshGoalManagerData();
+            } else if (section === 'schedule') {
+              await loadScheduleTypeSummaries(true);
+              if (state.scheduleData) await loadScheduleBuilder();
+            } else if (section === 'ieps') {
+              await renderIeps(document.getElementById('cmContent'));
             } else if (section === 'admin') {
               await refreshMessageManagementData();
-            } else if (section === 'overview') {
-              await refreshBootstrap('overview');
             } else {
-              await refreshBootstrap(section);
+              state.caseManagerDataLoaded[section] = false;
+              await renderCaseManagerTab();
             }
             toast('Data refreshed.');
           } catch (error) { toast(safeErrorMessage(error), true); }

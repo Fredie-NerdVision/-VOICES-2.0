@@ -15,6 +15,22 @@ function getScheduleTypes_() {
   }));
 }
 
+function getScheduleTypeSummaries() {
+  return withRowsCache_(() => {
+    requireCaseManager_();
+    return activeRows_('ScheduleTypes')
+      .map(type => ({
+        id: type.Id,
+        name: type.Name,
+        isDefault: toBoolean_(type.IsDefault)
+      }))
+      .sort((a, b) =>
+        Number(b.isDefault) - Number(a.isDefault) ||
+        a.name.localeCompare(b.name)
+      );
+  });
+}
+
 function publicPeriod_(row) {
   return {
     periodId: row.PeriodId,
@@ -25,14 +41,26 @@ function publicPeriod_(row) {
   };
 }
 
-function getScheduleBuilderData(dateText) {
+function getScheduleBuilderData(dateText, templateId) {
   return withRowsCache_(() => {
     requireCaseManager_();
     const date = dateText || formatDate_(new Date());
+    const selectedTemplateId = String(templateId || '');
+    const scheduleTypes = getScheduleTypes_().map(type =>
+      !selectedTemplateId || String(type.id) !== selectedTemplateId
+        ? {
+            id: type.id,
+            name: type.name,
+            isDefault: type.isDefault,
+            periods: [],
+            assignments: []
+          }
+        : type
+    );
     return {
       date: date,
       schedule: getDaySchedule_(date),
-      scheduleTypes: getScheduleTypes_(),
+      scheduleTypes: scheduleTypes,
       aides: activeRows_('Staff')
         .filter(row => row.Role === VOICES.ROLES.AIDE)
         .map(publicStaff_),
@@ -48,9 +76,45 @@ function getScheduleBuilderData(dateText) {
       dailyHours: getDailyHoursForDate_(date),
       unavailable: getUnavailableAidesForDate_(date),
       unassignedOneToOnes: getUnassignedOneToOnes_(date),
-      week: getWeeklyScheduleData_(date)
+      week: getCompactWeeklyScheduleData_(date)
     };
   });
+}
+
+function getCompactWeeklyScheduleData_(dateText) {
+  const weekStart = weekStart_(dateText);
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'voices-week-summary-' + weekStart + '-v' + getScheduleCacheVersion_();
+  try {
+    const cached = cache.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch (error) {
+    console.warn('Weekly schedule summary cache read failed: ' + error.message);
+  }
+  const result = compactWeeklySchedule_(buildWeeklyScheduleData_(dateText));
+  try {
+    cache.put(cacheKey, JSON.stringify(result), 300);
+  } catch (error) {
+    console.warn('Weekly schedule summary cache write failed: ' + error.message);
+  }
+  return result;
+}
+
+function compactWeeklySchedule_(week) {
+  return {
+    weekStart: week.weekStart,
+    weekEnd: week.weekEnd,
+    days: week.days.map(day => ({
+      date: day.date,
+      dayName: day.dayName,
+      scheduleId: day.scheduleId,
+      name: day.name,
+      source: day.source,
+      conflicts: day.conflicts
+    })),
+    aides: week.aides,
+    summary: week.summary
+  };
 }
 
 function getScheduleStaffingStatus_(dateText) {
