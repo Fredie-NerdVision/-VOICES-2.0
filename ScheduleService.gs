@@ -965,17 +965,23 @@ function reconcileCallOffDay_(absentEmail, dateText) {
   }
 
   const periods = Array.from(new Set(absentAssignments.map(row => String(row.PeriodId))));
-  const proposed = originalAssignments.map(row => Object.assign({}, row));
+  let proposed = originalAssignments.map(row => Object.assign({}, row));
   const failures = [];
+  const displacedAssignments = [];
 
   periods.forEach(periodId => {
-    const periodAssignments = proposed.filter(row => String(row.PeriodId) === periodId);
+    const existingPeriodAssignments = proposed.filter(row => String(row.PeriodId) === periodId);
+    const periodAssignments = existingPeriodAssignments.map(row => Object.assign({}, row));
     const requirements = periodAssignments
       .filter(row => row.StudentId && isOneToOneStudent_(row.StudentId))
-      .map(row => ({ studentId: String(row.StudentId), assignment: row }));
+      .map(row => ({
+        studentId: String(row.StudentId),
+        classId: String(row.ClassId || ''),
+        currentAideEmail: normalizeEmail_(row.AideEmail)
+      }));
     const uniqueRequirements = uniqueBy_(requirements, item => item.studentId);
     const absentStudentIds = uniqueRequirements
-      .filter(item => normalizeEmail_(item.assignment.AideEmail) === absentEmail)
+      .filter(item => item.currentAideEmail === absentEmail)
       .map(item => item.studentId);
     periodAssignments
       .filter(row => normalizeEmail_(row.AideEmail) === absentEmail)
@@ -986,11 +992,21 @@ function reconcileCallOffDay_(absentEmail, dateText) {
         assignment.Note = 'Call-off';
         assignment.Type = 'OFF';
       });
+    if (!absentStudentIds.length) {
+      proposed = proposed
+        .filter(row => String(row.PeriodId) !== periodId)
+        .concat(periodAssignments);
+      return;
+    }
     const candidateAides = activeRows_('Staff')
       .filter(row => row.Role === VOICES.ROLES.AIDE)
       .map(row => normalizeEmail_(row.Email))
       .filter(email => email !== absentEmail)
-      .filter(email => isAideAvailableForPeriod_(email, dateText, periodId));
+      .filter(email => isAideAvailableForPeriod_(email, dateText, periodId))
+      .sort((left, right) =>
+        callOffCandidatePriority_(left, existingPeriodAssignments) -
+        callOffCandidatePriority_(right, existingPeriodAssignments)
+      );
     const match = matchOneToOneCoverage_(uniqueRequirements, candidateAides);
     if (!match.ok) {
       failures.push(
@@ -999,9 +1015,13 @@ function reconcileCallOffDay_(absentEmail, dateText) {
           : match.unmatchedStudentIds
         ).join(', ')
       );
+      proposed = proposed
+        .filter(row => String(row.PeriodId) !== periodId)
+        .concat(periodAssignments);
       return;
     }
 
+    const requirementByStudent = indexBy_(uniqueRequirements, 'studentId');
     periodAssignments.forEach(assignment => {
       if (normalizeEmail_(assignment.AideEmail) === absentEmail) {
         assignment.ClassId = '';
@@ -1010,13 +1030,20 @@ function reconcileCallOffDay_(absentEmail, dateText) {
         assignment.Note = 'Call-off';
         assignment.Type = 'OFF';
       } else if (assignment.StudentId && isOneToOneStudent_(assignment.StudentId)) {
-        assignment.StudentId = '';
-        assignment.Duty = '';
-        assignment.Type = 'STANDARD';
+        const assignedAide = normalizeEmail_(match.byStudent[String(assignment.StudentId)]);
+        if (assignedAide !== normalizeEmail_(assignment.AideEmail)) {
+          assignment.StudentId = '';
+          assignment.Duty = '';
+          assignment.Note = '';
+          assignment.Type = 'STANDARD';
+        }
       }
     });
+    const periodDisplacements = [];
     Object.keys(match.byStudent).forEach(studentId => {
       const aideEmail = match.byStudent[studentId];
+      const requirement = requirementByStudent[studentId];
+      if (requirement.currentAideEmail === aideEmail) return;
       let assignment = periodAssignments.find(row => normalizeEmail_(row.AideEmail) === aideEmail);
       if (!assignment) {
         assignment = {
@@ -1031,15 +1058,59 @@ function reconcileCallOffDay_(absentEmail, dateText) {
           Note: '',
           Type: 'STANDARD'
         };
-        proposed.push(assignment);
+        periodAssignments.push(assignment);
+      } else {
+        const originalAssignment = existingPeriodAssignments.find(row =>
+          normalizeEmail_(row.AideEmail) === aideEmail
+        );
+        if (originalAssignment &&
+            !(originalAssignment.StudentId && isOneToOneStudent_(originalAssignment.StudentId)) &&
+            (originalAssignment.ClassId || originalAssignment.StudentId || originalAssignment.Duty)) {
+          periodDisplacements.push({
+            periodId: periodId,
+            aideEmail: aideEmail,
+            fromClassId: String(originalAssignment.ClassId || ''),
+            toClassId: requirement.classId,
+            priorDuty: String(originalAssignment.Duty || '')
+          });
+        }
       }
+      assignment.ClassId = requirement.classId;
       assignment.StudentId = studentId;
       assignment.Duty = '1:1 Support';
       assignment.Type = 'ONE_TO_ONE';
       assignment.Note = 'Automatically reconciled after call-off';
     });
+    const validation = validateOneToOnePeriodPlan_(
+      uniqueRequirements,
+      periodAssignments,
+      absentEmail,
+      candidateAides
+    );
+    if (!validation.ok) {
+      failures.push(periodId + ': reconciliation validation failed');
+      const offOnlyAssignments = existingPeriodAssignments.map(row => Object.assign({}, row));
+      offOnlyAssignments
+        .filter(row => normalizeEmail_(row.AideEmail) === absentEmail)
+        .forEach(assignment => {
+          assignment.ClassId = '';
+          assignment.StudentId = '';
+          assignment.Duty = 'OFF';
+          assignment.Note = 'Call-off';
+          assignment.Type = 'OFF';
+        });
+      proposed = proposed
+        .filter(row => String(row.PeriodId) !== periodId)
+        .concat(offOnlyAssignments);
+      return;
+    }
+    displacedAssignments.push.apply(displacedAssignments, periodDisplacements);
+    proposed = proposed
+      .filter(row => String(row.PeriodId) !== periodId)
+      .concat(periodAssignments);
   });
 
+  const displacementMessage = callOffDisplacementMessage_(displacedAssignments);
   if (failures.length) {
     replaceRows_('Assignments', row => formatDate_(row.Date) === dateText, proposed);
     const message = dateText + ' could not reconcile 1:1 coverage (' + failures.join('; ') + ').';
@@ -1055,12 +1126,19 @@ function reconcileCallOffDay_(absentEmail, dateText) {
     return {
       date: dateText,
       status: 'UNRESOLVED',
-      message: 'Aide marked OFF; unresolved 1:1 coverage was sent to case managers.'
+      message: 'Aide marked OFF; unresolved 1:1 coverage was sent to case managers.' +
+        displacementMessage,
+      displacedAssignments: displacedAssignments
     };
   }
 
   replaceRows_('Assignments', row => formatDate_(row.Date) === dateText, proposed);
-  return { date: dateText, status: 'RECONCILED', message: 'Assignments were reconciled.' };
+  return {
+    date: dateText,
+    status: 'RECONCILED',
+    message: 'Assignments were reconciled.' + displacementMessage,
+    displacedAssignments: displacedAssignments
+  };
 }
 
 function ensureDayScheduleMaterialized_(dateText, createdBy) {
@@ -1121,27 +1199,124 @@ function matchOneToOneCoverage_(requirements, candidateAides) {
     );
   });
   const aideToStudent = {};
-  function assign(studentId, seen) {
-    const candidates = trainedByStudent[studentId] || [];
-    for (let index = 0; index < candidates.length; index += 1) {
-      const aide = candidates[index];
-      if (seen[aide]) continue;
-      seen[aide] = true;
-      if (!aideToStudent[aide] || assign(aideToStudent[aide], seen)) {
-        aideToStudent[aide] = studentId;
-        return true;
+  const studentToAide = {};
+  requirements.forEach(item => {
+    const currentAide = normalizeEmail_(item.currentAideEmail);
+    if (!currentAide ||
+        !candidateAides.includes(currentAide) ||
+        !trainedByStudent[item.studentId].includes(currentAide) ||
+        aideToStudent[currentAide]) {
+      return;
+    }
+    aideToStudent[currentAide] = item.studentId;
+    studentToAide[item.studentId] = currentAide;
+  });
+
+  function augment(startStudentId) {
+    const queue = [startStudentId];
+    const seenStudents = {};
+    const seenAides = {};
+    const parentStudentByAide = {};
+    seenStudents[startStudentId] = true;
+    while (queue.length) {
+      const studentId = queue.shift();
+      const candidates = trainedByStudent[studentId] || [];
+      for (let index = 0; index < candidates.length; index += 1) {
+        const aide = candidates[index];
+        if (seenAides[aide]) continue;
+        seenAides[aide] = true;
+        parentStudentByAide[aide] = studentId;
+        if (!aideToStudent[aide]) {
+          let currentAide = aide;
+          while (currentAide) {
+            const assignedStudent = parentStudentByAide[currentAide];
+            const previousAide = studentToAide[assignedStudent] || '';
+            aideToStudent[currentAide] = assignedStudent;
+            studentToAide[assignedStudent] = currentAide;
+            currentAide = previousAide;
+          }
+          return true;
+        }
+        const displacedStudent = aideToStudent[aide];
+        if (!seenStudents[displacedStudent]) {
+          seenStudents[displacedStudent] = true;
+          queue.push(displacedStudent);
+        }
       }
     }
     return false;
   }
+
   const unmatched = requirements
     .map(item => item.studentId)
-    .filter(studentId => !assign(studentId, {}));
+    .filter(studentId => !studentToAide[studentId] && !augment(studentId));
   const byStudent = {};
   Object.keys(aideToStudent).forEach(aide => {
     byStudent[aideToStudent[aide]] = aide;
   });
   return { ok: unmatched.length === 0, unmatchedStudentIds: unmatched, byStudent: byStudent };
+}
+
+function callOffCandidatePriority_(email, periodAssignments) {
+  const assignments = periodAssignments.filter(row => normalizeEmail_(row.AideEmail) === email);
+  if (!assignments.length) return 0;
+  if (assignments.every(row => !row.ClassId && !row.StudentId && !row.Duty)) return 0;
+  if (assignments.some(row => row.StudentId && isOneToOneStudent_(row.StudentId))) return 3;
+  if (assignments.some(row => row.StudentId)) return 2;
+  return 1;
+}
+
+function validateOneToOnePeriodPlan_(requirements, periodAssignments, absentEmail, candidateAides) {
+  const errors = [];
+  const training = rows_('AideTraining');
+  const assignedAides = {};
+  requirements.forEach(requirement => {
+    const matches = periodAssignments.filter(row =>
+      String(row.StudentId) === requirement.studentId &&
+      String(row.Type).toUpperCase() === 'ONE_TO_ONE'
+    );
+    if (matches.length !== 1) {
+      errors.push(requirement.studentId + ' must have exactly one 1:1 assignment');
+      return;
+    }
+    const assignment = matches[0];
+    const aideEmail = normalizeEmail_(assignment.AideEmail);
+    if (String(assignment.ClassId || '') !== requirement.classId) {
+      errors.push(requirement.studentId + ' is assigned to the wrong class');
+    }
+    if (aideEmail === absentEmail || !candidateAides.includes(aideEmail)) {
+      errors.push(requirement.studentId + ' is assigned to an unavailable aide');
+    }
+    if (!training.some(row =>
+      normalizeEmail_(row.AideEmail) === aideEmail &&
+      String(row.StudentId) === requirement.studentId
+    )) {
+      errors.push(requirement.studentId + ' is assigned to an untrained aide');
+    }
+    if (assignedAides[aideEmail] && assignedAides[aideEmail] !== requirement.studentId) {
+      errors.push(aideEmail + ' is assigned to multiple 1:1 students');
+    }
+    assignedAides[aideEmail] = requirement.studentId;
+  });
+  periodAssignments
+    .filter(row => normalizeEmail_(row.AideEmail) === absentEmail)
+    .forEach(row => {
+      if (String(row.Type).toUpperCase() !== 'OFF' ||
+          String(row.Duty).toUpperCase() !== 'OFF' ||
+          row.ClassId ||
+          row.StudentId) {
+        errors.push(absentEmail + ' was not fully marked OFF');
+      }
+    });
+  return { ok: errors.length === 0, errors: errors };
+}
+
+function callOffDisplacementMessage_(displacedAssignments) {
+  if (!displacedAssignments.length) return '';
+  return ' Classroom coverage changed: ' + displacedAssignments.map(item =>
+    item.periodId + ' ' + item.aideEmail + ' moved from ' +
+      (item.fromClassId || 'an unassigned duty') + ' to ' + item.toClassId
+  ).join('; ') + '.';
 }
 
 function isAideAvailableForPeriod_(email, dateText, periodId) {
