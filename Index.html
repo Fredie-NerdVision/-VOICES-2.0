@@ -3617,7 +3617,7 @@
     function showFatal(error) {
       const root = document.getElementById('fatalError');
       root.classList.remove('hidden');
-      const chooser = 'https://accounts.google.com/AccountChooser?continue=' +
+      const chooser = 'https:' + '/' + '/accounts.google.com/AccountChooser?continue=' +
         encodeURIComponent(window.location.href);
       root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p>
         <p class="muted">Google Apps Script cannot reliably select among multiple signed-in accounts. Choose your hbuhsd.edu account below, or open this page in a private window signed into only that account.</p>
