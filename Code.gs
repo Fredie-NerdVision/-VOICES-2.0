@@ -46,27 +46,55 @@ function getAppBootstrap() {
     const isCaseManager = staff.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(staff.IsAdmin);
     const now = new Date();
     const today = formatDate_(now);
-    const currentAssignment = getCurrentAssignment_(email, now);
     const response = {
       appName: VOICES.APP_NAME,
       today: today,
       user: publicStaff_(staff),
       view: isCaseManager ? 'CASE_MANAGER' : 'AIDE',
-      logo: getBrandingLogo_(),
+      logo: getBrandingLogo_(false),
       dailyMessages: getDailyMessages_(today),
-      criticalBenchmarks: getCriticalBenchmarks_(staff),
-      subjects: activeRows_('Subjects'),
-      classes: getClassesForStaff_(staff),
-      students: getStudentsForStaff_(staff),
-      currentAssignment: currentAssignment,
-      benchmarkLookup: getBenchmarkLookupContext_(staff, currentAssignment)
+      criticalBenchmarks: [],
+      subjects: [],
+      classes: [],
+      students: [],
+      currentAssignment: null,
+      benchmarkLookup: {
+        currentClassId: '',
+        currentStudentId: '',
+        teachers: [],
+        classes: []
+      }
     };
 
     if (isCaseManager) {
-      response.caseManager = getCaseManagerDashboard_(staff, {
-        includeGoalCatalog: false
-      });
+      const students = managedStudents_(staff).map(publicStudent_);
+      response.caseManager = {
+        students: students,
+        goals: [],
+        benchmarks: [],
+        toDos: [],
+        staff: [],
+        caseManagers: [],
+        aides: [],
+        scheduleTypes: [],
+        requests: {
+          pending: [],
+          timeOffHistory: [],
+          currentAvailability: []
+        },
+        messages: {
+          messages: [],
+          activeToday: []
+        }
+      };
     } else {
+      const currentAssignment = getCurrentAssignment_(email, now);
+      response.criticalBenchmarks = getCriticalBenchmarks_(staff);
+      response.subjects = activeRows_('Subjects');
+      response.classes = getClassesForStaff_(staff);
+      response.students = getStudentsForStaff_(staff);
+      response.currentAssignment = currentAssignment;
+      response.benchmarkLookup = getBenchmarkLookupContext_(staff, currentAssignment);
       response.aide = {
         schedule: getStaffSchedule_(email, today),
         trainedStudents: getTrainedStudents_(email),
@@ -75,6 +103,49 @@ function getAppBootstrap() {
       };
     }
     return response;
+  });
+}
+
+function getCaseManagerOverviewData() {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    return {
+      toDos: getCaseManagerTodos_(staff)
+    };
+  });
+}
+
+function getCaseManagerEntryData() {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    return {
+      subjects: activeRows_('Subjects'),
+      classes: getClassesForStaff_(staff),
+      students: getStudentsForStaff_(staff),
+      benchmarkLookup: getBenchmarkLookupContext_(staff, null)
+    };
+  });
+}
+
+function getCaseManagerPeopleData() {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    const staffRows = activeRows_('Staff');
+    const isAdmin = toBoolean_(staff.IsAdmin);
+    return {
+      students: managedStudents_(staff).map(publicStudent_),
+      staff: staffRows.map(publicStaff_)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+      caseManagers: staffRows
+        .filter(row => row.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(row.IsAdmin))
+        .filter(row => isAdmin ||
+          normalizeEmail_(row.Email) === normalizeEmail_(staff.Email))
+        .map(publicStaff_)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+      aides: staffRows
+        .filter(row => row.Role === VOICES.ROLES.AIDE)
+        .map(publicStaff_)
+    };
   });
 }
 

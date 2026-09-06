@@ -410,13 +410,13 @@ function saveBrandingLogo(payload) {
   return { ok: true, logo: dataUriFromFile_(file) };
 }
 
-function getBrandingLogo_() {
+function getBrandingLogo_(useDefault) {
   const fileId = PropertiesService.getScriptProperties().getProperty(VOICES.LOGO_FILE_PROPERTY);
-  if (!fileId) return getDefaultLogoDataUri();
+  if (!fileId) return useDefault === false ? '' : getDefaultLogoDataUri();
   try {
     return dataUriFromFile_(DriveApp.getFileById(fileId));
   } catch (error) {
-    return getDefaultLogoDataUri();
+    return useDefault === false ? '' : getDefaultLogoDataUri();
   }
 }
 
@@ -488,6 +488,13 @@ function getStaffRequestData_() {
     timeOffHistory: timeOff,
     currentAvailability: availability.filter(row => row.status === 'APPROVED')
   };
+}
+
+function getStaffRequestData() {
+  return withRowsCache_(() => {
+    requireCaseManager_();
+    return getStaffRequestData_();
+  });
 }
 
 function availabilityDayOrder_(day) {

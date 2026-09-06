@@ -647,6 +647,7 @@
       observationQueue: [],
       observationBatchId: '',
       adminCatalogPreview: null,
+      caseManagerDataLoaded: {},
       pendingOperations: 0
     };
 
@@ -668,8 +669,9 @@
       });
       try {
         state.data = normalizeBootstrap(await server('getAppBootstrap'));
-        document.getElementById('loadingLogo').src = state.data.logo;
-        document.getElementById('brandLogo').src = state.data.logo;
+        const logo = state.data.logo || document.getElementById('loadingLogo').src;
+        document.getElementById('loadingLogo').src = logo;
+        document.getElementById('brandLogo').src = logo;
         document.getElementById('welcomeName').textContent = 'Welcome ' + state.data.user.firstName;
         document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
         if (state.data.view === 'CASE_MANAGER') renderCaseManager();
@@ -782,16 +784,66 @@
       renderCaseManagerTab();
     }
 
-    function renderCaseManagerTab() {
+    async function renderCaseManagerTab() {
       const content = document.getElementById('cmContent');
-      if (state.selectedTab === 'overview') renderOverview(content);
-      if (state.selectedTab === 'entry') renderDataEntry(content);
-      if (state.selectedTab === 'schedule') renderScheduleShell(content);
-      if (state.selectedTab === 'benchmarks') renderBenchmarkManager(content);
-      if (state.selectedTab === 'people') renderPeople(content);
-      if (state.selectedTab === 'ieps') renderIeps(content);
-      if (state.selectedTab === 'requests') renderRequests(content);
-      if (state.selectedTab === 'admin') renderAdmin(content);
+      const tab = state.selectedTab;
+      if (tab === 'overview') {
+        renderOverview(content);
+        try {
+          await ensureCaseManagerTabData('overview');
+          if (state.selectedTab === 'overview') renderCaseManagerTodos();
+        } catch (error) {
+          toast(safeErrorMessage(error), true);
+        }
+        return;
+      }
+      if (['entry', 'people', 'requests', 'admin'].includes(tab)) {
+        content.innerHTML = '<article class="card empty">Loading this workspace…</article>';
+        try {
+          await ensureCaseManagerTabData(tab);
+        } catch (error) {
+          content.innerHTML = `<article class="card red-tint">${escapeHtml(safeErrorMessage(error))}</article>`;
+          return;
+        }
+        if (state.selectedTab !== tab) return;
+      }
+      if (tab === 'entry') renderDataEntry(content);
+      if (tab === 'schedule') renderScheduleShell(content);
+      if (tab === 'benchmarks') renderBenchmarkManager(content);
+      if (tab === 'people') renderPeople(content);
+      if (tab === 'ieps') renderIeps(content);
+      if (tab === 'requests') renderRequests(content);
+      if (tab === 'admin') renderAdmin(content);
+    }
+
+    async function ensureCaseManagerTabData(tab, force) {
+      if (!force && state.caseManagerDataLoaded[tab]) return;
+      const cm = state.data.caseManager;
+      if (tab === 'overview') {
+        const data = await serverQuiet('getCaseManagerOverviewData');
+        cm.toDos = safeArray(data && data.toDos);
+      } else if (tab === 'entry') {
+        const data = await server('getCaseManagerEntryData');
+        state.data.subjects = safeArray(data && data.subjects);
+        state.data.classes = safeArray(data && data.classes);
+        state.data.students = safeArray(data && data.students);
+        state.data.benchmarkLookup = data && data.benchmarkLookup
+          ? data.benchmarkLookup
+          : { currentClassId: '', currentStudentId: '', teachers: [], classes: [] };
+        state.data.benchmarkLookup.teachers = safeArray(state.data.benchmarkLookup.teachers);
+        state.data.benchmarkLookup.classes = safeArray(state.data.benchmarkLookup.classes);
+      } else if (tab === 'people') {
+        const data = await server('getCaseManagerPeopleData');
+        cm.students = safeArray(data && data.students);
+        cm.staff = safeArray(data && data.staff);
+        cm.caseManagers = safeArray(data && data.caseManagers);
+        cm.aides = safeArray(data && data.aides);
+      } else if (tab === 'requests') {
+        cm.requests = await server('getStaffRequestData');
+      } else if (tab === 'admin') {
+        cm.messages = await server('getMessageManagementData');
+      }
+      state.caseManagerDataLoaded[tab] = true;
     }
 
     function renderDataEntry(root) {
@@ -806,7 +858,6 @@
     function renderOverview(root) {
       const cm = state.data.caseManager;
       const messages = safeArray(state.data.dailyMessages);
-      if (!state.goalStudentId && cm.students[0]) state.goalStudentId = cm.students[0].id;
       root.innerHTML = `
         <div class="section-tools" style="margin-bottom:14px"><div><div class="eyebrow">Case manager dashboard</div><h2>Overview</h2></div><button class="btn ghost small-btn" type="button" data-refresh="overview">Refresh</button></div>
         <article class="card mobile-cm-note">
@@ -824,8 +875,8 @@
               </div>`).join('') : '<div class="empty">No global messages today.</div>'}
           </article>
           <article class="card">
-            <div class="card-header"><div><div class="eyebrow">Action center</div><h2>To-do list</h2></div><span class="chip">${cm.toDos.length}</span></div>
-            <div class="list">${cm.toDos.length ? cm.toDos.map(item => `
+            <div class="card-header"><div><div class="eyebrow">Action center</div><h2>To-do list</h2></div><span id="caseManagerTodoCount" class="chip">${cm.toDos.length}</span></div>
+            <div id="caseManagerTodos" class="list">${cm.toDos.length ? cm.toDos.map(item => `
               <div class="list-item ${item.urgent ? 'urgent' : ''}">
                 <div class="row"><span class="chip ${item.urgent ? 'critical' : ''}">${escapeHtml(item.type)}</span><strong>${escapeHtml(item.title)}</strong></div>
                 <div class="muted small" style="margin-top:7px">${escapeHtml(item.detail)}</div>
@@ -855,6 +906,19 @@
         loadGoalWorkspace(state.goalStudentId);
       });
       if (state.goalStudentId) loadGoalWorkspace(state.goalStudentId);
+    }
+
+    function renderCaseManagerTodos() {
+      const items = safeArray(state.data && state.data.caseManager && state.data.caseManager.toDos);
+      const count = document.getElementById('caseManagerTodoCount');
+      const root = document.getElementById('caseManagerTodos');
+      if (!count || !root) return;
+      count.textContent = String(items.length);
+      root.innerHTML = items.length ? items.map(item => `
+        <div class="list-item ${item.urgent ? 'urgent' : ''}">
+          <div class="row"><span class="chip ${item.urgent ? 'critical' : ''}">${escapeHtml(item.type)}</span><strong>${escapeHtml(item.title)}</strong></div>
+          <div class="muted small" style="margin-top:7px">${escapeHtml(item.detail)}</div>
+        </div>`).join('') : '<div class="empty">Nothing needs attention.</div>';
     }
 
     function renderScheduleShell(root) {
@@ -1632,14 +1696,25 @@
       });
       if (!decision.confirmed || !decision.value.trim()) return;
       try {
-        await server('saveScheduleType', {
+        const assignments = collectScheduleAssignments();
+        const result = await server('saveScheduleType', {
           name: decision.value.trim(),
           isDefault: decision.checked,
           periods: state.scheduleData.schedule.periods,
-          assignments: collectScheduleAssignments()
+          assignments: assignments
         });
-        state.data = normalizeBootstrap(await server('getAppBootstrap'));
-        state.scheduleData.scheduleTypes = state.data.caseManager.scheduleTypes;
+        if (decision.checked) {
+          state.scheduleData.scheduleTypes.forEach(item => { item.isDefault = false; });
+        }
+        state.scheduleData.scheduleTypes = state.scheduleData.scheduleTypes
+          .filter(item => String(item.id) !== String(result.id))
+          .concat([{
+            id: result.id,
+            name: decision.value.trim(),
+            isDefault: decision.checked,
+            periods: state.scheduleData.schedule.periods.map(item => ({ ...item })),
+            assignments: assignments.map(item => ({ ...item }))
+          }]);
         toast('Schedule type saved.');
       } catch (error) { toast(error.message, true); }
     }
@@ -3112,7 +3187,7 @@
         workspace.innerHTML = '<div class="empty">Loading student goals…</div>';
         const data = !force && state.goalWorkspaceCache[studentId]
           ? state.goalWorkspaceCache[studentId]
-          : await server('getStudentGoalWorkspace', studentId);
+          : await serverQuiet('getStudentGoalWorkspace', studentId);
         state.goalWorkspaceCache[studentId] = data;
         renderGoalWorkspaceData(data);
       } catch (error) {
@@ -3542,9 +3617,10 @@
     async function refreshBootstrap(tab) {
       const nextData = normalizeBootstrap(await server('getAppBootstrap'));
       state.data = nextData;
+      state.caseManagerDataLoaded = {};
       state.goalWorkspaceCache = {};
       state.benchmarkEntryCache = {};
-      document.getElementById('brandLogo').src = state.data.logo || '';
+      if (state.data.logo) document.getElementById('brandLogo').src = state.data.logo;
       document.getElementById('welcomeName').textContent = 'Welcome ' + (state.data.user.firstName || '');
       document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
       if (state.data.view === 'CASE_MANAGER') {
@@ -3604,6 +3680,19 @@
             [functionName](...args);
         } catch (error) {
           endBusy();
+          reject(new Error(safeErrorMessage(error)));
+        }
+      });
+    }
+
+    function serverQuiet(functionName, ...args) {
+      return new Promise((resolve, reject) => {
+        try {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(error => reject(new Error(safeErrorMessage(error))))
+            [functionName](...args);
+        } catch (error) {
           reject(new Error(safeErrorMessage(error)));
         }
       });

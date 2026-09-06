@@ -131,7 +131,14 @@ if (!database.includes("'BenchmarkActivationMode'") ||
 if (/function getAppBootstrap\(\)[\s\S]{0,500}tryReconcileDateDrivenBenchmarks_/.test(code) ||
     /function getStudentGoalWorkspace[\s\S]{0,300}tryReconcileDateDrivenBenchmarks_/.test(goalService) ||
     /function lookupBenchmarks[\s\S]{0,300}tryReconcileDateDrivenBenchmarks_/.test(benchmarkService) ||
-    !code.includes('includeGoalCatalog: false') ||
+    !code.includes('function getCaseManagerOverviewData()') ||
+    !code.includes('function getCaseManagerEntryData()') ||
+    !code.includes('logo: getBrandingLogo_(false)') ||
+    code.includes('response.students = students') ||
+    !html.includes('caseManagerDataLoaded: {}') ||
+    !html.includes("await ensureCaseManagerTabData('overview')") ||
+    !html.includes("serverQuiet('getStudentGoalWorkspace'") ||
+    html.includes('if (!state.goalStudentId && cm.students[0])') ||
     !html.includes('goalCatalogLoaded: false') ||
     !html.includes('state.goalVisibility[goal.id] = index === 0') ||
     !html.includes('safeArray(data && data.otherGoals)') ||
