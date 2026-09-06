@@ -3127,6 +3127,16 @@
         if (count >= activeEntryAverage * 0.5) return 'status-pending';
         return 'critical';
       };
+      const masteryChip = benchmark => {
+        const mastery = benchmark && benchmark.mastery;
+        if (!mastery || !mastery.available) {
+          return '<span class="chip">Mastery unavailable</span>';
+        }
+        const label = mastery.mastered
+          ? 'Mastered'
+          : `${mastery.consecutiveSessionsMet}/${mastery.requiredConsecutiveSessions} qualifying ${String(mastery.evaluationWindowUnit || 'SESSION').toLowerCase().replace(/_/g, ' ')} windows`;
+        return `<span class="chip ${mastery.mastered ? 'status-approved' : 'status-pending'}">${escapeHtml(label)}</span>`;
+      };
       workspace.innerHTML = goals.length ? goals.map((goal, goalIndex) => {
         const metrics = goal.metrics || {};
         const benchmarks = safeArray(goal.benchmarks);
@@ -3169,7 +3179,7 @@
                   <div class="muted small">${escapeHtml(activeBenchmark.skill)}</div>
                   <div class="muted small">${escapeHtml(activeBenchmark.startDate || '—')}–${escapeHtml(activeBenchmark.dueDate || '—')}</div>
                 </button>
-                <div class="row"><span class="chip ${entryBadgeClass(Number(activeBenchmark.entryCount || 0), true)}">${escapeHtml(String(activeBenchmark.entryCount || 0))} entries</span><span class="chip status-approved">${escapeHtml(activeLabel)}</span></div>
+                <div class="row"><span class="chip ${entryBadgeClass(Number(activeBenchmark.entryCount || 0), true)}">${escapeHtml(String(activeBenchmark.entryCount || 0))} entries</span>${masteryChip(activeBenchmark)}<span class="chip status-approved">${escapeHtml(activeLabel)}</span></div>
               </div>` : '<div class="empty">No benchmark is active because all configured date ranges have ended.</div>'}</div>
               ${inactiveBenchmarks.length ? `<details style="margin-top:10px">
                 <summary class="muted small">Manage other benchmarks (${inactiveBenchmarks.length})</summary>
@@ -3180,7 +3190,7 @@
                       <div class="muted small">${escapeHtml(benchmark.skill)}</div>
                       <div class="muted small">${escapeHtml(benchmark.startDate || '—')}–${escapeHtml(benchmark.dueDate || '—')}</div>
                     </button>
-                    <div class="row"><span class="chip">${escapeHtml(String(benchmark.entryCount || 0))} entries</span><button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Override until next quarter</button></div>
+                    <div class="row"><span class="chip">${escapeHtml(String(benchmark.entryCount || 0))} entries</span>${masteryChip(benchmark)}<button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Override until next quarter</button></div>
                   </div>`).join('')}</div>
               </details>` : ''}`;
             })()}

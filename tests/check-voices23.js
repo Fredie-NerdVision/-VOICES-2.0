@@ -149,6 +149,7 @@ if (!html.includes('activeEntryAverage') ||
 });
 if (!goalService.includes('function benchmarkMasteryConfig_') ||
     !goalService.includes('function evaluateMasteryWindows_') ||
+    !html.includes('const masteryChip = benchmark =>') ||
     !html.includes("label: 'Prompt count (lower is better)'") ||
     !html.includes("label: 'Recorded occurrences / quota progress'") ||
     /chart\.js|recharts|plotly/i.test(html)) {
