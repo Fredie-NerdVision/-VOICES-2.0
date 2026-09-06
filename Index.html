@@ -634,6 +634,8 @@
       goalVisibility: {},
       currentGoalWorkspace: null,
       goalWorkspaceCache: {},
+      goalCatalogLoaded: false,
+      goalCatalogLoading: false,
       benchmarkEntryCache: {},
       parsedObjectives: [],
       editingMessageId: '',
@@ -1660,6 +1662,20 @@
     }
 
     function renderBenchmarkManager(root) {
+      if (!state.goalCatalogLoaded) {
+        root.innerHTML = '<article class="card empty">Loading goal management data…</article>';
+        if (!state.goalCatalogLoading) {
+          state.goalCatalogLoading = true;
+          refreshGoalManagerData()
+            .catch(error => {
+              root.innerHTML = `<article class="card empty">${escapeHtml(error.message)}</article>`;
+            })
+            .finally(() => {
+              state.goalCatalogLoading = false;
+            });
+        }
+        return;
+      }
       const cm = state.data.caseManager;
       const students = safeArray(cm.students);
       const goals = safeArray(cm.goals);
@@ -1949,6 +1965,7 @@
       state.data.caseManager.students = safeArray(data.students);
       state.data.caseManager.goals = safeArray(data.goals);
       state.data.caseManager.benchmarks = safeArray(data.benchmarks);
+      state.goalCatalogLoaded = true;
       state.goalWorkspaceCache = {};
       renderBenchmarkManager(document.getElementById('cmContent'));
     }
@@ -3291,8 +3308,10 @@
         Model: '#bf5af2',
         Physical: '#ff453a'
       };
-      goals.forEach(goal => {
-        if (state.goalVisibility[goal.id] === undefined) state.goalVisibility[goal.id] = true;
+      goals.forEach((goal, index) => {
+        if (state.goalVisibility[goal.id] === undefined) {
+          state.goalVisibility[goal.id] = index === 0;
+        }
       });
       const series = goals.map((goal, index) => ({
         goal,

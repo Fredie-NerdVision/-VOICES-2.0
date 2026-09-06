@@ -634,7 +634,6 @@ function rollbackGoalCreation_(goalId, benchmarkIds) {
 function getGoalManagerData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
-    tryReconcileDateDrivenBenchmarks_(new Date(), '');
     return getGoalManagerData_(staff);
   });
 }
@@ -647,8 +646,11 @@ function getGoalManagerData_(staff) {
     .filter(row => ['ACTIVE', 'DRAFT', 'COMPLETED'].includes(goalStatus_(row)))
     .filter(row => studentIds.has(String(row.StudentId)));
   const goalIds = new Set(goals.map(row => String(row.Id)));
-  const benchmarks = rows_('Benchmarks')
-    .filter(row => goalIds.has(String(row.GoalId)));
+  const benchmarks = effectiveBenchmarkRows_(
+    goals,
+    rows_('Benchmarks').filter(row => goalIds.has(String(row.GoalId))),
+    new Date()
+  );
   return {
     students: students.map(publicStudent_),
     goals: goals.map(row => publicGoal_(
@@ -664,14 +666,16 @@ function getStudentGoalWorkspace(studentId, options) {
   return withRowsCache_(() => {
     options = options || {};
     const staff = requireCaseManager_();
-    tryReconcileDateDrivenBenchmarks_(new Date(), '');
     const student = requireManagedStudent_(staff, studentId);
     const goals = rows_('Goals')
       .filter(isActiveGoal_)
       .filter(row => String(row.StudentId) === String(student.Id));
     const goalIds = new Set(goals.map(row => String(row.Id)));
-    const benchmarks = rows_('Benchmarks')
-      .filter(row => goalIds.has(String(row.GoalId)));
+    const benchmarks = effectiveBenchmarkRows_(
+      goals,
+      rows_('Benchmarks').filter(row => goalIds.has(String(row.GoalId))),
+      options.endDate || new Date()
+    );
     const benchmarkIds = new Set(benchmarks.map(row => String(row.Id)));
     const entries = rows_('BenchmarkEntries')
       .filter(row => benchmarkIds.has(String(row.BenchmarkId)))
@@ -979,18 +983,40 @@ function selectDateDrivenBenchmark_(benchmarks, date) {
     return (!start || start <= current) && (!due || current <= due);
   });
   if (eligible.length) return eligible[0];
-  return ordered
-    .filter(row => formatDate_(row.StartDate || row.startDate) > current)
-    .sort((a, b) =>
-      formatDate_(a.StartDate || a.startDate)
-        .localeCompare(formatDate_(b.StartDate || b.startDate)) ||
-      (optionalInteger_(a.OrderIndex || a.orderIndex) || 1) -
-        (optionalInteger_(b.OrderIndex || b.orderIndex) || 1)
-    )[0] || null;
+  return null;
 }
 
 function goalUsesDateDrivenBenchmarks_(goal) {
   return String(goal && goal.BenchmarkActivationMode || '').toUpperCase() === 'DATE';
+}
+
+function effectiveBenchmarkRows_(goals, benchmarks, date) {
+  const goalIndex = indexBy_(goals || [], 'Id');
+  const benchmarksByGoal = (benchmarks || []).reduce((map, benchmark) => {
+    const goalId = String(benchmark.GoalId || '');
+    if (!map[goalId]) map[goalId] = [];
+    map[goalId].push(benchmark);
+    return map;
+  }, {});
+  const selectedByGoal = {};
+  return (benchmarks || []).map(benchmark => {
+    const goal = goalIndex[benchmark.GoalId];
+    if (!goalUsesDateDrivenBenchmarks_(goal)) return benchmark;
+    const goalId = String(benchmark.GoalId || '');
+    if (!(goalId in selectedByGoal)) {
+      selectedByGoal[goalId] = getEffectiveGoalBenchmark_(
+        goal,
+        benchmarksByGoal[goalId] || [],
+        date
+      );
+    }
+    return Object.assign({}, benchmark, {
+      Active: Boolean(
+        selectedByGoal[goalId] &&
+        String(selectedByGoal[goalId].Id) === String(benchmark.Id)
+      )
+    });
+  });
 }
 
 function getManualBenchmarkOverride_(goalId, date) {
@@ -1140,19 +1166,6 @@ function reconcileDateDrivenBenchmarks_(date, changedBy) {
     .filter(isActiveGoal_)
     .filter(goalUsesDateDrivenBenchmarks_)
     .forEach(goal => syncDateDrivenGoal_(goal, currentDate, changedBy));
-}
-
-function tryReconcileDateDrivenBenchmarks_(date, changedBy) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(1000)) return false;
-  try {
-    reconcileDateDrivenBenchmarks_(date, changedBy);
-    return true;
-  } catch (error) {
-    return false;
-  } finally {
-    lock.releaseLock();
-  }
 }
 
 function reconcileDateDrivenBenchmarks() {

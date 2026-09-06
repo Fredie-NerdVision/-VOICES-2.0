@@ -46,7 +46,6 @@ function getAppBootstrap() {
     const isCaseManager = staff.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(staff.IsAdmin);
     const now = new Date();
     const today = formatDate_(now);
-    tryReconcileDateDrivenBenchmarks_(today, '');
     const currentAssignment = getCurrentAssignment_(email, now);
     const response = {
       appName: VOICES.APP_NAME,
@@ -64,7 +63,9 @@ function getAppBootstrap() {
     };
 
     if (isCaseManager) {
-      response.caseManager = getCaseManagerDashboard_(staff);
+      response.caseManager = getCaseManagerDashboard_(staff, {
+        includeGoalCatalog: false
+      });
     } else {
       response.aide = {
         schedule: getStaffSchedule_(email, today),

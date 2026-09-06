@@ -128,6 +128,15 @@ if (!database.includes("'BenchmarkActivationMode'") ||
     !html.includes('data-phase-due')) {
   throw new Error('Date-driven benchmark activation, quarter overrides, or monitoring is incomplete.');
 }
+if (/function getAppBootstrap\(\)[\s\S]{0,500}tryReconcileDateDrivenBenchmarks_/.test(code) ||
+    /function getStudentGoalWorkspace[\s\S]{0,300}tryReconcileDateDrivenBenchmarks_/.test(goalService) ||
+    /function lookupBenchmarks[\s\S]{0,300}tryReconcileDateDrivenBenchmarks_/.test(benchmarkService) ||
+    !code.includes('includeGoalCatalog: false') ||
+    !html.includes('goalCatalogLoaded: false') ||
+    !html.includes('state.goalVisibility[goal.id] = index === 0') ||
+    !goalService.includes('function effectiveBenchmarkRows_')) {
+  throw new Error('Read-only app loads still perform global benchmark writes or eagerly load the goal catalog.');
+}
 if (!html.includes('activeEntryAverage') ||
     !html.includes('entryBadgeClass') ||
     !benchmarkService.includes('Benchmark observation overdue') ||
@@ -352,6 +361,11 @@ const result = vm.runInContext(`
   if (getPhaseForObservationDate_('G2', '2026-09-10').BenchmarkId !== 'B3' ||
       getPhaseForObservationDate_('G2', '2026-09-11') !== null) {
     throw new Error('Goal deactivation boundary handling failed.');
+  }
+  if (selectDateDrivenBenchmark_([
+    { Id: 'FUTURE', StartDate: '2026-10-01', DueDate: '2026-10-31', OrderIndex: 1 }
+  ], '2026-09-01') !== null) {
+    throw new Error('A future benchmark was activated before its start date.');
   }
   return { phases: parsed.length, latestThree: metrics.currentPhaseLastThreeAccuracy };
 })()

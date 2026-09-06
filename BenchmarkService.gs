@@ -133,35 +133,13 @@ function getTrainedStudents_(email) {
 
 function getCurrentActiveBenchmarks_() {
   const goals = rows_('Goals').filter(isActiveGoal_);
-  const goalIndex = indexBy_(goals, 'Id');
-  const benchmarks = rows_('Benchmarks');
-  const today = formatDate_(new Date());
-  const benchmarksByGoal = benchmarks.reduce((map, benchmark) => {
-    const goalId = String(benchmark.GoalId || '');
-    if (!map[goalId]) map[goalId] = [];
-    map[goalId].push(benchmark);
-    return map;
-  }, {});
-  const selectedByGoal = {};
-  return benchmarks.filter(benchmark => {
-    const goal = goalIndex[benchmark.GoalId];
-    if (!goalUsesDateDrivenBenchmarks_(goal)) return toBoolean_(benchmark.Active);
-    if (!(benchmark.GoalId in selectedByGoal)) {
-      selectedByGoal[benchmark.GoalId] = getEffectiveGoalBenchmark_(
-        goal,
-        benchmarksByGoal[String(benchmark.GoalId)] || [],
-        today
-      );
-    }
-    const selected = selectedByGoal[benchmark.GoalId];
-    return Boolean(selected && String(selected.Id) === String(benchmark.Id));
-  });
+  return effectiveBenchmarkRows_(goals, rows_('Benchmarks'), new Date())
+    .filter(benchmark => toBoolean_(benchmark.Active));
 }
 
 function lookupBenchmarks(filters) {
   filters = filters || {};
   const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
-  tryReconcileDateDrivenBenchmarks_(new Date(), '');
   assertRequired_(filters, ['classId', 'studentIds']);
   const studentIds = Array.isArray(filters.studentIds) ? filters.studentIds.map(String) : [String(filters.studentIds)];
   const classRow = findOne_('Classes', row => String(row.Id) === String(filters.classId) && toBoolean_(row.Active));
@@ -869,8 +847,15 @@ function assertObservationClassAccess_(staff, classRow) {
   if (!assigned) throw new Error('You are not assigned to this class.');
 }
 
-function getCaseManagerDashboard_(staff) {
-  const goalData = getGoalManagerData_(staff);
+function getCaseManagerDashboard_(staff, options) {
+  options = options || {};
+  const goalData = options.includeGoalCatalog === false
+    ? {
+        students: managedStudents_(staff).map(publicStudent_),
+        goals: [],
+        benchmarks: []
+      }
+    : getGoalManagerData_(staff);
   const staffRows = activeRows_('Staff');
   const isAdmin = toBoolean_(staff.IsAdmin);
   return Object.assign({}, goalData, {
