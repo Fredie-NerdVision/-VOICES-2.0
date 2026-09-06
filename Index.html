@@ -3121,17 +3121,18 @@
     }
 
     function renderGoalWorkspaceData(data) {
-      const goals = safeArray(data && data.goals);
+      const currentGoals = safeArray(data && data.goals);
+      const otherGoals = safeArray(data && data.otherGoals);
       const workspace = document.getElementById('goalWorkspace');
       const chart = document.getElementById('goalProgressChart');
       const legend = document.getElementById('goalLegend');
       if (!workspace || !chart || !legend) return;
       state.currentGoalWorkspace = data;
-      renderGoalProgressChart(goals, chart, legend);
+      renderGoalProgressChart(currentGoals, chart, legend);
       document.getElementById('openGoalReport')?.addEventListener('click', () =>
-        openGoalProgressReport(data)
+        openGoalProgressReport({ ...data, goals: currentGoals })
       );
-      const activeEntryCounts = goals.map(goal => {
+      const activeEntryCounts = currentGoals.map(goal => {
         const active = safeArray(goal.benchmarks).find(benchmark => benchmark.active);
         return active ? Number(active.entryCount || 0) : null;
       }).filter(count => count !== null);
@@ -3154,7 +3155,7 @@
           : `${mastery.consecutiveSessionsMet}/${mastery.requiredConsecutiveSessions} qualifying ${String(mastery.evaluationWindowUnit || 'SESSION').toLowerCase().replace(/_/g, ' ')} windows`;
         return `<span class="chip ${mastery.mastered ? 'status-approved' : 'status-pending'}">${escapeHtml(label)}</span>`;
       };
-      workspace.innerHTML = goals.length ? goals.map((goal, goalIndex) => {
+      workspace.innerHTML = currentGoals.length ? currentGoals.map((goal, goalIndex) => {
         const metrics = goal.metrics || {};
         const benchmarks = safeArray(goal.benchmarks);
         const activeForBadge = benchmarks.find(benchmark => benchmark.active);
@@ -3212,7 +3213,21 @@
               </details>` : ''}`;
             })()}
           </div>`;
-      }).join('') : '<div class="empty">This student has no active annual goals.</div>';
+      }).join('') : '<div class="empty">This student has no current annual goals.</div>';
+      if (otherGoals.length) {
+        workspace.insertAdjacentHTML('beforeend', `
+          <details style="margin-top:14px">
+            <summary class="muted small">Other goal records (${otherGoals.length})</summary>
+            <div class="list" style="margin-top:10px">${otherGoals.map(goal => `
+              <div class="goal-card">
+                <div class="row" style="justify-content:space-between;align-items:flex-start">
+                  <div><strong>${escapeHtml(goal.goal)}</strong><div class="muted small">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</div></div>
+                  <span class="chip">${goal.workspaceSection === 'FUTURE' ? 'Future' : goal.status === 'ACTIVE' ? 'Past' : escapeHtml(titleCase(goal.status || 'History'))}</span>
+                </div>
+                <div class="row"><span class="chip">${escapeHtml(String(goal.totalEntryCount || 0))} entries</span><button class="btn ghost small-btn" type="button" data-view-goal-history="${escapeAttr(goal.id)}">View goal history</button></div>
+              </div>`).join('')}</div>
+          </details>`);
+      }
       workspace.querySelectorAll('[data-set-active]').forEach(button => button.addEventListener('click', async () => {
         try {
           const result = await server('setActiveGoalBenchmark', {
@@ -3257,9 +3272,22 @@
           toast(critical ? 'Goal marked critical.' : 'Critical status removed.');
         } catch (error) { toast(error.message, true); }
       }));
+      workspace.querySelectorAll('[data-view-goal-history]').forEach(button =>
+        button.addEventListener('click', async () => {
+          try {
+            const history = await server('getStudentGoalWorkspace', data.student.id, {
+              goalId: button.dataset.viewGoalHistory
+            });
+            openGoalProgressReport(history, { showHistory: true });
+          } catch (error) {
+            toast(error.message, true);
+          }
+        })
+      );
     }
 
-    function openGoalProgressReport(data) {
+    function openGoalProgressReport(data, options) {
+      options = options || {};
       const content = document.getElementById('goalReportContent');
       if (!content) return;
       const goals = safeArray(data && data.goals);
@@ -3293,13 +3321,16 @@
       renderGoalProgressChart(
         goals,
         document.getElementById('goalReportChart'),
-        document.getElementById('goalReportLegend')
+        document.getElementById('goalReportLegend'),
+        { showHistory: Boolean(options.showHistory) }
       );
       document.getElementById('printGoalReport').onclick = () => window.print();
       openDialog('goalReportDialog');
     }
 
-    function renderGoalProgressChart(goals, chart, legend) {
+    function renderGoalProgressChart(goals, chart, legend, options) {
+      options = options || {};
+      const showHistory = Boolean(options.showHistory);
       const colors = ['#ff453a', '#64d2ff', '#ffd60a', '#bf5af2', '#30d158', '#ff9f0a', '#5e5ce6', '#ff375f'];
       const promptColors = {
         Independent: '#30d158',
@@ -3316,7 +3347,11 @@
       const series = goals.map((goal, index) => ({
         goal,
         color: colors[index % colors.length],
-        points: safeArray(goal.points).map(point => ({
+        points: safeArray(goal.points).filter(point =>
+          showHistory || safeArray(goal.benchmarks).some(benchmark =>
+            benchmark.active && String(benchmark.id) === String(point.benchmarkId)
+          )
+        ).map(point => ({
           ...point,
           time: new Date((point.observationDate || point.timestamp) + (
             point.observationDate ? 'T12:00:00' : ''
@@ -3325,7 +3360,7 @@
       })).filter(item => state.goalVisibility[item.goal.id]);
       const allPoints = series.flatMap(item => item.points);
       legend.innerHTML = `
-        <div class="toolbar"><button class="btn ghost small-btn" type="button" data-show-all-goals>Show all</button></div>
+        <div class="toolbar"><button class="btn ghost small-btn" type="button" data-show-all-goals>Show all</button><button class="btn ghost small-btn" type="button" data-toggle-goal-history>${showHistory ? 'Show active benchmarks only' : 'View full goal history'}</button></div>
         ${goals.map((goal, index) => `
         <span class="goal-legend-item">
           <input type="checkbox" data-goal-visibility="${escapeAttr(goal.id)}" ${state.goalVisibility[goal.id] ? 'checked' : ''} aria-label="Show Goal ${index + 1}">
@@ -3335,16 +3370,22 @@
         </span>`).join('')}`;
       legend.querySelectorAll('[data-goal-visibility]').forEach(input => input.addEventListener('change', () => {
         state.goalVisibility[input.dataset.goalVisibility] = input.checked;
-        renderGoalProgressChart(goals, chart, legend);
+        renderGoalProgressChart(goals, chart, legend, options);
       }));
       legend.querySelectorAll('[data-show-only-goal]').forEach(button => button.addEventListener('click', () => {
         goals.forEach(goal => { state.goalVisibility[goal.id] = goal.id === button.dataset.showOnlyGoal; });
-        renderGoalProgressChart(goals, chart, legend);
+        renderGoalProgressChart(goals, chart, legend, options);
       }));
       legend.querySelector('[data-show-all-goals]')?.addEventListener('click', () => {
         goals.forEach(goal => { state.goalVisibility[goal.id] = true; });
-        renderGoalProgressChart(goals, chart, legend);
+        renderGoalProgressChart(goals, chart, legend, options);
       });
+      legend.querySelector('[data-toggle-goal-history]')?.addEventListener('click', () =>
+        renderGoalProgressChart(goals, chart, legend, {
+          ...options,
+          showHistory: !showHistory
+        })
+      );
       if (!allPoints.length) {
         chart.innerHTML = '<div class="empty">No visible goal has recorded entries.</div>';
         return;
@@ -3387,6 +3428,7 @@
           return `<div class="empty">${escapeHtml(panel.label)} data was not recorded.</div>`;
         }
         const targetValues = panelSeries.flatMap(item => safeArray(item.goal.benchmarks))
+          .filter(benchmark => showHistory || benchmark.active)
           .filter(benchmark => metricKey(benchmark.goalArchetype || 'DISCRETE_TRIAL') === panel.key)
           .map(benchmark => panel.key === 'PROMPT'
             ? benchmark.targetPromptCeiling
@@ -3408,8 +3450,11 @@
           <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
           <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}${panel.suffix}</text>`).join('');
         const phaseAnnotations = panelSeries.map(item => {
-          const benchmarks = safeArray(item.goal.benchmarks);
+          const benchmarks = safeArray(item.goal.benchmarks)
+            .filter(benchmark => showHistory || benchmark.active);
+          const benchmarkIds = new Set(benchmarks.map(benchmark => String(benchmark.id)));
           return safeArray(item.goal.phaseHistory)
+            .filter(history => benchmarkIds.has(String(history.benchmarkId)))
             .slice()
             .sort((a, b) =>
               String(a.activatedAt).localeCompare(String(b.activatedAt)) ||

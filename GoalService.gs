@@ -593,6 +593,16 @@ function isActiveGoal_(row) {
   return goalStatus_(row) === 'ACTIVE' && toBoolean_(row.Active);
 }
 
+function goalWorkspaceSection_(goal, date) {
+  const currentDate = formatDate_(date || new Date());
+  if (!isActiveGoal_(goal) || goalStatus_(goal) === 'COMPLETED') return 'HISTORY';
+  const startDate = formatDate_(goal.StartDate);
+  const dueDate = formatDate_(goal.DueDate);
+  if (startDate && startDate > currentDate) return 'FUTURE';
+  if (dueDate && dueDate < currentDate) return 'HISTORY';
+  return 'CURRENT';
+}
+
 function normalizePromptLevel_(value) {
   if (!value) return '';
   const matched = VOICES.PROMPT_LEVELS.find(level =>
@@ -667,26 +677,40 @@ function getStudentGoalWorkspace(studentId, options) {
     options = options || {};
     const staff = requireCaseManager_();
     const student = requireManagedStudent_(staff, studentId);
-    const goals = rows_('Goals')
-      .filter(isActiveGoal_)
+    const asOfDate = formatDate_(options.endDate || new Date());
+    const availableGoals = rows_('Goals')
+      .filter(row => ['ACTIVE', 'COMPLETED', 'INACTIVE'].includes(goalStatus_(row)))
       .filter(row => String(row.StudentId) === String(student.Id));
+    const goals = options.goalId
+      ? availableGoals.filter(row => String(row.Id) === String(options.goalId))
+      : availableGoals.filter(row => goalWorkspaceSection_(row, asOfDate) === 'CURRENT');
+    if (options.goalId && !goals.length) throw new Error('Goal history was not found.');
+    const availableGoalIds = new Set(availableGoals.map(row => String(row.Id)));
     const goalIds = new Set(goals.map(row => String(row.Id)));
     const benchmarks = effectiveBenchmarkRows_(
-      goals,
-      rows_('Benchmarks').filter(row => goalIds.has(String(row.GoalId))),
+      availableGoals,
+      rows_('Benchmarks').filter(row => availableGoalIds.has(String(row.GoalId))),
       options.endDate || new Date()
     );
-    const benchmarkIds = new Set(benchmarks.map(row => String(row.Id)));
-    const entries = rows_('BenchmarkEntries')
-      .filter(row => benchmarkIds.has(String(row.BenchmarkId)))
+    const benchmarkIds = new Set(benchmarks
+      .filter(row => goalIds.has(String(row.GoalId)))
+      .map(row => String(row.Id)));
+    const allEntries = rows_('BenchmarkEntries')
       .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .sort(compareObservationEntries_);
+    const entryCountsByBenchmark = allEntries.reduce((counts, entry) => {
+      const benchmarkId = String(entry.BenchmarkId);
+      counts[benchmarkId] = (counts[benchmarkId] || 0) + 1;
+      return counts;
+    }, {});
+    const entries = allEntries
+      .filter(row => benchmarkIds.has(String(row.BenchmarkId)))
       .filter(row => !options.startDate ||
         formatDate_(row.ObservationDate || row.Timestamp) >= options.startDate
       )
       .filter(row => !options.endDate ||
         formatDate_(row.ObservationDate || row.Timestamp) <= options.endDate
-      )
-      .sort(compareObservationEntries_);
+      );
     const benchmarkIndex = indexBy_(benchmarks, 'Id');
     const history = rows_('GoalPhaseHistory')
       .filter(row => goalIds.has(String(row.GoalId)));
@@ -721,6 +745,7 @@ function getStudentGoalWorkspace(studentId, options) {
               String(a.Id).localeCompare(String(b.Id))
             );
         return Object.assign({}, publicGoal_(goal, student, goalBenchmarks), {
+          workspaceSection: goalWorkspaceSection_(goal, asOfDate),
           benchmarks: goalBenchmarks.map(row => publicBenchmark_(
             row,
             student,
@@ -796,7 +821,22 @@ function getStudentGoalWorkspace(studentId, options) {
               : ''
           }))
         });
-      })
+      }),
+      otherGoals: options.goalId ? [] : availableGoals
+        .filter(goal => goalWorkspaceSection_(goal, asOfDate) !== 'CURRENT')
+        .map(goal => {
+          const goalBenchmarks = benchmarks.filter(row =>
+            String(row.GoalId) === String(goal.Id)
+          );
+          const ids = new Set(goalBenchmarks.map(row => String(row.Id)));
+          return Object.assign({}, publicGoal_(goal, student, goalBenchmarks), {
+            workspaceSection: goalWorkspaceSection_(goal, asOfDate),
+            totalEntryCount: Array.from(ids).reduce((total, id) =>
+              total + (entryCountsByBenchmark[id] || 0), 0
+            )
+          });
+        }),
+      asOfDate: asOfDate
     };
   });
 }

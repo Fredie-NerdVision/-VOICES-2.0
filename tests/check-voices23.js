@@ -134,6 +134,9 @@ if (/function getAppBootstrap\(\)[\s\S]{0,500}tryReconcileDateDrivenBenchmarks_/
     !code.includes('includeGoalCatalog: false') ||
     !html.includes('goalCatalogLoaded: false') ||
     !html.includes('state.goalVisibility[goal.id] = index === 0') ||
+    !html.includes('safeArray(data && data.otherGoals)') ||
+    !html.includes('View full goal history') ||
+    !html.includes('showHistory || benchmark.active') ||
     !goalService.includes('function effectiveBenchmarkRows_')) {
   throw new Error('Read-only app loads still perform global benchmark writes or eagerly load the goal catalog.');
 }
@@ -366,6 +369,15 @@ const result = vm.runInContext(`
     { Id: 'FUTURE', StartDate: '2026-10-01', DueDate: '2026-10-31', OrderIndex: 1 }
   ], '2026-09-01') !== null) {
     throw new Error('A future benchmark was activated before its start date.');
+  }
+  if (goalWorkspaceSection_({
+    Status: 'ACTIVE', Active: true, StartDate: '2026-10-01', DueDate: '2027-01-01'
+  }, '2026-09-01') !== 'FUTURE' || goalWorkspaceSection_({
+    Status: 'ACTIVE', Active: true, StartDate: '2025-01-01', DueDate: '2025-12-31'
+  }, '2026-09-01') !== 'HISTORY' || goalWorkspaceSection_({
+    Status: 'ACTIVE', Active: true, StartDate: '2026-01-01', DueDate: '2026-12-31'
+  }, '2026-09-01') !== 'CURRENT') {
+    throw new Error('Goal workspace current, future, and history grouping failed.');
   }
   return { phases: parsed.length, latestThree: metrics.currentPhaseLastThreeAccuracy };
 })()
