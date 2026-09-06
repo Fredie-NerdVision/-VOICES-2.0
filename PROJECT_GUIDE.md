@@ -93,6 +93,8 @@ The app should be deployed:
 - with the database shared to the deployment owner;
 - without publishing the database publicly.
 
+The deployment owner authorizes the declared Google service scopes. Domain staff sign in to establish their active Workspace identity but do not grant the application access to their own Sheets, Drive, Docs, or Mail resources.
+
 Emails are sent from the deployment owner's account under the display name `V.O.I.C.E.S 2.0`. Request messages identify the signed-in aide by email.
 
 ## 5. Source map
