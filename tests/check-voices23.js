@@ -10,6 +10,8 @@ const goalService = read('GoalService.gs');
 const scheduleService = read('ScheduleService.gs');
 const html = read('Index.html');
 const iepService = read('IEPService.gs');
+const adminService = read('AdminService.gs');
+const code = read('Code.gs');
 
 [
   'GoalPhaseHistory',
@@ -36,14 +38,15 @@ if (!benchmarkService.includes('tryLock(25000)') ||
   throw new Error('Observation batching is missing locking or idempotency safeguards.');
 }
 if (!benchmarkService.includes("String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE'") ||
-    !benchmarkService.includes('The historical Short-Term Objective does not belong to this student and goal.') ||
+    !benchmarkService.includes('The historical benchmark does not belong to this student and goal.') ||
     !benchmarkService.includes("if (!correctionReason) throw new Error('A correction reason is required.')")) {
   throw new Error('Observation summaries, historical phases, or correction audits are not hardened.');
 }
-if (!/function getStudentsForClass[\s\S]*?assertClassAccess_\(staff, classRow\)/.test(benchmarkService) ||
-    !/function lookupBenchmarks[\s\S]*?assertClassAccess_\(staff, classRow\)/.test(benchmarkService) ||
-    !benchmarkService.includes('getBenchmarkLookupContext_(staffMember, currentAssignment)')) {
-  throw new Error('Benchmark lookup does not enforce staff class access.');
+if (!/function getStudentsForClass[\s\S]*?assertObservationClassAccess_\(staff, classRow\)/.test(benchmarkService) ||
+    !/function lookupBenchmarks[\s\S]*?assertObservationClassAccess_\(staff, classRow\)/.test(benchmarkService) ||
+    !benchmarkService.includes('canUseAnyObservationClass_(staffMember)') ||
+    !benchmarkService.includes("? activeRows_('Classes')")) {
+  throw new Error('Benchmark lookup does not allow authorized cross-class observation entry.');
 }
 if (!scheduleService.includes("code: 'STALE_SCHEDULE'") ||
     !scheduleService.includes('LunchMinutes') ||
@@ -54,6 +57,17 @@ if (!scheduleService.includes("code: 'STALE_SCHEDULE'") ||
 }
 if (!/function isAideAvailableForPeriod_[\s\S]*?getEffectiveDailyHours_[\s\S]*?shiftOverlapLabel_/.test(scheduleService)) {
   throw new Error('Call-off replacements do not honor effective date-specific shift overlap.');
+}
+if (!code.includes('function requireAdmin_()') ||
+    !adminService.includes('function previewAdminCatalogBatch(payload)') ||
+    !adminService.includes('function saveAdminCatalogBatch(payload)') ||
+    !adminService.includes('tryLock(25000)') ||
+    !adminService.includes("teacherEmail + '|' + periodId") ||
+    !adminService.includes('Subject must match an existing or batched subject name.') ||
+    !html.includes('id="adminCatalogDialog"') ||
+    !html.includes("server('previewAdminCatalogBatch'") ||
+    !html.includes("server('saveAdminCatalogBatch'")) {
+  throw new Error('Admin subject/class batching is missing authorization, review, or retry safeguards.');
 }
 if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
   throw new Error('Native browser confirmation or prompt dialogs remain.');
@@ -84,9 +98,9 @@ if (/await server\('callOff'[\s\S]{0,300}event\.currentTarget/.test(html) ||
 }
 if (!html.includes('[hidden] { display: none !important; }') ||
     !html.includes('benchmarks.find(benchmark => benchmark.active)') ||
-    !html.includes('Manage other Short-Term Objectives') ||
-    !goalService.includes("Category: 'Short-Term Objective ' + (index + 1)")) {
-  throw new Error('Short-Term Objective wording, active-only display, or dialog controls regressed.');
+    !html.includes('Manage other benchmarks') ||
+    !goalService.includes("Category: 'Benchmark ' + (index + 1)")) {
+  throw new Error('Benchmark wording, active-only display, or dialog controls regressed.');
 }
 if (!goalService.includes('goalImportFingerprint_') ||
     !goalService.includes("code: 'IMPORT_MISMATCH'") ||
@@ -101,6 +115,26 @@ if (!iepService.includes('mastery targets not fully recorded') ||
       'normalizeEmail_(row.Email) === normalizeEmail_(student.CaseManagerEmail)'
     )) {
   throw new Error('IEP export is not null-safe, progress-aware, or access-scoped.');
+}
+if (!database.includes("'BenchmarkActivationMode'") ||
+    !database.includes("Key: 'SchoolQuarterBoundaries'") ||
+    !goalService.includes('function selectDateDrivenBenchmark_') ||
+    !goalService.includes('function nextSchoolQuarterBoundary_') ||
+    !goalService.includes("Source: 'MANUAL_OVERRIDE'") ||
+    !goalService.includes('function checkMissingBenchmarkObservations()') ||
+    !adminService.includes('function installMissingBenchmarkObservationTrigger()') ||
+    !html.includes('id="quarterBoundaryForm"') ||
+    !html.includes('data-phase-start') ||
+    !html.includes('data-phase-due')) {
+  throw new Error('Date-driven benchmark activation, quarter overrides, or monitoring is incomplete.');
+}
+if (!html.includes('activeEntryAverage') ||
+    !html.includes('entryBadgeClass') ||
+    !benchmarkService.includes('Benchmark observation overdue') ||
+    !html.includes('Benchmark ${escapeHtml(String(history.orderIndex') ||
+    html.includes('STO ${escapeHtml(String(history.orderIndex') ||
+    html.includes("slice(0, 34)")) {
+  throw new Error('Entry-count badges or benchmark chart cleanup is incomplete.');
 }
 
 const tables = {
@@ -124,7 +158,9 @@ const context = {
   toNumber_: value => Number(value) || 0,
   toBoolean_: value => value === true || String(value).toLowerCase() === 'true',
   formatDate_: value => String(value || '').slice(0, 10),
-  rows_: name => (tables[name] || []).map(row => ({ ...row }))
+  rows_: name => (tables[name] || []).map(row => ({ ...row })),
+  findOne_: (name, predicate) =>
+    (tables[name] || []).map(row => ({ ...row })).find(predicate) || null
 };
 vm.createContext(context);
 vm.runInContext(goalService, context);

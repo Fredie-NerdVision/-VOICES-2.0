@@ -21,7 +21,7 @@ function parseGoalObjectives_(value) {
 
 function parseObjectiveRecord_(objective, index) {
   if (!objective) {
-    throw new Error('Short-Term Objective ' + (index + 1) + ' has no task description.');
+    throw new Error('Benchmark ' + (index + 1) + ' has no task description.');
   }
   const ratios = extractObjectiveRatios_(objective);
   const percentageMatch = String(objective).match(/(\d+(?:\.\d+)?)\s*%/);
@@ -102,11 +102,18 @@ function createGoal(payload) {
     payload = payload || {};
     assertRequired_(payload, ['studentId', 'goal']);
     const student = requireManagedStudent_(staff, payload.studentId);
+    const startDate = payload.startDate || formatDate_(new Date());
+    const dueDate = payload.dueDate || formatDate_(
+      new Date(parseDate_(startDate).getTime() + 365 * 86400000)
+    );
+    if (parseDate_(dueDate) < parseDate_(startDate)) {
+      throw new Error('The goal due date must be on or after its start date.');
+    }
     const sourcePhases = Array.isArray(payload.phases)
       ? payload.phases
       : parseGoalObjectives_(payload.objectivesText || '');
     const phases = sourcePhases.map((phase, index) =>
-      normalizeGoalPhase_(phase, index, payload.startDate, payload.dueDate)
+      normalizeGoalPhase_(phase, index, startDate, dueDate)
     );
     const subjects = indexBy_(activeRows_('Subjects'), 'Id');
     const subjectIds = Array.from(new Set(
@@ -117,17 +124,11 @@ function createGoal(payload) {
     if (!subjectIds.length) {
       throw new Error('Choose at least one relevant class or subject for the goal.');
     }
-    const startDate = payload.startDate || formatDate_(new Date());
-    const dueDate = payload.dueDate || formatDate_(
-      new Date(parseDate_(startDate).getTime() + 365 * 86400000)
-    );
-    if (parseDate_(dueDate) < parseDate_(startDate)) {
-      throw new Error('The goal due date must be on or after its start date.');
-    }
     const status = normalizeGoalStatus_(payload.status, phases.length);
-    const activeIndex = phases.length && status === 'ACTIVE'
-      ? Math.max(0, phases.findIndex(phase => phase.active))
-      : -1;
+    const activePhase = status === 'ACTIVE'
+      ? selectDateDrivenBenchmark_(phases, formatDate_(new Date()))
+      : null;
+    const activeIndex = activePhase ? phases.indexOf(activePhase) : -1;
     const importBatchId = sanitizeText_(payload.importBatchId || '', 100);
     const importGoalKey = sanitizeText_(payload.importGoalKey || '', 100);
     if (Boolean(importBatchId) !== Boolean(importGoalKey)) {
@@ -204,7 +205,8 @@ function createGoal(payload) {
         Status: status,
         ImportBatchId: importBatchId,
         ImportGoalKey: importGoalKey,
-        ImportFingerprint: importFingerprint
+        ImportFingerprint: importFingerprint,
+        BenchmarkActivationMode: 'DATE'
       });
       const benchmarkRows = phases.map((phase, index) => {
         const benchmarkId = uuid_();
@@ -214,7 +216,7 @@ function createGoal(payload) {
           GoalId: goalId,
           StudentId: student.Id,
           SubjectId: subjectIds[0],
-          Category: 'Short-Term Objective ' + (index + 1),
+          Category: 'Benchmark ' + (index + 1),
           Skill: phase.taskDemandDescription,
           TargetCorrect: phase.targetCorrect,
           TargetAttempts: phase.targetAttempts,
@@ -245,11 +247,11 @@ function createGoal(payload) {
           Id: uuid_(),
           GoalId: goalId,
           BenchmarkId: benchmarkRows[activeIndex].Id,
-          ActivatedAt: startDate,
+          ActivatedAt: formatDate_(new Date()),
           EndedAt: '',
           ChangedBy: staff.Email,
-          ChangeReason: 'Initial active phase',
-          Source: 'APPLICATION'
+          ChangeReason: 'Initial date-selected benchmark',
+          Source: 'DATE'
         });
       }
     } catch (error) {
@@ -262,7 +264,7 @@ function createGoal(payload) {
       ok: true,
       id: goalId,
       benchmarkCount: benchmarkIds.length,
-      message: 'Goal and ' + benchmarkIds.length + ' Short-Term Objective' +
+      message: 'Goal and ' + benchmarkIds.length + ' benchmark' +
         (benchmarkIds.length === 1 ? '' : 's') + ' created.'
     };
   });
@@ -272,8 +274,8 @@ function previewBulkGoals(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
-  if (!rows.length) throw new Error('Paste at least one goal or Short-Term Objective row.');
-  if (rows.length > 500) throw new Error('Preview no more than 500 Short-Term Objective rows at a time.');
+  if (!rows.length) throw new Error('Paste at least one goal or benchmark row.');
+  if (rows.length > 500) throw new Error('Preview no more than 500 benchmark rows at a time.');
   const students = indexBy_(activeRows_('Students'), 'Id');
   const subjects = indexBy_(activeRows_('Subjects'), 'Id');
   const errors = [];
@@ -323,7 +325,8 @@ function previewBulkGoals(payload) {
         }
       }
       if (row.taskDemandDescription || row.phaseOrder || row.targetAccuracyPct ||
-          row.targetPromptLevel || row.targetPromptCount || row.targetConsecutiveSessions) {
+          row.targetPromptLevel || row.targetPromptCount || row.targetConsecutiveSessions ||
+          row.benchmarkStartDate || row.benchmarkDueDate) {
         groups[key].phases.push(normalizeGoalPhase_({
           orderIndex: row.phaseOrder,
           taskDemandDescription: row.taskDemandDescription,
@@ -331,6 +334,8 @@ function previewBulkGoals(payload) {
           targetPromptLevel: row.targetPromptLevel,
           targetPromptCount: row.targetPromptCount,
           targetConsecutiveSessions: row.targetConsecutiveSessions,
+          startDate: row.benchmarkStartDate,
+          dueDate: row.benchmarkDueDate,
           active: toBoolean_(row.active)
         }, groups[key].phases.length, row.startDate, row.dueDate));
       }
@@ -344,7 +349,7 @@ function previewBulkGoals(payload) {
     if (orders.some(order => order <= 0) || new Set(orders).size !== orders.length) {
       errors.push({
         row: 0,
-        message: goal.goalKey + ' must use unique positive Short-Term Objective order values (PhaseOrder).'
+        message: goal.goalKey + ' must use unique positive benchmark order values (BenchmarkOrder).'
       });
     }
     goal.phases.sort((a, b) => a.orderIndex - b.orderIndex);
@@ -409,33 +414,41 @@ function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
     phase.taskDemandDescription || phase.text || phase.skill || phase.description,
     5000
   );
-  if (!taskDemand) throw new Error('Short-Term Objective ' + (index + 1) + ' needs a task description.');
+  if (!taskDemand) throw new Error('Benchmark ' + (index + 1) + ' needs a task description.');
   const targetAccuracy = optionalNumber_(phase.targetAccuracyPct);
   if (targetAccuracy !== null && (targetAccuracy < 0 || targetAccuracy > 100)) {
-    throw new Error('Short-Term Objective ' + (index + 1) + ' target accuracy must be from 0 to 100.');
+    throw new Error('Benchmark ' + (index + 1) + ' target accuracy must be from 0 to 100.');
   }
   const targetPromptLevel = normalizePromptLevel_(phase.targetPromptLevel);
   const targetPromptCount = optionalInteger_(phase.targetPromptCount);
   if (targetPromptCount !== null && targetPromptCount < 0) {
-    throw new Error('Short-Term Objective ' + (index + 1) + ' prompt count cannot be negative.');
+    throw new Error('Benchmark ' + (index + 1) + ' prompt count cannot be negative.');
   }
   const consecutive = optionalInteger_(phase.targetConsecutiveSessions);
   if (consecutive !== null && consecutive <= 0) {
-    throw new Error('Short-Term Objective ' + (index + 1) + ' consecutive sessions must be positive.');
+    throw new Error('Benchmark ' + (index + 1) + ' consecutive sessions must be positive.');
   }
   const targetCorrect = optionalNumber_(phase.targetCorrect);
   const targetAttempts = optionalNumber_(phase.targetAttempts);
   if ((targetCorrect === null) !== (targetAttempts === null) ||
       (targetAttempts !== null &&
         (targetCorrect < 0 || targetAttempts <= 0 || targetCorrect > targetAttempts))) {
-    throw new Error('Short-Term Objective ' + (index + 1) + ' correctness ratio is invalid.');
+    throw new Error('Benchmark ' + (index + 1) + ' correctness ratio is invalid.');
   }
   const requiredTrials = optionalNumber_(phase.requiredTrials);
   const totalTrials = optionalNumber_(phase.totalTrials);
   if ((requiredTrials === null) !== (totalTrials === null) ||
       (totalTrials !== null &&
         (requiredTrials <= 0 || totalTrials <= 0 || requiredTrials > totalTrials))) {
-    throw new Error('Short-Term Objective ' + (index + 1) + ' legacy trial ratio is invalid.');
+    throw new Error('Benchmark ' + (index + 1) + ' legacy trial ratio is invalid.');
+  }
+  const startDate = formatDate_(phase.startDate || defaultStartDate);
+  const dueDate = formatDate_(phase.dueDate || defaultDueDate);
+  if (!startDate || !dueDate) {
+    throw new Error('Benchmark ' + (index + 1) + ' needs a start date and due date.');
+  }
+  if (dueDate < startDate) {
+    throw new Error('Benchmark ' + (index + 1) + ' due date must be on or after its start date.');
   }
   return {
     orderIndex: optionalInteger_(phase.orderIndex) || index + 1,
@@ -449,8 +462,8 @@ function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
     targetPromptLevel: targetPromptLevel,
     targetPromptCount: targetPromptCount === null ? '' : targetPromptCount,
     targetConsecutiveSessions: consecutive === null ? '' : consecutive,
-    startDate: phase.startDate || defaultStartDate || '',
-    dueDate: phase.dueDate || defaultDueDate || '',
+    startDate: startDate,
+    dueDate: dueDate,
     active: toBoolean_(phase.active)
   };
 }
@@ -485,7 +498,7 @@ function optionalInteger_(value) {
   if (value === '' || value === null || value === undefined) return null;
   const number = Number(value);
   if (!Number.isFinite(number) || !Number.isInteger(number)) {
-    throw new Error('Use a whole number for prompt counts, Short-Term Objective order, and session targets.');
+    throw new Error('Use a whole number for prompt counts, benchmark order, and session targets.');
   }
   return number;
 }
@@ -513,6 +526,7 @@ function rollbackGoalCreation_(goalId, benchmarkIds) {
 function getGoalManagerData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
+    tryReconcileDateDrivenBenchmarks_(new Date(), staff.Email);
     return getGoalManagerData_(staff);
   });
 }
@@ -542,6 +556,7 @@ function getStudentGoalWorkspace(studentId, options) {
   return withRowsCache_(() => {
     options = options || {};
     const staff = requireCaseManager_();
+    tryReconcileDateDrivenBenchmarks_(new Date(), staff.Email);
     const student = requireManagedStudent_(staff, studentId);
     const goals = rows_('Goals')
       .filter(isActiveGoal_)
@@ -576,12 +591,14 @@ function getStudentGoalWorkspace(studentId, options) {
         const ids = new Set(goalBenchmarks.map(row => String(row.Id)));
         const goalEntries = entries.filter(row => ids.has(String(row.BenchmarkId)));
         const displayedEntries = goalEntries.slice(-entryLimit);
-        const phaseHistory = history
-          .filter(row => String(row.GoalId) === String(goal.Id))
-          .sort((a, b) =>
-            String(a.ActivatedAt).localeCompare(String(b.ActivatedAt)) ||
-            String(a.Id).localeCompare(String(b.Id))
-          );
+        const phaseHistory = goalUsesDateDrivenBenchmarks_(goal)
+          ? buildDateDrivenBenchmarkHistory_(goal, goalBenchmarks, options.endDate || formatDate_(new Date()))
+          : history
+            .filter(row => String(row.GoalId) === String(goal.Id))
+            .sort((a, b) =>
+              String(a.ActivatedAt).localeCompare(String(b.ActivatedAt)) ||
+              String(a.Id).localeCompare(String(b.Id))
+            );
         return Object.assign({}, publicGoal_(goal, student, goalBenchmarks), {
           benchmarks: goalBenchmarks.map(row => publicBenchmark_(
             row,
@@ -598,6 +615,7 @@ function getStudentGoalWorkspace(studentId, options) {
             endedAt: formatDate_(row.EndedAt),
             changedBy: row.ChangedBy,
             changeReason: row.ChangeReason,
+            source: row.Source || '',
             orderIndex: benchmarkIndex[row.BenchmarkId]
               ? optionalInteger_(benchmarkIndex[row.BenchmarkId].OrderIndex) || 1
               : 1
@@ -782,6 +800,363 @@ function getGoalProgressReport(payload) {
   };
 }
 
+function getSchoolQuarterBoundaries_() {
+  const raw = settingsMap_().SchoolQuarterBoundaries || '[]';
+  try {
+    const values = JSON.parse(String(raw));
+    return Array.isArray(values)
+      ? values.map(formatDate_).filter(Boolean).sort()
+      : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function nextSchoolQuarterBoundary_(date) {
+  const current = formatDate_(date);
+  const next = getSchoolQuarterBoundaries_().find(boundary => boundary > current);
+  if (!next) {
+    throw new Error('An administrator must configure a future school-quarter boundary before overriding a benchmark.');
+  }
+  return next;
+}
+
+function selectDateDrivenBenchmark_(benchmarks, date) {
+  const current = formatDate_(date);
+  const ordered = (benchmarks || []).slice().sort((a, b) =>
+    String(formatDate_(a.DueDate || a.dueDate) || '9999-12-31')
+      .localeCompare(String(formatDate_(b.DueDate || b.dueDate) || '9999-12-31')) ||
+    (optionalInteger_(a.OrderIndex || a.orderIndex) || 1) -
+      (optionalInteger_(b.OrderIndex || b.orderIndex) || 1)
+  );
+  const eligible = ordered.filter(row => {
+    const start = formatDate_(row.StartDate || row.startDate);
+    const due = formatDate_(row.DueDate || row.dueDate);
+    return (!start || start <= current) && (!due || current <= due);
+  });
+  if (eligible.length) return eligible[0];
+  return ordered
+    .filter(row => formatDate_(row.StartDate || row.startDate) > current)
+    .sort((a, b) =>
+      formatDate_(a.StartDate || a.startDate)
+        .localeCompare(formatDate_(b.StartDate || b.startDate)) ||
+      (optionalInteger_(a.OrderIndex || a.orderIndex) || 1) -
+        (optionalInteger_(b.OrderIndex || b.orderIndex) || 1)
+    )[0] || null;
+}
+
+function goalUsesDateDrivenBenchmarks_(goal) {
+  return String(goal && goal.BenchmarkActivationMode || '').toUpperCase() === 'DATE';
+}
+
+function getManualBenchmarkOverride_(goalId, date) {
+  const current = formatDate_(date);
+  return rows_('GoalPhaseHistory')
+    .filter(row =>
+      String(row.GoalId) === String(goalId) &&
+      String(row.Source || '').toUpperCase() === 'MANUAL_OVERRIDE' &&
+      formatDate_(row.ActivatedAt) <= current &&
+      current < formatDate_(row.EndedAt)
+    )
+    .sort((a, b) =>
+      String(b.ActivatedAt).localeCompare(String(a.ActivatedAt)) ||
+      String(b.Id).localeCompare(String(a.Id))
+    )[0] || null;
+}
+
+function getEffectiveGoalBenchmark_(goal, benchmarks, date) {
+  if (!goalUsesDateDrivenBenchmarks_(goal)) return null;
+  const override = getManualBenchmarkOverride_(goal.Id, date);
+  if (override) {
+    return benchmarks.find(row => String(row.Id) === String(override.BenchmarkId)) || null;
+  }
+  return selectDateDrivenBenchmark_(benchmarks, date);
+}
+
+function buildDateDrivenBenchmarkHistory_(goal, benchmarks, throughDate) {
+  const endDate = formatDate_(throughDate || new Date());
+  const dates = new Set([formatDate_(goal.StartDate), endDate].filter(Boolean));
+  (benchmarks || []).forEach(benchmark => {
+    const start = formatDate_(benchmark.StartDate);
+    const due = formatDate_(benchmark.DueDate);
+    if (start) dates.add(start);
+    if (due) {
+      dates.add(formatDate_(new Date(parseDate_(due).getTime() + 86400000)));
+    }
+  });
+  rows_('GoalPhaseHistory')
+    .filter(row =>
+      String(row.GoalId) === String(goal.Id) &&
+      String(row.Source || '').toUpperCase() === 'MANUAL_OVERRIDE'
+    )
+    .forEach(row => {
+      if (row.ActivatedAt) dates.add(formatDate_(row.ActivatedAt));
+      if (row.EndedAt) dates.add(formatDate_(row.EndedAt));
+    });
+  const timeline = [];
+  Array.from(dates)
+    .filter(date => date && date <= endDate)
+    .sort()
+    .forEach(date => {
+      const selected = getEffectiveGoalBenchmark_(goal, benchmarks, date);
+      const previous = timeline[timeline.length - 1];
+      if (String(previous && previous.BenchmarkId || '') === String(selected && selected.Id || '')) {
+        return;
+      }
+      if (previous && !previous.EndedAt) previous.EndedAt = date;
+      if (selected) {
+        const override = getManualBenchmarkOverride_(goal.Id, date);
+        timeline.push({
+          Id: 'TIMELINE|' + goal.Id + '|' + date,
+          GoalId: goal.Id,
+          BenchmarkId: selected.Id,
+          ActivatedAt: date,
+          EndedAt: override ? formatDate_(override.EndedAt) : '',
+          ChangedBy: override ? override.ChangedBy : '',
+          ChangeReason: override
+            ? override.ChangeReason
+            : 'Selected from benchmark start and due dates',
+          Source: override ? 'MANUAL_OVERRIDE' : 'DATE'
+        });
+      }
+    });
+  return timeline;
+}
+
+function syncDateDrivenGoal_(goal, date, changedBy) {
+  if (!isActiveGoal_(goal) || !goalUsesDateDrivenBenchmarks_(goal)) return null;
+  const currentDate = formatDate_(date);
+  const benchmarks = rows_('Benchmarks')
+    .filter(row => String(row.GoalId) === String(goal.Id));
+  const desired = getEffectiveGoalBenchmark_(goal, benchmarks, currentDate);
+  const current = benchmarks.find(row => toBoolean_(row.Active)) || null;
+  if (String(current && current.Id || '') === String(desired && desired.Id || '')) {
+    return desired;
+  }
+  if (current && !desired) {
+    const student = findOne_('Students', row => String(row.Id) === String(goal.StudentId));
+    const recipient = normalizeEmail_(student && student.CaseManagerEmail);
+    const message = (student ? student.Name : 'A student') +
+      ' has no active benchmark for goal ' + goal.Id +
+      ' because all configured benchmark date ranges have ended.';
+    const duplicate = rows_('Notifications').some(row =>
+      row.Type === 'BENCHMARK_ENDED' &&
+      row.Status === 'OPEN' &&
+      String(row.Message) === message
+    );
+    if (!duplicate && recipient) {
+      appendRow_('Notifications', {
+        Id: uuid_(),
+        Type: 'BENCHMARK_ENDED',
+        Message: message,
+        Recipients: recipient,
+        Status: 'OPEN',
+        CreatedAt: new Date()
+      });
+    }
+  }
+  benchmarks.forEach(row => updateRow_('Benchmarks', row._row, {
+    Active: Boolean(desired && String(row.Id) === String(desired.Id))
+  }));
+  rows_('GoalPhaseHistory')
+    .filter(row =>
+      String(row.GoalId) === String(goal.Id) &&
+      formatDate_(row.ActivatedAt) <= currentDate &&
+      (!row.EndedAt || formatDate_(row.EndedAt) > currentDate) &&
+      String(row.Source || '').toUpperCase() !== 'MANUAL_OVERRIDE'
+    )
+    .forEach(row => updateRow_('GoalPhaseHistory', row._row, {
+      EndedAt: currentDate,
+      EndedBy: changedBy || '',
+      EndReason: desired ? 'Date-selected benchmark changed' : 'No date-eligible benchmark'
+    }));
+  if (desired) {
+    const override = getManualBenchmarkOverride_(goal.Id, currentDate);
+    if (!override) {
+      appendRow_('GoalPhaseHistory', {
+        Id: uuid_(),
+        GoalId: goal.Id,
+        BenchmarkId: desired.Id,
+        ActivatedAt: currentDate,
+        EndedAt: '',
+        ChangedBy: changedBy || '',
+        ChangeReason: 'Selected from benchmark start and due dates',
+        Source: 'DATE'
+      });
+    }
+  }
+  invalidateRowsCache_('Benchmarks');
+  invalidateRowsCache_('GoalPhaseHistory');
+  return desired;
+}
+
+function reconcileDateDrivenBenchmarks_(date, changedBy) {
+  const currentDate = formatDate_(date || new Date());
+  rows_('Goals')
+    .filter(isActiveGoal_)
+    .filter(goalUsesDateDrivenBenchmarks_)
+    .forEach(goal => syncDateDrivenGoal_(goal, currentDate, changedBy));
+}
+
+function tryReconcileDateDrivenBenchmarks_(date, changedBy) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return false;
+  try {
+    reconcileDateDrivenBenchmarks_(date, changedBy);
+    return true;
+  } catch (error) {
+    return false;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function reconcileDateDrivenBenchmarks() {
+  requireAdmin_();
+  return withRowsCache_(() => {
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(25000)) {
+      return { ok: false, code: 'WRITE_BUSY', retryable: true };
+    }
+    try {
+      reconcileDateDrivenBenchmarks_(new Date(), getCurrentUserEmail_());
+      return { ok: true, date: formatDate_(new Date()) };
+    } finally {
+      lock.releaseLock();
+    }
+  });
+}
+
+function getCurrentBenchmarkActivationDate_(goalId, benchmarkId, date) {
+  const current = formatDate_(date);
+  const history = rows_('GoalPhaseHistory')
+    .filter(row =>
+      String(row.GoalId) === String(goalId) &&
+      String(row.BenchmarkId) === String(benchmarkId) &&
+      formatDate_(row.ActivatedAt) <= current &&
+      (!row.EndedAt || current < formatDate_(row.EndedAt))
+    )
+    .sort((a, b) =>
+      String(b.ActivatedAt).localeCompare(String(a.ActivatedAt)) ||
+      String(b.Id).localeCompare(String(a.Id))
+    );
+  return history.length ? formatDate_(history[0].ActivatedAt) : '';
+}
+
+function checkMissingBenchmarkObservations() {
+  return withRowsCache_(() => {
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(25000)) {
+      return {
+        ok: false,
+        code: 'WRITE_BUSY',
+        retryable: true,
+        message: 'Benchmark monitoring is busy. Retry shortly.'
+      };
+    }
+    try {
+      const today = formatDate_(new Date());
+      reconcileDateDrivenBenchmarks_(today, '');
+      const students = indexBy_(activeRows_('Students'), 'Id');
+      const goals = indexBy_(rows_('Goals').filter(isActiveGoal_), 'Id');
+      const entries = rows_('BenchmarkEntries')
+        .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+      const notificationRows = rows_('Notifications');
+      const activeBenchmarks = rows_('Benchmarks').filter(row => toBoolean_(row.Active));
+      const activeBenchmarkIds = new Set(activeBenchmarks.map(row => String(row.Id)));
+      notificationRows
+        .filter(row =>
+          row.Status === 'OPEN' &&
+          String(row.Type || '').startsWith('MISSING_BENCHMARK_ENTRY|') &&
+          !activeBenchmarkIds.has(String(row.Type).split('|')[1])
+        )
+        .forEach(row => updateRow_('Notifications', row._row, { Status: 'RESOLVED' }));
+      const existingTypes = new Set(notificationRows
+        .filter(row => row.Status === 'OPEN')
+        .map(row => String(row.Type)));
+      const emailAlerts = {};
+      let alertsCreated = 0;
+      activeBenchmarks.forEach(benchmark => {
+          const goal = goals[String(benchmark.GoalId)];
+          const student = students[String(benchmark.StudentId)];
+          const recipient = normalizeEmail_(student && student.CaseManagerEmail);
+          if (!goal || !student || !recipient) return;
+          const activatedAt = getCurrentBenchmarkActivationDate_(
+            goal.Id,
+            benchmark.Id,
+            today
+          );
+          if (!activatedAt) return;
+          const lastEntryDate = entries
+            .filter(row =>
+              String(row.BenchmarkId) === String(benchmark.Id) &&
+              formatDate_(row.ObservationDate || row.Timestamp) >= activatedAt &&
+              formatDate_(row.ObservationDate || row.Timestamp) <= today
+            )
+            .map(row => formatDate_(row.ObservationDate || row.Timestamp))
+            .sort()
+            .pop() || '';
+          const referenceDate = lastEntryDate || activatedAt;
+          if (lastEntryDate) {
+            notificationRows
+              .filter(row => {
+                const parts = String(row.Type || '').split('|');
+                return row.Status === 'OPEN' &&
+                  parts[0] === 'MISSING_BENCHMARK_ENTRY' &&
+                  parts[1] === String(benchmark.Id) &&
+                  parts[2] < lastEntryDate;
+              })
+              .forEach(row => updateRow_('Notifications', row._row, {
+                Status: 'RESOLVED'
+              }));
+          }
+          const daysWithoutEntry = Math.floor(
+            (parseDate_(today).getTime() - parseDate_(referenceDate).getTime()) / 86400000
+          );
+          if (daysWithoutEntry < 14) return;
+          const alertDay = 14 + Math.floor((daysWithoutEntry - 14) / 7) * 7;
+          const type = [
+            'MISSING_BENCHMARK_ENTRY',
+            benchmark.Id,
+            referenceDate,
+            alertDay
+          ].join('|');
+          if (existingTypes.has(type)) return;
+          const message = student.Name + ' has no benchmark observation for ' +
+            daysWithoutEntry + ' days: ' +
+            (benchmark.TaskDemandDescription || benchmark.Skill || benchmark.Description) + '.';
+          appendRow_('Notifications', {
+            Id: uuid_(),
+            Type: type,
+            Message: message,
+            Recipients: recipient,
+            Status: 'OPEN',
+            CreatedAt: new Date()
+          });
+          existingTypes.add(type);
+          if (!emailAlerts[recipient]) emailAlerts[recipient] = [];
+          emailAlerts[recipient].push(message);
+          alertsCreated += 1;
+        });
+      Object.keys(emailAlerts).forEach(recipient => sendEmail_(
+        recipient,
+        'V.O.I.C.E.S missing benchmark observations',
+        'The following active benchmarks need observations:\n\n' +
+          emailAlerts[recipient].map(message => '- ' + message).join('\n')
+      ));
+      invalidateRowsCache_('Notifications');
+      return {
+        ok: true,
+        checkedAt: today,
+        alertsCreated: alertsCreated,
+        recipientsEmailed: Object.keys(emailAlerts).length
+      };
+    } finally {
+      lock.releaseLock();
+    }
+  });
+}
+
 function setActiveGoalBenchmark(payload) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -800,7 +1175,7 @@ function setActiveGoalBenchmark(payload) {
     if (!selected) throw new Error('Benchmark was not found in this goal.');
     const activationDate = formatDate_(payload.activationDate || new Date());
     if (!activationDate || activationDate > formatDate_(new Date())) {
-      throw new Error('Short-Term Objective activation date must be today or earlier.');
+      throw new Error('Benchmark activation date must be today or earlier.');
     }
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(25000)) {
@@ -814,8 +1189,45 @@ function setActiveGoalBenchmark(payload) {
       const selectedCurrent = currentBenchmarks.find(row =>
         String(row.Id) === String(selected.Id)
       );
-      if (!selectedCurrent) throw new Error('The selected Short-Term Objective is no longer available.');
+      if (!selectedCurrent) throw new Error('The selected benchmark is no longer available.');
       const current = currentBenchmarks.find(row => toBoolean_(row.Active));
+      if (goalUsesDateDrivenBenchmarks_(goal)) {
+        const overrideExpiresAt = nextSchoolQuarterBoundary_(activationDate);
+        rows_('GoalPhaseHistory')
+          .filter(row =>
+            String(row.GoalId) === String(goal.Id) &&
+            formatDate_(row.ActivatedAt) <= activationDate &&
+            (!row.EndedAt || formatDate_(row.EndedAt) > activationDate)
+          )
+          .forEach(row => updateRow_('GoalPhaseHistory', row._row, {
+            EndedAt: activationDate,
+            EndedBy: staff.Email,
+            EndReason: 'Manual benchmark override'
+          }));
+        currentBenchmarks.forEach(row => updateRow_('Benchmarks', row._row, {
+          Active: String(row.Id) === String(selectedCurrent.Id)
+        }));
+        appendRow_('GoalPhaseHistory', {
+          Id: uuid_(),
+          GoalId: goal.Id,
+          BenchmarkId: selectedCurrent.Id,
+          ActivatedAt: activationDate,
+          EndedAt: overrideExpiresAt,
+          ChangedBy: staff.Email,
+          ChangeReason: sanitizeText_(payload.reason || 'Manual benchmark override', 500),
+          Source: 'MANUAL_OVERRIDE',
+          EndedBy: '',
+          EndReason: 'Quarter boundary expiration'
+        });
+        updateRow_('Goals', goal._row, { UpdatedAt: new Date() });
+        return {
+          ok: true,
+          goalId: goal.Id,
+          benchmarkId: selectedCurrent.Id,
+          activationDate: activationDate,
+          overrideExpiresAt: overrideExpiresAt
+        };
+      }
       if (current && String(current.Id) === String(selectedCurrent.Id)) {
         return {
           ok: true,
@@ -827,7 +1239,7 @@ function setActiveGoalBenchmark(payload) {
       if (current &&
           (optionalInteger_(selectedCurrent.OrderIndex) || selectedCurrent._row) <=
           (optionalInteger_(current.OrderIndex) || current._row)) {
-        throw new Error('Activate a later Short-Term Objective in the goal progression order.');
+        throw new Error('Activate a later benchmark in the goal progression order.');
       }
       const openHistory = rows_('GoalPhaseHistory')
         .filter(row =>
@@ -835,7 +1247,7 @@ function setActiveGoalBenchmark(payload) {
           !row.EndedAt
         );
       if (openHistory.some(row => formatDate_(row.ActivatedAt) > activationDate)) {
-        throw new Error('Short-Term Objective activation cannot precede the current objective.');
+        throw new Error('Benchmark activation cannot precede the current benchmark.');
       }
       currentBenchmarks.forEach(row => updateRow_('Benchmarks', row._row, {
         Active: String(row.Id) === String(selectedCurrent.Id)
@@ -852,7 +1264,7 @@ function setActiveGoalBenchmark(payload) {
         ActivatedAt: activationDate,
         EndedAt: '',
         ChangedBy: staff.Email,
-        ChangeReason: sanitizeText_(payload.reason || 'Short-Term Objective activated', 500),
+        ChangeReason: sanitizeText_(payload.reason || 'Benchmark activated', 500),
         Source: 'APPLICATION'
       });
       updateRow_('Goals', goal._row, {
@@ -887,6 +1299,24 @@ function getGoalPhaseHistory_(goalId) {
 
 function getPhaseForObservationDate_(goalId, observationDate) {
   const date = formatDate_(observationDate);
+  const goal = findOne_('Goals', row => String(row.Id) === String(goalId));
+  if (goal && goalUsesDateDrivenBenchmarks_(goal)) {
+    const benchmarks = rows_('Benchmarks')
+      .filter(row => String(row.GoalId) === String(goalId));
+    const override = getManualBenchmarkOverride_(goalId, date);
+    if (override) return override;
+    const selected = selectDateDrivenBenchmark_(benchmarks, date);
+    return selected ? {
+      Id: 'DATE|' + goalId + '|' + date,
+      GoalId: goalId,
+      BenchmarkId: selected.Id,
+      ActivatedAt: date,
+      EndedAt: '',
+      ChangedBy: '',
+      ChangeReason: 'Resolved from benchmark dates',
+      Source: 'DATE'
+    } : null;
+  }
   return getGoalPhaseHistory_(goalId)
     .filter(row => formatDate_(row.ActivatedAt) <= date)
     .filter(row =>

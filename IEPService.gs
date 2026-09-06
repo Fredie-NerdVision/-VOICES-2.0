@@ -53,7 +53,7 @@ function generateIep(payload) {
   body.appendParagraph('Case manager: ' + student.CaseManagerEmail);
   body.appendParagraph('Plan dates: ' + payload.startDate + ' through ' + payload.endDate);
   body.appendHorizontalRule();
-  body.appendParagraph('Annual goals and short-term objectives')
+  body.appendParagraph('Annual goals and benchmarks')
     .setHeading(DocumentApp.ParagraphHeading.HEADING2);
   if (!goals.length) {
     body.appendParagraph('No active annual goals were assigned when this document was generated.');
@@ -68,7 +68,7 @@ function generateIep(payload) {
             .map(id => subjects[id] ? subjects[id].Name : '')
             .filter(Boolean);
           body.appendParagraph(
-            String(benchmark.Category || 'Phase') +
+            String(benchmark.Category || 'Benchmark') +
             (subjectNames.length ? ' — ' + subjectNames.join(', ') : '')
           ).setHeading(DocumentApp.ParagraphHeading.HEADING4);
           body.appendParagraph(String(

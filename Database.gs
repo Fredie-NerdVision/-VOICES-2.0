@@ -11,7 +11,7 @@ const SHEET_SCHEMAS = Object.freeze({
   Goals: [
     'Id', 'StudentId', 'Goal', 'StartDate', 'DueDate', 'Active',
     'CreatedBy', 'CreatedAt', 'UpdatedAt', 'Domain', 'Status',
-    'ImportBatchId', 'ImportGoalKey', 'ImportFingerprint'
+    'ImportBatchId', 'ImportGoalKey', 'ImportFingerprint', 'BenchmarkActivationMode'
   ],
   Benchmarks: [
     'Id', 'StudentId', 'SubjectId', 'Category', 'Skill', 'TargetCorrect', 'TargetAttempts',
@@ -278,6 +278,19 @@ function migrateVoices23Data_() {
       return aOrder - bOrder || a._row - b._row;
     });
     const goal = goals.find(item => String(item.Id) === goalId);
+    if (goal && !goal.BenchmarkActivationMode) {
+      const ranges = new Set(ordered.map(benchmark =>
+        formatDate_(benchmark.StartDate) + '|' + formatDate_(benchmark.DueDate)
+      ));
+      const completeDates = ordered.length && ordered.every(benchmark =>
+        formatDate_(benchmark.StartDate) && formatDate_(benchmark.DueDate)
+      );
+      updateRow_('Goals', goal._row, {
+        BenchmarkActivationMode: completeDates && (ordered.length === 1 || ranges.size > 1)
+          ? 'DATE'
+          : 'LEGACY'
+      });
+    }
     const phaseHistoryCandidates = ordered.filter(benchmark =>
       toBoolean_(benchmark.Active) ||
       (entriesByBenchmark[String(benchmark.Id)] || []).length
@@ -468,6 +481,12 @@ function seedDefaults_() {
     appendRow_('Settings', {
       Key: 'ScheduleWeekdays',
       Value: 'MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY'
+    });
+  }
+  if (!findOne_('Settings', row => row.Key === 'SchoolQuarterBoundaries')) {
+    appendRow_('Settings', {
+      Key: 'SchoolQuarterBoundaries',
+      Value: '[]'
     });
   }
   upsertSetting_('SchemaVersion', '2.3');

@@ -54,8 +54,9 @@ Each row is one annual IEP goal:
 - `Domain`
 - `Status`: `DRAFT`, `ACTIVE`, `COMPLETED`, or `INACTIVE`
 - `ImportBatchId`, `ImportGoalKey`, and `ImportFingerprint` for retry-safe bulk imports
+- `BenchmarkActivationMode`: `DATE` for date-selected benchmarks or `LEGACY` for migrated progression-only goals
 
-Goals may contain zero or any number of ordered Short-Term Objectives. The code and schema use “phase” internally for progression and chronology, while the application retains “Short-Term Objective” in user-facing goal workflows. Draft goals may omit structured targets. Only `ACTIVE` lifecycle goals participate in lookup, analytics, and IEP export; drafts and completed goals remain available to case managers without being treated as active.
+Goals may contain zero or any number of ordered benchmarks. The parser accepts IEP labels such as “STO” and “Short-Term Objective,” while the application uses “Benchmark” in normal workflows. Draft goals may omit structured targets. Only `ACTIVE` lifecycle goals participate in lookup, analytics, and IEP export; drafts and completed goals remain available to case managers without being treated as active.
 
 ### Benchmarks
 
@@ -67,12 +68,13 @@ Each benchmark row is an ordered task/condition phase associated with a goal thr
 - `TargetPromptCount`
 - `TargetAccuracyPct`
 - `TargetConsecutiveSessions`
+- benchmark-specific `StartDate` and `DueDate`
 
-`TargetCorrect`, `TargetAttempts`, `RequiredTrials`, and `TotalTrials` are retained for compatibility. Within each non-draft goal, one phase is active for current lookup and data entry.
+`TargetCorrect`, `TargetAttempts`, `RequiredTrials`, and `TotalTrials` are retained for compatibility. Date-mode goals select the eligible benchmark with the nearest due date, fall forward to the next upcoming benchmark when no date window is currently open, and select none after all date ranges end.
 
 ### GoalPhaseHistory
 
-Records every phase activation boundary with `ActivatedAt`, `EndedAt`, actor, reason, and source. Closed intervals also retain `EndedBy` and `EndReason`. Backdated observations are resolved against this history rather than silently assigned to the current phase, and the resolved phase must belong to the same goal and student.
+Records benchmark activation boundaries with `ActivatedAt`, `EndedAt`, actor, reason, and source. `MANUAL_OVERRIDE` rows end at the next configured school-quarter boundary; date selection resumes at expiration. Closed intervals also retain `EndedBy` and `EndReason`. Backdated observations in date mode are resolved from benchmark dates and applicable overrides, while legacy goals continue to use persisted history.
 
 ### BenchmarkSubjects
 
@@ -81,6 +83,10 @@ Each goal has subject relevance tags shared by all of its phases. A benchmark is
 ### BenchmarkEntries
 
 Each active row preserves raw successes/trials, calculated accuracy, observation date, actual prompt level/count, class, evaluator, notes, an idempotent submission batch ID, and a normalized batch fingerprint. The fingerprint rejects accidental batch-ID reuse with different data. Correction fields retain the original entry and a required correction reason rather than overwriting history; superseded rows are excluded from current lookup and analytics.
+
+### Settings and Notifications
+
+`Settings.SchoolQuarterBoundaries` stores five chronological dates: Q1, Q2, Q3, Q4, and the next school-year start. Notifications record all-ended benchmark warnings and retry-safe missing-observation alerts. Missing-observation keys include the benchmark, reset date, and 14/21/28-day alert interval so the daily monitor sends once at 14 days and then weekly until a new valid entry resets the cycle.
 
 ### IEPs
 

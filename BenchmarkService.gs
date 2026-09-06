@@ -50,7 +50,7 @@ function getStudentsForClass(classId) {
   const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
   const classRow = findOne_('Classes', row => String(row.Id) === String(classId) && toBoolean_(row.Active));
   if (!classRow) throw new Error('Class was not found.');
-  assertClassAccess_(staff, classRow);
+  assertObservationClassAccess_(staff, classRow);
   const ids = new Set(
     rows_('ClassStudents')
       .filter(row => String(row.ClassId) === String(classId))
@@ -70,11 +70,17 @@ function getBenchmarkLookupContext_(staffMember, currentAssignment) {
   const subjects = indexBy_(activeRows_('Subjects'), 'Id');
   const students = indexBy_(activeRows_('Students'), 'Id');
   const enrollment = rows_('ClassStudents');
-  const allowedClassIds = new Set(
-    getClassesForStaff_(staffMember).map(row => String(row.id))
-  );
-  const classes = activeRows_('Classes')
-    .filter(row => allowedClassIds.has(String(row.Id)))
+  const lookupClasses = canUseAnyObservationClass_(staffMember)
+    ? activeRows_('Classes')
+    : activeRows_('Classes').filter(row => {
+        try {
+          assertObservationClassAccess_(staffMember, row);
+          return true;
+        } catch (error) {
+          return false;
+        }
+      });
+  const classes = lookupClasses
     .map(row => ({
     id: row.Id,
     name: row.Name,
@@ -125,14 +131,42 @@ function getTrainedStudents_(email) {
     .map(publicStudent_);
 }
 
+function getCurrentActiveBenchmarks_() {
+  const goals = rows_('Goals').filter(isActiveGoal_);
+  const goalIndex = indexBy_(goals, 'Id');
+  const benchmarks = rows_('Benchmarks');
+  const today = formatDate_(new Date());
+  const benchmarksByGoal = benchmarks.reduce((map, benchmark) => {
+    const goalId = String(benchmark.GoalId || '');
+    if (!map[goalId]) map[goalId] = [];
+    map[goalId].push(benchmark);
+    return map;
+  }, {});
+  const selectedByGoal = {};
+  return benchmarks.filter(benchmark => {
+    const goal = goalIndex[benchmark.GoalId];
+    if (!goalUsesDateDrivenBenchmarks_(goal)) return toBoolean_(benchmark.Active);
+    if (!(benchmark.GoalId in selectedByGoal)) {
+      selectedByGoal[benchmark.GoalId] = getEffectiveGoalBenchmark_(
+        goal,
+        benchmarksByGoal[String(benchmark.GoalId)] || [],
+        today
+      );
+    }
+    const selected = selectedByGoal[benchmark.GoalId];
+    return Boolean(selected && String(selected.Id) === String(benchmark.Id));
+  });
+}
+
 function lookupBenchmarks(filters) {
   filters = filters || {};
   const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
+  tryReconcileDateDrivenBenchmarks_(new Date(), '');
   assertRequired_(filters, ['classId', 'studentIds']);
   const studentIds = Array.isArray(filters.studentIds) ? filters.studentIds.map(String) : [String(filters.studentIds)];
   const classRow = findOne_('Classes', row => String(row.Id) === String(filters.classId) && toBoolean_(row.Active));
   if (!classRow) throw new Error('Class was not found.');
-  assertClassAccess_(staff, classRow);
+  assertObservationClassAccess_(staff, classRow);
 
   const enrolled = new Set(
     rows_('ClassStudents')
@@ -149,7 +183,7 @@ function lookupBenchmarks(filters) {
   );
   const entries = rows_('BenchmarkEntries')
     .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE');
-  return activeRows_('Benchmarks')
+  return getCurrentActiveBenchmarks_()
     .filter(row =>
       selected.includes(String(row.StudentId)) &&
       (!row.GoalId || activeGoalIds.has(String(row.GoalId))) &&
@@ -303,10 +337,10 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
         if (datedPhase && String(datedPhase.BenchmarkId) !== String(benchmark.Id)) {
           if (item.phaseDateResolution === 'USE_HISTORICAL_PHASE') {
             benchmark = benchmarks[String(datedPhase.BenchmarkId)];
-            if (!benchmark) throw new Error('The historical Short-Term Objective is no longer available.');
+            if (!benchmark) throw new Error('The historical benchmark is no longer available.');
             if (String(benchmark.GoalId) !== String(originalBenchmark.GoalId) ||
                 String(benchmark.StudentId) !== String(originalBenchmark.StudentId)) {
-              throw new Error('The historical Short-Term Objective does not belong to this student and goal.');
+              throw new Error('The historical benchmark does not belong to this student and goal.');
             }
           } else {
             conflicts.push({
@@ -315,7 +349,7 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
               observationDate: observationDate,
               selectedBenchmarkId: item.benchmarkId,
               suggestedBenchmarkId: datedPhase.BenchmarkId,
-              message: 'A different Short-Term Objective was active on this observation date.'
+              message: 'A different benchmark was active on this observation date.'
             });
             return;
           }
@@ -324,20 +358,20 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
           if (!resolved ||
               String(resolved.GoalId) !== String(originalBenchmark.GoalId) ||
               String(resolved.StudentId) !== String(originalBenchmark.StudentId)) {
-            throw new Error('The Short-Term Objective history does not belong to this student and goal.');
+            throw new Error('The benchmark history does not belong to this student and goal.');
           }
         } else if (!isActiveGoal_(goal) || !toBoolean_(benchmark.Active) ||
             rows_('GoalPhaseHistory').some(row =>
               String(row.GoalId) === String(goal.Id)
             )) {
-          throw new Error('This Short-Term Objective was not active on the observation date.');
+          throw new Error('This benchmark was not active on the observation date.');
         }
       } else if (!toBoolean_(benchmark.Active)) {
         throw new Error('Benchmark was not found or is inactive.');
       }
       const classRow = classes[String(item.classId)];
       if (!classRow) throw new Error('Class was not found.');
-      assertClassAccess_(staff, classRow);
+      assertObservationClassAccess_(staff, classRow);
       if (!benchmarkMatchesSubject_(benchmark, classRow.SubjectId)) {
         throw new Error('This benchmark is not relevant to the selected class subject.');
       }
@@ -387,7 +421,7 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
       code: 'PHASE_DATE_CONFLICT',
       retryable: false,
       conflicts: conflicts,
-      message: 'Resolve Short-Term Objective/date conflicts before saving.'
+      message: 'Resolve benchmark/date conflicts before saving.'
     };
   }
   if (errors.length) {
@@ -587,7 +621,7 @@ function saveBenchmark(payload) {
     StudentId: student.Id,
     SubjectId: sanitizeText_(payload.subjectId, 100),
     GoalId: sanitizeText_(payload.goalId, 100),
-    Category: sanitizeText_(payload.category || 'Short-Term Objective', 120),
+    Category: sanitizeText_(payload.category || 'Benchmark', 120),
     Skill: taskDemand,
     TargetCorrect: targetCorrect === null ? '' : targetCorrect,
     TargetAttempts: targetAttempts === null ? '' : targetAttempts,
@@ -668,7 +702,7 @@ function getBenchmarkProgress(benchmarkId) {
 
 function getCriticalBenchmarks_(staff) {
   const students = indexBy_(activeRows_('Students'), 'Id');
-  return activeRows_('Benchmarks')
+  return getCurrentActiveBenchmarks_()
     .filter(row => toBoolean_(row.Critical))
     .filter(row => staff.Role !== VOICES.ROLES.CASE_MANAGER ||
       toBoolean_(staff.IsAdmin) ||
@@ -693,9 +727,9 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   const targetConsecutiveSessions = optionalInteger_(row.TargetConsecutiveSessions);
   const taskDemand = row.TaskDemandDescription || row.Skill || row.Description || '';
   const orderIndex = optionalInteger_(row.OrderIndex) || 1;
-  const category = /^Phase\s+\d+$/i.test(String(row.Category || '').trim())
-    ? 'Short-Term Objective ' + orderIndex
-    : row.Category;
+  const category = /^(?:Phase|Short-Term Objective)\s+\d+$/i.test(
+    String(row.Category || '').trim()
+  ) ? 'Benchmark ' + orderIndex : row.Category;
   const targetParts = [
     targetAccuracy === null ? '' : targetAccuracy + '% accuracy',
     row.TargetPromptLevel
@@ -746,8 +780,14 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   };
 }
 
-function assertClassAccess_(staff, classRow) {
-  if (staff.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(staff.IsAdmin)) return;
+function canUseAnyObservationClass_(staff) {
+  return staff.Role === VOICES.ROLES.AIDE ||
+    staff.Role === VOICES.ROLES.CASE_MANAGER ||
+    toBoolean_(staff.IsAdmin);
+}
+
+function assertObservationClassAccess_(staff, classRow) {
+  if (canUseAnyObservationClass_(staff)) return;
   const email = normalizeEmail_(staff.Email);
   if (normalizeEmail_(classRow.TeacherEmail) === email) return;
   const assigned = findOne_('ClassAides', row =>
@@ -823,6 +863,34 @@ function getCaseManagerTodos_(staff) {
       type: '1TO1',
       urgent: true,
       title: 'Unresolved 1:1 coverage',
+      detail: row.Message
+    }));
+  rows_('Notifications')
+    .filter(row =>
+      row.Status === 'OPEN' &&
+      row.Type === 'BENCHMARK_ENDED' &&
+      (isAdmin || String(row.Recipients || '').split(',')
+        .map(normalizeEmail_)
+        .includes(email))
+    )
+    .forEach(row => todos.push({
+      type: 'BENCHMARK',
+      urgent: true,
+      title: 'Benchmark dates need review',
+      detail: row.Message
+    }));
+  rows_('Notifications')
+    .filter(row =>
+      row.Status === 'OPEN' &&
+      String(row.Type || '').startsWith('MISSING_BENCHMARK_ENTRY|') &&
+      (isAdmin || String(row.Recipients || '').split(',')
+        .map(normalizeEmail_)
+        .includes(email))
+    )
+    .forEach(row => todos.push({
+      type: 'BENCHMARK',
+      urgent: true,
+      title: 'Benchmark observation overdue',
       detail: row.Message
     }));
   return todos;

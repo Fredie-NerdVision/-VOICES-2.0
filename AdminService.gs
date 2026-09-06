@@ -45,12 +45,302 @@ function getMessageManagementData_() {
   const messages = rows_('Messages')
     .sort((a, b) => String(b.CreatedAt).localeCompare(String(a.CreatedAt)))
     .map(row => publicMessage_(row, staffIndex));
-  return {
+  const result = {
     messages: messages,
     activeToday: messages.filter(row =>
       row.active && dateInRange_(today, row.startDate, row.endDate)
     )
   };
+  const currentStaff = findOne_('Staff', row =>
+    normalizeEmail_(row.Email) === normalizeEmail_(getCurrentUserEmail_())
+  );
+  if (currentStaff && toBoolean_(currentStaff.IsAdmin)) {
+    result.catalog = getAdminCatalogData_();
+  }
+  return result;
+}
+
+function getAdminCatalogData_() {
+  const staff = activeRows_('Staff')
+    .filter(row =>
+      row.Role === VOICES.ROLES.TEACHER ||
+      row.Role === VOICES.ROLES.CASE_MANAGER ||
+      toBoolean_(row.IsAdmin)
+    )
+    .map(publicStaff_)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  const subjects = activeRows_('Subjects')
+    .map(row => ({ id: row.Id, name: row.Name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const subjectIndex = indexBy_(activeRows_('Subjects'), 'Id');
+  const classes = activeRows_('Classes')
+    .map(row => ({
+      id: row.Id,
+      name: row.Name,
+      subjectId: row.SubjectId,
+      subjectName: subjectIndex[row.SubjectId] ? subjectIndex[row.SubjectId].Name : '',
+      teacherEmail: normalizeEmail_(row.TeacherEmail),
+      periodId: row.PeriodId
+    }))
+    .sort((a, b) =>
+      a.teacherEmail.localeCompare(b.teacherEmail) ||
+      String(a.periodId).localeCompare(String(b.periodId), undefined, { numeric: true })
+    );
+  const periods = Array.from(new Set(
+    rows_('SchedulePeriods').map(row => String(row.PeriodId || '').trim()).filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return {
+    staff: staff,
+    subjects: subjects,
+    classes: classes,
+    periods: periods,
+    quarterBoundaries: getSchoolQuarterBoundaries_()
+  };
+}
+
+function saveSchoolQuarterBoundaries(payload) {
+  requireAdmin_();
+  const boundaries = Array.isArray(payload && payload.boundaries)
+    ? payload.boundaries.map(formatDate_).filter(Boolean)
+    : [];
+  if (boundaries.length !== 5) {
+    throw new Error('Configure Q1, Q2, Q3, Q4, and the next school-year start date.');
+  }
+  if (new Set(boundaries).size !== boundaries.length ||
+      boundaries.some((date, index) => index && date <= boundaries[index - 1])) {
+    throw new Error('Quarter boundaries must be five unique dates in chronological order.');
+  }
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Quarter settings are busy. Retry shortly.'
+    };
+  }
+  try {
+    invalidateRowsCache_('Settings');
+    upsertSetting_('SchoolQuarterBoundaries', JSON.stringify(boundaries));
+    invalidateRowsCache_('Settings');
+    return { ok: true, boundaries: boundaries };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function installMissingBenchmarkObservationTrigger() {
+  requireAdmin_();
+  ScriptApp.getProjectTriggers()
+    .filter(trigger =>
+      trigger.getHandlerFunction() === 'checkMissingBenchmarkObservations'
+    )
+    .forEach(trigger => ScriptApp.deleteTrigger(trigger));
+  ScriptApp.newTrigger('checkMissingBenchmarkObservations')
+    .timeBased()
+    .everyDays(1)
+    .atHour(6)
+    .create();
+  return { ok: true, handler: 'checkMissingBenchmarkObservations' };
+}
+
+function previewAdminCatalogBatch(payload) {
+  requireAdmin_();
+  return validateAdminCatalogBatch_(payload);
+}
+
+function saveAdminCatalogBatch(payload) {
+  requireAdmin_();
+  const validation = validateAdminCatalogBatch_(payload);
+  if (!validation.ok) return validation;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Catalog saving is busy. The validated batch is still available; retry shortly.'
+    };
+  }
+  try {
+    ['Subjects', 'Classes'].forEach(invalidateRowsCache_);
+    const subjects = activeRows_('Subjects');
+    const subjectByName = subjects.reduce((map, row) => {
+      map[normalizeCatalogName_(row.Name)] = row;
+      return map;
+    }, {});
+    let subjectsCreated = 0;
+    validation.subjects.forEach(item => {
+      const key = normalizeCatalogName_(item.name);
+      if (subjectByName[key]) return;
+      const record = { Id: uuid_(), Name: item.name, Active: true };
+      appendRow_('Subjects', record);
+      subjectByName[key] = record;
+      subjectsCreated += 1;
+    });
+
+    invalidateRowsCache_('Subjects');
+    invalidateRowsCache_('Classes');
+    const existingByTeacherPeriod = activeRows_('Classes').reduce((map, row) => {
+      map[normalizeEmail_(row.TeacherEmail) + '|' + String(row.PeriodId)] = row;
+      return map;
+    }, {});
+    let classesCreated = 0;
+    validation.classes.forEach(item => {
+      const key = item.teacherEmail + '|' + item.periodId;
+      const existing = existingByTeacherPeriod[key];
+      const subject = subjectByName[normalizeCatalogName_(item.subjectName)];
+      if (existing) return;
+      const record = {
+        Id: uuid_(),
+        Name: item.name,
+        SubjectId: subject.Id,
+        TeacherEmail: item.teacherEmail,
+        PeriodId: item.periodId,
+        Active: true
+      };
+      appendRow_('Classes', record);
+      existingByTeacherPeriod[key] = record;
+      classesCreated += 1;
+    });
+    invalidateRowsCache_('Subjects');
+    invalidateRowsCache_('Classes');
+    invalidateScheduleCache_();
+    return {
+      ok: true,
+      subjectsCreated: subjectsCreated,
+      classesCreated: classesCreated,
+      subjectsTotal: validation.subjects.length,
+      classesTotal: validation.classes.length
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function validateAdminCatalogBatch_(payload) {
+  payload = payload || {};
+  const sourceSubjects = Array.isArray(payload.subjects) ? payload.subjects : [];
+  const sourceClasses = Array.isArray(payload.classes) ? payload.classes : [];
+  if (!sourceSubjects.length && !sourceClasses.length) {
+    throw new Error('Add at least one subject or class.');
+  }
+  if (sourceSubjects.length > 100 || sourceClasses.length > 200) {
+    throw new Error('Submit no more than 100 subjects and 200 classes at a time.');
+  }
+  const activeSubjects = activeRows_('Subjects');
+  const subjectByName = activeSubjects.reduce((map, row) => {
+    map[normalizeCatalogName_(row.Name)] = row;
+    return map;
+  }, {});
+  const staffByEmail = activeRows_('Staff').reduce((map, row) => {
+    map[normalizeEmail_(row.Email)] = row;
+    return map;
+  }, {});
+  const periodIds = new Set(
+    rows_('SchedulePeriods').map(row => String(row.PeriodId || '').trim()).filter(Boolean)
+  );
+  const existingByTeacherPeriod = activeRows_('Classes').reduce((map, row) => {
+    map[normalizeEmail_(row.TeacherEmail) + '|' + String(row.PeriodId)] = row;
+    return map;
+  }, {});
+  const errors = [];
+  const subjects = [];
+  const batchSubjects = {};
+  sourceSubjects.forEach((item, index) => {
+    const name = sanitizeText_(
+      typeof item === 'string' ? item : item && item.name,
+      200
+    );
+    if (!name) {
+      errors.push({ section: 'Subject', row: index + 1, message: 'Name is required.' });
+      return;
+    }
+    const key = normalizeCatalogName_(name);
+    if (batchSubjects[key]) {
+      errors.push({ section: 'Subject', row: index + 1, message: 'Duplicate subject name in this batch.' });
+      return;
+    }
+    batchSubjects[key] = true;
+    subjects.push({ name: name, exists: Boolean(subjectByName[key]) });
+  });
+  const availableSubjectNames = Object.assign({}, subjectByName);
+  subjects.forEach(item => {
+    availableSubjectNames[normalizeCatalogName_(item.name)] =
+      availableSubjectNames[normalizeCatalogName_(item.name)] || item;
+  });
+  const classes = [];
+  const batchTeacherPeriods = {};
+  sourceClasses.forEach((item, index) => {
+    item = item || {};
+    const name = sanitizeText_(item.name, 200);
+    const subjectName = sanitizeText_(item.subjectName, 200);
+    const teacherEmail = normalizeEmail_(item.teacherEmail);
+    const periodId = sanitizeText_(item.periodId, 100);
+    if (!name || !subjectName || !teacherEmail || !periodId) {
+      errors.push({
+        section: 'Class',
+        row: index + 1,
+        message: 'ClassName, Subject, TeacherEmail, and PeriodId are required.'
+      });
+      return;
+    }
+    const teacher = staffByEmail[teacherEmail];
+    if (!teacher ||
+        ![VOICES.ROLES.TEACHER, VOICES.ROLES.CASE_MANAGER].includes(teacher.Role) &&
+        !toBoolean_(teacher.IsAdmin)) {
+      errors.push({ section: 'Class', row: index + 1, message: 'TeacherEmail must match active instructional staff.' });
+      return;
+    }
+    if (!periodIds.has(periodId)) {
+      errors.push({ section: 'Class', row: index + 1, message: 'PeriodId must match a configured schedule period.' });
+      return;
+    }
+    const subject = availableSubjectNames[normalizeCatalogName_(subjectName)];
+    if (!subject) {
+      errors.push({ section: 'Class', row: index + 1, message: 'Subject must match an existing or batched subject name.' });
+      return;
+    }
+    const key = teacherEmail + '|' + periodId;
+    if (batchTeacherPeriods[key]) {
+      errors.push({ section: 'Class', row: index + 1, message: 'A teacher can only have one class per period in a batch.' });
+      return;
+    }
+    batchTeacherPeriods[key] = true;
+    const existing = existingByTeacherPeriod[key];
+    if (existing) {
+      const existingSubject = subjectByName[normalizeCatalogName_(subjectName)];
+      if (String(existing.Name) !== name ||
+          !existingSubject ||
+          String(existing.SubjectId) !== String(existingSubject.Id)) {
+        errors.push({
+          section: 'Class',
+          row: index + 1,
+          message: 'This teacher and period already belong to a different active class.'
+        });
+        return;
+      }
+    }
+    classes.push({
+      name: name,
+      subjectName: subjectName,
+      teacherEmail: teacherEmail,
+      periodId: periodId,
+      exists: Boolean(existing)
+    });
+  });
+  return {
+    ok: !errors.length,
+    errors: errors,
+    subjects: subjects,
+    classes: classes,
+    subjectCount: subjects.length,
+    classCount: classes.length
+  };
+}
+
+function normalizeCatalogName_(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function setDailyMessageActive(payload) {

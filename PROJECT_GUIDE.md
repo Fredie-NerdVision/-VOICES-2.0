@@ -166,7 +166,7 @@ The browser displays an operation overlay and prevents competing clicks while an
 
 ## 8. Goal creation
 
-The case manager selects a student, enters the annual goal, chooses relevant subjects, and may provide zero or any number of Short-Term Objectives. “Phase” remains an internal progression term; goal screens retain the IEP wording “Short-Term Objective.” Goals without objectives are saved as drafts.
+The case manager selects a student, enters the annual goal, chooses relevant subjects, and may provide zero or any number of IEP Short-Term Objectives. The parser recognizes that source language, but V.O.I.C.E.S displays the resulting records as benchmarks. Goals without benchmarks are saved as drafts.
 
 The parser:
 
@@ -178,11 +178,11 @@ The parser:
 - preserves source text when structured values are absent;
 - requires an editable preview before save.
 
-Creation is protected by a script lock. It creates one annual `Goals` row, its ordered phase rows, subject relationships, and initial phase-history boundary. The first phase starts active for an active goal. Draft and completed lifecycle states are retained for management but excluded from active lookup, analytics, and IEP export.
+Creation is protected by a script lock. It creates one annual `Goals` row, ordered benchmark rows with individual start/due dates, subject relationships, and an initial date-selection history boundary. The active benchmark is the currently eligible record with the nearest due date; if no date window is open, the next upcoming benchmark is selected. Draft and completed lifecycle states are retained for management but excluded from active lookup, analytics, and IEP export.
 
 The bulk-paste dialog accepts tab-separated rows copied from the documented Google Sheets template. IDs must match exactly; the server returns row-level errors and requires a preview before saving. A stable import batch ID, goal key, and fingerprint make an unchanged retry skip goals already created by a partially completed attempt.
 
-The case-manager Overview shows only the active Short-Term Objective on each goal by default. Other objectives remain available in a collapsed management/history area for manual activation and phase-aware reporting. Deactivating a goal closes every open phase interval with the date and actor while preserving prior observations.
+The case-manager Overview shows only the active benchmark on each goal by default. Other benchmarks remain available in a collapsed management/history area. A manual override may choose any benchmark and expires at the next administrator-configured quarter boundary, when date selection resumes. Deactivating a goal closes every open interval with the date and actor while preserving prior observations.
 
 ## 9. Benchmark lookup and entry
 
@@ -210,7 +210,7 @@ Multiple students may be selected. Each saved entry records:
 
 Staff may queue individual entries or paste up to 200 tab-separated rows. One submission batch ID and normalized fingerprint are reused across retries; reusing an ID with different data is rejected. Validation runs before and after a 25-second script lock; `WRITE_BUSY` and validation responses leave the browser queue intact. Historical-phase choices are persisted into that queue before retrying so a lost response can be submitted with the same fingerprint. Staff can download a tab-separated backup before retrying or navigating away. Backdated phase conflicts require an explicit historical-phase choice.
 
-Case-manager analytics preserve raw counts, calculate latest-three current-phase accuracy from combined successes/trials, and evaluate mastery only when accuracy and prompt targets are complete. Consecutive mastery counts distinct observation dates; if a date has multiple observations, every observation on that date must meet the benchmark target for that date to qualify. Charts support local goal visibility, prompt-colored points, monotonic phase dividers, and phase target lines. Printable progress summaries provide standardized IEP statements.
+Case-manager analytics preserve raw counts, calculate latest-three current-benchmark accuracy from combined successes/trials, and evaluate mastery only when accuracy and prompt targets are complete. Consecutive mastery counts distinct observation dates; if a date has multiple observations, every observation on that date must meet the benchmark target for that date to qualify. Goal and benchmark cards show valid-entry totals; active counts are green at/above the student’s active-goal average, yellow from 50% to below average, and red below 50% (a zero average is green). Charts support local goal visibility, prompt-colored points, neutral benchmark dividers, and labeled target lines. Printable progress summaries provide standardized IEP statements.
 
 ## 10. Schedule builder
 
@@ -328,6 +328,8 @@ Do not run this function against current production as part of code deployment.
 `upgradeVoices23Database()` opens the database already configured in `VOICES_DATABASE_ID`. It makes additive schema changes, derives safe legacy values, seeds phase history, normalizes historical observation dates/status, adds schedule revision metadata, validates relationships, and records schema version 2.3. `upgradeVoices22Database()` delegates to this migration.
 
 Use it only against a backed-up or copied database first. Production and training must not be upgraded or deployed until separately approved.
+
+After the migration, an administrator must save Q1, Q2, Q3, Q4, and next-school-year boundary dates in the Admin view. Run `installMissingBenchmarkObservationTrigger()` once from the Apps Script editor as an administrator to replace any prior monitor trigger with a daily 6 a.m. check. The checker emails each relevant case manager after 14 days without a valid active-benchmark observation and weekly thereafter until a new entry resets the cycle.
 
 ### Training data
 

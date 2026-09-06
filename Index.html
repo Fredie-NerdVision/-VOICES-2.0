@@ -586,13 +586,31 @@
 
   <dialog id="bulkGoalDialog" class="wide-dialog">
     <div class="card-header">
-      <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk goals and Short-Term Objectives</h2></div>
+      <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk goals and benchmarks</h2></div>
       <button class="btn ghost small-btn" type="button" onclick="closeDialog('bulkGoalDialog')">Close</button>
     </div>
-    <p class="muted">Columns: GoalKey, StudentId, Goal, Domain, Status, StartDate, DueDate, SubjectIds, PhaseOrder, TaskDemand, TargetAccuracyPct, TargetPromptLevel, TargetPromptCount, TargetConsecutiveSessions, Active. Use one row per Short-Term Objective and repeat the goal fields; separate multiple subject IDs with commas.</p>
+    <p class="muted">Columns: GoalKey, StudentId, Goal, Domain, Status, StartDate, DueDate, SubjectIds, BenchmarkOrder, TaskDemand, TargetAccuracyPct, TargetPromptLevel, TargetPromptCount, TargetConsecutiveSessions, BenchmarkStartDate, BenchmarkDueDate. Use one row per benchmark and repeat the goal fields; separate multiple subject IDs with commas.</p>
     <div class="field"><label for="bulkGoalText">Copied rows</label><textarea id="bulkGoalText" style="min-height:240px"></textarea></div>
     <div id="bulkGoalPreview" class="list" style="margin-top:12px"></div>
     <div class="dialog-actions"><button id="previewBulkGoals" class="btn ghost" type="button">Preview</button><button id="saveBulkGoals" class="btn primary" type="button" disabled>Save previewed goals</button></div>
+  </dialog>
+
+  <dialog id="adminCatalogDialog" class="wide-dialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Administrator bulk entry</div><h2>Subjects and classes</h2></div>
+      <button class="btn ghost small-btn" type="button" onclick="closeDialog('adminCatalogDialog')">Close</button>
+    </div>
+    <p class="muted">Paste either or both tables from Google Sheets. New IDs are generated automatically.</p>
+    <div class="field">
+      <label for="adminSubjectText">Subjects — column: Name</label>
+      <textarea id="adminSubjectText" style="min-height:130px" placeholder="Name&#10;Life Skills"></textarea>
+    </div>
+    <div class="field">
+      <label for="adminClassText">Classes — columns: ClassName, Subject, TeacherEmail, PeriodId</label>
+      <textarea id="adminClassText" style="min-height:180px" placeholder="ClassName&#9;Subject&#9;TeacherEmail&#9;PeriodId"></textarea>
+    </div>
+    <div id="adminCatalogPreview" class="list" style="margin-top:12px"></div>
+    <div class="dialog-actions"><button id="previewAdminCatalog" class="btn ghost" type="button">Preview</button><button id="saveAdminCatalog" class="btn primary" type="button" disabled>Save previewed records</button></div>
   </dialog>
 
   <div id="dialogFallbackBackdrop" aria-hidden="true"></div>
@@ -626,6 +644,7 @@
       fullScheduleDate: '',
       observationQueue: [],
       observationBatchId: '',
+      adminCatalogPreview: null,
       pendingOperations: 0
     };
 
@@ -813,7 +832,7 @@
           <article class="card desktop-cm-only">
             <div class="card-header"><div><div class="eyebrow">Student workspace</div><h2>Goal progress</h2></div></div>
             <div class="field"><label>Student</label><select id="goalStudent"><option value="">Choose student</option>${options(cm.students, 'id', 'name', state.goalStudentId)}</select></div>
-            <p class="muted small" style="margin:12px 0 0">Goal lines can be hidden locally; Short-Term Objective annotations and prompt colors remain visible without reloading data.</p>
+            <p class="muted small" style="margin:12px 0 0">Goal lines can be hidden locally; benchmark annotations and prompt colors remain visible without reloading data.</p>
           </article>
           <article class="card span-2 desktop-cm-only">
             <div class="card-header"><div><div class="eyebrow">Annual goals</div><h2>Progress over time</h2></div><button class="btn ghost small-btn" id="openGoalReport" type="button">Progress summary</button></div>
@@ -1660,13 +1679,13 @@
         </article>
         <div class="master-detail">
           <article class="card desktop-cm-only">
-            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste any number of Short-Term Objectives. Review every parsed condition before saving.</p></div><div class="toolbar"><button id="openBulkGoals" class="btn ghost small-btn" type="button">Bulk paste</button><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div></div>
+            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste IEP Short-Term Objectives; V.O.I.C.E.S will review them as benchmarks before saving.</p></div><div class="toolbar"><button id="openBulkGoals" class="btn ghost small-btn" type="button">Bulk paste</button><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div></div>
             <form id="goalForm" class="form-grid">
               <div class="field full"><label>Student</label><select name="studentId" required><option value="">Choose student</option>${options(students, 'id', 'name', state.benchmarkStudentId)}</select></div>
               <div class="field"><label>Domain</label><select name="domain"><option value="">Not specified</option><option>Academic</option><option>Adaptive</option><option>Behavioral</option><option>Communication</option><option>Social/Emotional</option><option>Transition</option></select></div>
               <div class="field"><label>Status</label><select name="status"><option value="ACTIVE">Active</option><option value="DRAFT">Draft</option></select></div>
               <div class="field full"><label>Annual IEP goal</label><textarea name="goal" placeholder="Describe the overall challenge the student should meet during the IEP year." required></textarea></div>
-              <div class="field full"><label>Short-Term Objectives</label><textarea name="objectivesText" style="min-height:220px" placeholder="Short-Term Objective 1: State home address with no more than 2 verbal prompts at 60% accuracy for 3 sessions.&#10;&#10;Short-Term Objective 2: State address and phone number with 1 verbal prompt at 80% accuracy."></textarea><span class="muted small">May be blank for a draft goal with no Short-Term Objectives.</span></div>
+              <div class="field full"><label>IEP Short-Term Objectives</label><textarea name="objectivesText" style="min-height:220px" placeholder="Short-Term Objective 1: State home address with no more than 2 verbal prompts at 60% accuracy for 3 sessions.&#10;&#10;Short-Term Objective 2: State address and phone number with 1 verbal prompt at 80% accuracy."></textarea><span class="muted small">May be blank for a draft goal with no benchmarks.</span></div>
               <div class="field full">
                 <label>Relevant classes / subjects</label>
                 <div class="checks" style="margin-top:7px">${safeArray(state.data.subjects).map(subject => `
@@ -1677,7 +1696,7 @@
               </div>
               <div class="field"><label>Start date</label><input name="startDate" type="date" value="${escapeAttr(state.data.today)}"></div>
               <div class="field"><label>Due date</label><input name="dueDate" type="date"><span class="muted small">Blank uses one calendar year.</span></div>
-              <div class="field full"><div class="eyebrow">Editable Short-Term Objective preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste Short-Term Objectives to preview them, or save a draft goal without objectives.</div></div></div>
+              <div class="field full"><div class="eyebrow">Editable benchmark preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste IEP objectives to preview benchmarks, or save a draft goal without benchmarks.</div></div></div>
               <div class="field full"><button class="btn primary" type="submit">Create goal</button></div>
             </form>
           </article>
@@ -1696,7 +1715,7 @@
                   <div class="checks">${safeArray(goal.subjectNames).map(name => `<span class="chip">${escapeHtml(name)}</span>`).join('')}</div>
                   <div class="checks">${items.length
                     ? items.map(item => `<span class="chip status-approved">${escapeHtml(item.category)} · Active</span>`).join('')
-                    : '<span class="muted small">No active Short-Term Objective</span>'}</div>
+                    : '<span class="muted small">No active benchmark</span>'}</div>
                   <button class="btn danger small-btn" data-deactivate-goal="${escapeAttr(goal.id)}">Deactivate goal</button>
                 </div>`;
             }).join('') : '<div class="empty">This student has no active, draft, or completed goals.</div>'}</div>
@@ -1718,7 +1737,7 @@
       root.querySelectorAll('[data-deactivate-goal]').forEach(button => button.addEventListener('click', async () => {
         if (!await confirmDialog({
           title: 'Deactivate goal',
-          message: 'Deactivate this goal and all Short-Term Objectives? Existing entries will remain.',
+          message: 'Deactivate this goal and all benchmarks? Existing entries will remain.',
           confirmLabel: 'Deactivate'
         })) return;
         try {
@@ -1751,11 +1770,13 @@
         targetPromptLevel: row.querySelector('[data-phase-prompt-level]').value,
         targetPromptCount: row.querySelector('[data-phase-prompt-count]').value,
         targetConsecutiveSessions: row.querySelector('[data-phase-consecutive]').value,
+        startDate: row.querySelector('[data-phase-start]').value,
+        dueDate: row.querySelector('[data-phase-due]').value,
         targetCorrect: row.dataset.targetCorrect || '',
         targetAttempts: row.dataset.targetAttempts || '',
         requiredTrials: row.dataset.requiredTrials || '',
         totalTrials: row.dataset.totalTrials || '',
-        active: row.querySelector('[data-phase-active]').checked
+        active: false
       }));
       if (!payload.subjectIds.length) {
         return toast('Choose at least one relevant class or subject for the goal.', true);
@@ -1793,7 +1814,7 @@
         : [text];
       return sections.map((section, index) => {
         const objective = section.replace(/^[\s:;#\d.)\]-]+/, '').trim();
-        if (!objective) throw new Error(`Short-Term Objective ${index + 1} has no task description.`);
+        if (!objective) throw new Error(`Benchmark ${index + 1} has no task description.`);
         const ratios = [];
         const ratioPattern = /(\d+)\s*(?:\/|out\s+of)\s*(\d+)/gi;
         let ratio;
@@ -1801,7 +1822,7 @@
           const numerator = Number(ratio[1]);
           const denominator = Number(ratio[2]);
           if (denominator <= 0 || numerator < 0 || numerator > denominator) {
-            throw new Error(`Short-Term Objective ${index + 1} has an invalid ratio.`);
+            throw new Error(`Benchmark ${index + 1} has an invalid ratio.`);
           }
           ratios.push({ numerator, denominator });
         }
@@ -1845,7 +1866,7 @@
       try {
         state.parsedObjectives = parseGoalObjectivesClient(form.elements.objectivesText.value);
         if (!state.parsedObjectives.length) {
-          root.innerHTML = '<div class="empty">No Short-Term Objectives parsed. This goal will be saved as a draft unless objectives are added.</div>';
+          root.innerHTML = '<div class="empty">No benchmarks parsed. This goal will be saved as a draft unless objectives are added.</div>';
           return;
         }
         root.innerHTML = state.parsedObjectives.map(item => `
@@ -1855,7 +1876,7 @@
             data-required-trials="${escapeAttr(item.requiredTrials)}"
             data-total-trials="${escapeAttr(item.totalTrials)}">
             <div class="row" style="justify-content:space-between">
-              <strong>Short-Term Objective ${item.index + 1}</strong>
+              <strong>Benchmark ${item.index + 1}</strong>
               <span class="chip">${escapeHtml(item.metric)}</span>
             </div>
             <div class="field">
@@ -1867,7 +1888,9 @@
               <div class="field"><label>Target prompt level</label><select data-phase-prompt-level><option value="">Not specified</option>${['Independent','Verbal','Gestural/Visual','Model','Physical'].map(level => `<option ${level === item.targetPromptLevel ? 'selected' : ''}>${escapeHtml(level)}</option>`).join('')}</select></div>
               <div class="field"><label>Maximum prompt count</label><input data-phase-prompt-count type="number" min="0" step="1" value="${escapeAttr(item.targetPromptCount)}"></div>
               <div class="field"><label>Consecutive sessions</label><input data-phase-consecutive type="number" min="1" step="1" value="${escapeAttr(item.targetConsecutiveSessions)}"></div>
-              <label class="check full"><input data-phase-active type="radio" name="activePhase" ${item.index === 0 ? 'checked' : ''}> Active Short-Term Objective</label>
+              <div class="field"><label>Benchmark start date</label><input data-phase-start type="date" value="${escapeAttr(form.elements.startDate.value)}" required></div>
+              <div class="field"><label>Benchmark due date</label><input data-phase-due type="date" value="${escapeAttr(form.elements.dueDate.value)}" required></div>
+              <div class="message full">The active benchmark is selected automatically from these dates.</div>
             </div>
           </div>`).join('');
       } catch (error) {
@@ -2081,8 +2104,30 @@
       const management = state.data.caseManager.messages || { messages: [], activeToday: [] };
       const messages = safeArray(management.messages);
       const editing = messages.find(item => String(item.id) === String(state.editingMessageId)) || {};
+      const catalog = management.catalog || {};
       root.innerHTML = `
         <div class="grid two">
+          ${state.data.user.isAdmin ? `
+          <article class="card span-2">
+            <div class="card-header">
+              <div><div class="eyebrow">Administrator data</div><h2>Subjects and classes</h2><p class="muted">Create multiple subjects and teacher-period classes in one reviewed batch. IDs are generated automatically.</p></div>
+              <button id="openAdminCatalog" class="btn primary" type="button">Bulk create</button>
+            </div>
+            <div class="row">
+              <span class="chip">${safeArray(catalog.subjects).length} active subjects</span>
+              <span class="chip">${safeArray(catalog.classes).length} active classes</span>
+              <span class="chip">${safeArray(catalog.periods).length} configured periods</span>
+            </div>
+          </article>
+          <article class="card span-2">
+            <div class="card-header"><div><div class="eyebrow">Administrator settings</div><h2>School-year quarter boundaries</h2><p class="muted">Manual benchmark overrides expire at the next date below.</p></div></div>
+            <form id="quarterBoundaryForm" class="form-grid">
+              ${['Q1 start','Q2 start','Q3 start','Q4 start','Next school-year start'].map((label, index) => `
+                <div class="field"><label>${label}</label><input name="boundary${index}" type="date" value="${escapeAttr(safeArray(catalog.quarterBoundaries)[index] || '')}" required></div>
+              `).join('')}
+              <div class="field full"><button class="btn primary" type="submit">Save quarter dates</button></div>
+            </form>
+          </article>` : ''}
           <article class="card">
             <div class="card-header"><div><div class="eyebrow">Broadcast</div><h2>${editing.id ? 'Edit message' : 'Create message'}</h2></div><div class="toolbar"><button class="btn ghost small-btn" type="button" data-refresh="admin">Refresh</button>${editing.id ? '<button id="cancelMessageEdit" class="btn ghost small-btn" type="button">Cancel</button>' : ''}</div></div>
             <form id="messageForm" class="form-grid">
@@ -2124,6 +2169,13 @@
           </article>
         </div>`;
       bindRefreshButtons(root);
+      document.getElementById('openAdminCatalog')?.addEventListener('click', () => {
+        state.adminCatalogPreview = null;
+        document.getElementById('adminCatalogPreview').innerHTML = '';
+        document.getElementById('saveAdminCatalog').disabled = true;
+        openDialog('adminCatalogDialog');
+      });
+      document.getElementById('quarterBoundaryForm')?.addEventListener('submit', saveQuarterBoundaries_);
       document.getElementById('messageForm').addEventListener('submit', async event => {
         event.preventDefault();
         try {
@@ -2154,6 +2206,103 @@
         } catch (error) { toast(error.message, true); }
       }));
       document.getElementById('logoForm').addEventListener('submit', uploadLogo);
+    }
+
+    function parseOptionalTabularRows_(elementId, columns) {
+      const value = document.getElementById(elementId).value;
+      if (!String(value || '').trim()) return [];
+      return parseTabularRows_(value, columns);
+    }
+
+    async function previewAdminCatalog_() {
+      const root = document.getElementById('adminCatalogPreview');
+      const saveButton = document.getElementById('saveAdminCatalog');
+      saveButton.disabled = true;
+      try {
+        const subjects = parseOptionalTabularRows_('adminSubjectText', [
+          { header: 'Name', key: 'name', required: true }
+        ]);
+        const classes = parseOptionalTabularRows_('adminClassText', [
+          { header: 'ClassName', key: 'name', required: true },
+          { header: 'Subject', key: 'subjectName', required: true },
+          { header: 'TeacherEmail', key: 'teacherEmail', required: true },
+          { header: 'PeriodId', key: 'periodId', required: true }
+        ]);
+        const result = await server('previewAdminCatalogBatch', { subjects, classes });
+        if (!result.ok) {
+          root.innerHTML = safeArray(result.errors).map(issue =>
+            `<div class="list-item critical">${escapeHtml(issue.section)} row ${escapeHtml(issue.row)}: ${escapeHtml(issue.message)}</div>`
+          ).join('');
+          return;
+        }
+        state.adminCatalogPreview = {
+          subjectSource: document.getElementById('adminSubjectText').value,
+          classSource: document.getElementById('adminClassText').value,
+          subjects,
+          classes
+        };
+        root.innerHTML = `<div class="message"><strong>${result.subjectCount} subjects and ${result.classCount} classes are valid</strong><div class="muted small">Existing exact matches will be retained; nothing has been saved yet.</div></div>` +
+          safeArray(result.subjects).map(item => `<div class="list-item">Subject · ${escapeHtml(item.name)}${item.exists ? ' · Existing' : ' · New'}</div>`).join('') +
+          safeArray(result.classes).map(item => `<div class="list-item">Class · ${escapeHtml(item.teacherEmail)} · ${escapeHtml(item.periodId)} · ${escapeHtml(item.name)} · ${escapeHtml(item.subjectName)}${item.exists ? ' · Existing' : ' · New'}</div>`).join('');
+        saveButton.disabled = false;
+      } catch (error) {
+        root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function saveAdminCatalog_() {
+      const preview = state.adminCatalogPreview;
+      if (!preview ||
+          preview.subjectSource !== document.getElementById('adminSubjectText').value ||
+          preview.classSource !== document.getElementById('adminClassText').value) {
+        return toast('Preview the current subject and class tables before saving.', true);
+      }
+      closeDialog('adminCatalogDialog');
+      const approved = await confirmDialog({
+        title: 'Save subjects and classes',
+        message: `Save ${preview.subjects.length} subject records and ${preview.classes.length} class records?`,
+        confirmLabel: 'Save all'
+      });
+      if (!approved) {
+        openDialog('adminCatalogDialog');
+        return;
+      }
+      try {
+        const result = await server('saveAdminCatalogBatch', {
+          subjects: preview.subjects,
+          classes: preview.classes
+        });
+        if (!result.ok) {
+          openDialog('adminCatalogDialog');
+          return toast(result.message || 'The catalog batch could not be saved.', true);
+        }
+        state.adminCatalogPreview = null;
+        document.getElementById('adminSubjectText').value = '';
+        document.getElementById('adminClassText').value = '';
+        document.getElementById('adminCatalogPreview').innerHTML = '';
+        document.getElementById('saveAdminCatalog').disabled = true;
+        await refreshBootstrap('admin');
+        toast(`${result.subjectsCreated} subjects and ${result.classesCreated} classes created.`);
+      } catch (error) {
+        openDialog('adminCatalogDialog');
+        toast(error.message, true);
+      }
+    }
+
+    async function saveQuarterBoundaries_(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const boundaries = [0, 1, 2, 3, 4].map(index =>
+        form.elements[`boundary${index}`].value
+      );
+      try {
+        const result = await server('saveSchoolQuarterBoundaries', { boundaries });
+        if (!result.ok) return toast(result.message || 'Quarter dates were not saved.', true);
+        state.data.caseManager.messages.catalog.quarterBoundaries = result.boundaries;
+        toast('School-year quarter boundaries saved.');
+      } catch (error) {
+        toast(error.message, true);
+      }
     }
 
     async function refreshMessageManagementData() {
@@ -2432,8 +2581,8 @@
         });
         if (result.code === 'PHASE_DATE_CONFLICT') {
           const useHistorical = await confirmDialog({
-            title: 'Observation date conflicts with active Short-Term Objective',
-            message: 'One or more observations belong to the Short-Term Objective active on their observation date. Use those historical objectives?',
+            title: 'Observation date conflicts with active benchmark',
+            message: 'One or more observations belong to the benchmark active on their observation date. Use those historical benchmarks?',
             confirmLabel: 'Use historical objectives',
             cancelLabel: 'Change dates'
           });
@@ -2577,13 +2726,14 @@
         { header: 'StartDate', key: 'startDate', required: false },
         { header: 'DueDate', key: 'dueDate', required: false },
         { header: 'SubjectIds', key: 'subjectIds', required: true },
-        { header: 'PhaseOrder', key: 'phaseOrder', required: false },
+        { header: 'BenchmarkOrder', key: 'phaseOrder', required: false },
         { header: 'TaskDemand', key: 'taskDemandDescription', required: false },
         { header: 'TargetAccuracyPct', key: 'targetAccuracyPct', required: false },
         { header: 'TargetPromptLevel', key: 'targetPromptLevel', required: false },
         { header: 'TargetPromptCount', key: 'targetPromptCount', required: false },
         { header: 'TargetConsecutiveSessions', key: 'targetConsecutiveSessions', required: false },
-        { header: 'Active', key: 'active', required: false }
+        { header: 'BenchmarkStartDate', key: 'benchmarkStartDate', required: true },
+        { header: 'BenchmarkDueDate', key: 'benchmarkDueDate', required: true }
       ]);
     }
 
@@ -2605,8 +2755,8 @@
           rows: rows,
           importBatchId: clientUuid()
         };
-        root.innerHTML = `<div class="message"><strong>${result.goalCount} goals and ${result.phaseCount} Short-Term Objectives are valid</strong><div class="muted small">Nothing has been saved yet.</div></div>` +
-          safeArray(result.goals).map(goal => `<div class="list-item"><strong>${escapeHtml(goal.goalKey)}</strong> · ${escapeHtml(goal.studentId)} · ${goal.phases.length} Short-Term Objective${goal.phases.length === 1 ? '' : 's'}<div class="muted small">${escapeHtml(goal.goal)}</div></div>`).join('');
+        root.innerHTML = `<div class="message"><strong>${result.goalCount} goals and ${result.phaseCount} benchmarks are valid</strong><div class="muted small">Nothing has been saved yet.</div></div>` +
+          safeArray(result.goals).map(goal => `<div class="list-item"><strong>${escapeHtml(goal.goalKey)}</strong> · ${escapeHtml(goal.studentId)} · ${goal.phases.length} benchmark${goal.phases.length === 1 ? '' : 's'}<div class="muted small">${escapeHtml(goal.goal)}</div></div>`).join('');
         saveButton.disabled = false;
       } catch (error) {
         root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
@@ -2621,7 +2771,7 @@
       closeDialog('bulkGoalDialog');
       const approved = await confirmDialog({
         title: 'Save bulk goals',
-        message: 'Save every goal and Short-Term Objective in the validated preview?',
+        message: 'Save every goal and benchmark in the validated preview?',
         confirmLabel: 'Save all'
       });
       if (!approved) {
@@ -2642,7 +2792,7 @@
         document.getElementById('bulkGoalPreview').innerHTML = '';
         document.getElementById('saveBulkGoals').disabled = true;
         await refreshGoalManagerData();
-        toast(`${result.goalCount} goals and ${result.phaseCount} Short-Term Objectives saved.`);
+        toast(`${result.goalCount} goals and ${result.phaseCount} benchmarks saved.`);
       } catch (error) {
         openDialog('bulkGoalDialog');
         toast(error.message, true);
@@ -2741,6 +2891,8 @@
       document.getElementById('queueBulkObservations').addEventListener('click', queueBulkObservations_);
       document.getElementById('previewBulkGoals').addEventListener('click', previewBulkGoals_);
       document.getElementById('saveBulkGoals').addEventListener('click', saveBulkGoals_);
+      document.getElementById('previewAdminCatalog').addEventListener('click', previewAdminCatalog_);
+      document.getElementById('saveAdminCatalog').addEventListener('click', saveAdminCatalog_);
       document.getElementById('callOffForm').addEventListener('submit', async event => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -2867,14 +3019,30 @@
       document.getElementById('openGoalReport')?.addEventListener('click', () =>
         openGoalProgressReport(data)
       );
+      const activeEntryCounts = goals.map(goal => {
+        const active = safeArray(goal.benchmarks).find(benchmark => benchmark.active);
+        return active ? Number(active.entryCount || 0) : null;
+      }).filter(count => count !== null);
+      const activeEntryAverage = activeEntryCounts.length
+        ? activeEntryCounts.reduce((total, count) => total + count, 0) / activeEntryCounts.length
+        : 0;
+      const entryBadgeClass = (count, active) => {
+        if (!active) return '';
+        if (count >= activeEntryAverage) return 'status-approved';
+        if (count >= activeEntryAverage * 0.5) return 'status-pending';
+        return 'critical';
+      };
       workspace.innerHTML = goals.length ? goals.map((goal, goalIndex) => {
         const metrics = goal.metrics || {};
         const benchmarks = safeArray(goal.benchmarks);
+        const activeForBadge = benchmarks.find(benchmark => benchmark.active);
+        const activeCount = activeForBadge ? Number(activeForBadge.entryCount || 0) : 0;
         return `
           <div class="goal-card">
             <div class="row" style="justify-content:space-between;align-items:flex-start">
               <div><div class="eyebrow">Goal ${goalIndex + 1}</div><h3>${escapeHtml(goal.goal)}</h3></div>
               <div class="row">
+                <span class="chip ${entryBadgeClass(activeCount, Boolean(activeForBadge))}" title="Goal total; color compares its active benchmark with this student’s active-goal average">${escapeHtml(String(goal.totalEntryCount || 0))} entries</span>
                 ${goal.critical ? '<span class="chip critical">Critical</span>' : ''}
                 <span class="chip">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</span>
               </div>
@@ -2885,7 +3053,7 @@
               <span class="chip">Average ${metrics.averagePercent == null ? '—' : escapeHtml(String(metrics.averagePercent)) + '%'}</span>
               <span class="chip">${escapeHtml(String(metrics.entryCount || 0))} entries</span>
               <span class="chip">Trend ${metrics.trend == null ? '—' : (metrics.trend > 0 ? '+' : '') + escapeHtml(String(metrics.trend)) + '%'}</span>
-              <span class="chip">Current objective last 3 ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
+              <span class="chip">Current benchmark last 3 ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
               <span class="chip">Highest independence ${metrics.highestIndependence ? escapeHtml(metrics.highestIndependence.promptLevel + ' · ' + metrics.highestIndependence.promptCount + ' prompts') : '—'}</span>
             </div>
             <div class="toolbar">
@@ -2894,23 +3062,30 @@
             ${(() => {
               const activeBenchmark = benchmarks.find(benchmark => benchmark.active);
               const inactiveBenchmarks = benchmarks.filter(benchmark => !benchmark.active);
+              const currentActivation = safeArray(goal.phaseHistory).slice().reverse()
+                .find(item => activeBenchmark && item.benchmarkId === activeBenchmark.id);
+              const activeLabel = currentActivation && currentActivation.source === 'MANUAL_OVERRIDE'
+                ? `Override through ${currentActivation.endedAt}`
+                : 'Date-selected active';
               return `<div class="list">${activeBenchmark ? `
               <div class="benchmark-row active">
                 <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(activeBenchmark.id)}">
                   <strong>${escapeHtml(activeBenchmark.category)}</strong>
                   <div class="muted small">${escapeHtml(activeBenchmark.skill)}</div>
+                  <div class="muted small">${escapeHtml(activeBenchmark.startDate || '—')}–${escapeHtml(activeBenchmark.dueDate || '—')}</div>
                 </button>
-                <span class="chip status-approved">Active</span>
-              </div>` : '<div class="empty">No Short-Term Objective is active.</div>'}</div>
+                <div class="row"><span class="chip ${entryBadgeClass(Number(activeBenchmark.entryCount || 0), true)}">${escapeHtml(String(activeBenchmark.entryCount || 0))} entries</span><span class="chip status-approved">${escapeHtml(activeLabel)}</span></div>
+              </div>` : '<div class="empty">No benchmark is active because all configured date ranges have ended.</div>'}</div>
               ${inactiveBenchmarks.length ? `<details style="margin-top:10px">
-                <summary class="muted small">Manage other Short-Term Objectives (${inactiveBenchmarks.length})</summary>
+                <summary class="muted small">Manage other benchmarks (${inactiveBenchmarks.length})</summary>
                 <div class="list" style="margin-top:10px">${inactiveBenchmarks.map(benchmark => `
                   <div class="benchmark-row">
                     <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(benchmark.id)}">
                       <strong>${escapeHtml(benchmark.category)}</strong>
                       <div class="muted small">${escapeHtml(benchmark.skill)}</div>
+                      <div class="muted small">${escapeHtml(benchmark.startDate || '—')}–${escapeHtml(benchmark.dueDate || '—')}</div>
                     </button>
-                    <button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Make active</button>
+                    <div class="row"><span class="chip">${escapeHtml(String(benchmark.entryCount || 0))} entries</span><button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Override until next quarter</button></div>
                   </div>`).join('')}</div>
               </details>` : ''}`;
             })()}
@@ -2923,7 +3098,7 @@
             benchmarkId: button.dataset.setActive
           });
           if (!result || !result.ok) {
-            return toast(result && result.message ? result.message : 'The active objective was not changed.', true);
+            return toast(result && result.message ? result.message : 'The active benchmark was not changed.', true);
           }
           state.goalWorkspaceCache[state.goalStudentId] = null;
           await loadGoalWorkspace(state.goalStudentId, true);
@@ -2933,7 +3108,9 @@
           state.data.caseManager.benchmarks
             .filter(item => String(item.goalId) === String(button.dataset.goalId))
             .forEach(item => { item.active = benchmark ? item.id === benchmark.id : false; });
-          toast('Active objective updated.');
+          toast(result.overrideExpiresAt
+            ? `Benchmark override saved through ${result.overrideExpiresAt}.`
+            : 'Active benchmark updated.');
         } catch (error) { toast(error.message, true); }
       }));
       workspace.querySelectorAll('[data-benchmark-history]').forEach(button =>
@@ -2976,7 +3153,7 @@
             <div class="eyebrow">Goal ${index + 1}${goal.domain ? ' · ' + escapeHtml(goal.domain) : ''}</div>
             <h2>${escapeHtml(goal.goal)}</h2>
             <div class="checks">
-              <span class="chip">Current Short-Term Objective: ${escapeHtml(metrics.currentPhase || 'Not selected')}</span>
+              <span class="chip">Current benchmark: ${escapeHtml(metrics.currentPhase || 'Not selected')}</span>
               <span class="chip">Latest 3 combined: ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
               <span class="chip">Current-objective trials: ${escapeHtml(String(metrics.currentPhaseTrialCount || 0))}</span>
               <span class="chip">Highest independence: ${metrics.highestIndependence ? escapeHtml(metrics.highestIndependence.promptLevel + ' · ' + metrics.highestIndependence.promptCount + ' prompts') : '—'}</span>
@@ -2987,7 +3164,7 @@
           </article>`;
         }).join('')}
         <article class="card">
-          <div class="eyebrow">Short-Term Objective progress graph</div>
+          <div class="eyebrow">Benchmark progress graph</div>
           <div id="goalReportLegend" class="legend"></div>
           <div id="goalReportChart" class="chart"></div>
         </article>`;
@@ -3087,10 +3264,11 @@
               ? null
               : Number(benchmark.targetAccuracyPct);
             const targetLine = target !== null && Number.isFinite(target)
-              ? `<line x1="${lineX}" y1="${y(target)}" x2="${x(Math.max(startTime, endTime))}" y2="${y(target)}" stroke="${item.color}" stroke-width="2" stroke-dasharray="9 6" opacity=".75"/>`
+              ? `<line x1="${lineX}" y1="${y(target)}" x2="${x(Math.max(startTime, endTime))}" y2="${y(target)}" stroke="${item.color}" stroke-width="2" stroke-dasharray="9 6" opacity=".75"/>
+                <text x="${Math.min(width - right - 4, x(Math.max(startTime, endTime)))}" y="${y(target) - 5}" fill="#b8bbc2" font-size="10" text-anchor="end">Benchmark ${escapeHtml(String(history.orderIndex || ''))} target ${escapeHtml(String(target))}%</text>`
               : '';
-            return `<line x1="${lineX}" y1="${top}" x2="${lineX}" y2="${plotBottom}" stroke="${item.color}" stroke-width="2" stroke-dasharray="5 5" opacity=".8"/>
-              <text x="${lineX + 4}" y="${36 + (Number(history.orderIndex || 1) % 3) * 11}" fill="${item.color}" font-size="10">STO ${escapeHtml(String(history.orderIndex || ''))}: ${escapeHtml(String(benchmark.taskDemandDescription || '').slice(0, 34))}</text>
+            return `<line x1="${lineX}" y1="${top}" x2="${lineX}" y2="${plotBottom}" stroke="#8f9299" stroke-width="2" stroke-dasharray="5 5" opacity=".8"/>
+              <text x="${lineX + 4}" y="${36 + (Number(history.orderIndex || 1) % 3) * 11}" fill="#b8bbc2" font-size="10">Benchmark ${escapeHtml(String(history.orderIndex || ''))}</text>
               ${targetLine}`;
           }).join('');
       }).join('');
@@ -3254,7 +3432,10 @@
         deleteStudent: 'Deactivating student…',
         reviewStaffRequest: 'Updating request…',
         generateIep: 'Generating IEP document…',
-        saveBrandingLogo: 'Uploading logo…'
+        saveBrandingLogo: 'Uploading logo…',
+        previewAdminCatalogBatch: 'Validating subjects and classes…',
+        saveAdminCatalogBatch: 'Saving subjects and classes…',
+        saveSchoolQuarterBoundaries: 'Saving quarter dates…'
       };
       return labels[functionName] || 'Working with the database…';
     }
