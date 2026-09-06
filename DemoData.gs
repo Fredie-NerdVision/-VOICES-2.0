@@ -629,6 +629,7 @@ function buildDemoGoals_(random, students, studentClasses, classes, subjectIds, 
         StartDate: startDate,
         DueDate: iep.EndDate,
         Active: true,
+        BenchmarkActivationMode: 'DATE',
         CreatedBy: student.CaseManagerEmail,
         CreatedAt: formatDateTime_(new Date(today.getTime() + startOffset * 86400000)),
         UpdatedAt: formatDateTime_(new Date(today.getTime() + (startOffset + 5) * 86400000))
@@ -638,11 +639,12 @@ function buildDemoGoals_(random, students, studentClasses, classes, subjectIds, 
         tags.push(subjectIds[template.alsoRelevant]);
       }
       const span = Math.max(60, Math.round((parseDate_(iep.EndDate).getTime() - parseDate_(startDate).getTime()) / 86400000));
-      const elapsed = Math.max(0, Math.round((today.getTime() - parseDate_(startDate).getTime()) / 86400000));
-      const activePhase = Math.min(2, Math.floor(elapsed / (span / 3)));
       VOICES_DEMO_BENCHMARK_PHASES.forEach((phase, phaseIndex) => {
         const benchmarkId = demoId_('BM', benchmarks.length + 1);
-        const benchmarkStart = formatDate_(new Date(parseDate_(startDate).getTime() + Math.round(span * phaseIndex / 3) * 86400000));
+        const benchmarkStartOffset = phaseIndex
+          ? Math.round(span * phaseIndex / 3) + 1
+          : 0;
+        const benchmarkStart = formatDate_(new Date(parseDate_(startDate).getTime() + benchmarkStartOffset * 86400000));
         const benchmarkDue = formatDate_(new Date(parseDate_(startDate).getTime() + Math.round(span * (phaseIndex + 1) / 3) * 86400000));
         benchmarks.push({
           Id: benchmarkId,
@@ -657,10 +659,18 @@ function buildDemoGoals_(random, students, studentClasses, classes, subjectIds, 
           StartDate: benchmarkStart,
           DueDate: benchmarkDue,
           Critical: false,
-          Active: phaseIndex === activePhase,
+          Active: benchmarkStart <= formatDate_(today) && formatDate_(today) <= benchmarkDue,
           Description: 'Short-Term Objective ' + (phaseIndex + 1) + ': ' + firstName + ' will ' +
             template.skill + ' ' + phase + ' on 3 out of 4 recorded trials.',
-          GoalId: goalId
+          GoalId: goalId,
+          OrderIndex: phaseIndex + 1,
+          TaskDemandDescription: firstName + ' will ' + template.skill,
+          TargetPromptLevel: phaseIndex === 2 ? 'Independent' : 'Verbal',
+          TargetPromptCeiling: phaseIndex === 0 ? 2 : phaseIndex === 1 ? 1 : '',
+          ConsistencyTrialsPassed: 3,
+          ConsistencyTrialsWindow: 4,
+          EvaluationWindowUnit: 'SESSION',
+          GoalArchetype: phaseIndex < 2 ? 'PROMPT_FADE' : 'DISCRETE_TRIAL'
         });
         tags.forEach(subjectId => benchmarkSubjects.push({
           BenchmarkId: benchmarkId,
@@ -678,10 +688,25 @@ function buildDemoEntries_(random, benchmarks, studentClasses, aidesByClass, stu
     return map;
   }, {});
   const entries = [];
-  benchmarks.filter(row => toBoolean_(row.Active)).forEach(benchmark => {
+  const recentHistoryStart = new Date(today.getTime() - 90 * 86400000);
+  benchmarks.filter(row => {
+    const start = parseDate_(formatDate_(row.StartDate));
+    const due = parseDate_(formatDate_(row.DueDate));
+    return start.getTime() <= today.getTime() && (
+      toBoolean_(row.Active) || due.getTime() >= recentHistoryStart.getTime()
+    );
+  }).forEach(benchmark => {
     const student = studentById[benchmark.StudentId];
     const enrolled = studentClasses[benchmark.StudentId];
-    const sessions = demoInt_(random, 6, 10);
+    const start = parseDate_(formatDate_(benchmark.StartDate));
+    const due = parseDate_(formatDate_(benchmark.DueDate));
+    const end = new Date(Math.min(today.getTime(), due.getTime()));
+    const availableDays = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 86400000));
+    const sessions = Math.min(
+      toBoolean_(benchmark.Active) ? demoInt_(random, 6, 10) : demoInt_(random, 2, 3),
+      availableDays + 1
+    );
+    if (!sessions) return;
     let level = demoInt_(random, 0, 2);
     for (let index = 0; index < sessions; index += 1) {
       const drift = random();
@@ -690,17 +715,23 @@ function buildDemoEntries_(random, benchmarks, studentClasses, aidesByClass, stu
       else level = Math.min(4, level + 1);
       const correct = level;
       const attempts = 4;
-      const dayOffset = -7 * (sessions - index) - demoInt_(random, 0, 2);
-      const timestamp = new Date(today.getTime() + dayOffset * 86400000);
+      const dayOffset = sessions === 1
+        ? availableDays
+        : Math.round(availableDays * index / (sessions - 1));
+      const timestamp = new Date(start.getTime() + dayOffset * 86400000);
       timestamp.setHours(9 + (index % 5), (index * 7) % 60, 0, 0);
       const classRow = enrolled[index % enrolled.length];
       const classAides = aidesByClass[classRow.Id];
       const recorder = index % 3 === 0
         ? student.CaseManagerEmail
         : classAides[index % classAides.length].Email;
+      const promptCount = String(benchmark.GoalArchetype) === 'PROMPT_FADE'
+        ? Math.max(0, 3 - level)
+        : level >= 3 ? 0 : 1;
       entries.push({
         Id: demoId_('ENTRY', entries.length + 1),
         Timestamp: formatDateTime_(timestamp),
+        ObservationDate: formatDate_(timestamp),
         BenchmarkId: benchmark.Id,
         StudentId: benchmark.StudentId,
         StaffEmail: recorder,
@@ -708,7 +739,10 @@ function buildDemoEntries_(random, benchmarks, studentClasses, aidesByClass, stu
         Correct: correct,
         Attempts: attempts,
         Percent: Math.round((correct / attempts) * 1000) / 10,
-        Notes: demoPick_(random, VOICES_DEMO_ENTRY_NOTES)
+        ActualPromptLevel: promptCount === 0 ? 'Independent' : promptCount === 1 ? 'Verbal' : 'Model',
+        ActualPromptCount: promptCount,
+        Notes: demoPick_(random, VOICES_DEMO_ENTRY_NOTES),
+        Status: 'ACTIVE'
       });
     }
   });

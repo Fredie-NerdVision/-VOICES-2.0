@@ -134,10 +134,19 @@ const code = `
   });
   const benchmarksByGoal = {};
   const activeByGoal = {};
+  const benchmarkRowsByGoal = {};
   goals.benchmarks.forEach(benchmark => {
     benchmarksByGoal[benchmark.GoalId] = (benchmarksByGoal[benchmark.GoalId] || 0) + 1;
+    benchmarkRowsByGoal[benchmark.GoalId] = benchmarkRowsByGoal[benchmark.GoalId] || [];
+    benchmarkRowsByGoal[benchmark.GoalId].push(benchmark);
     if (benchmark.Active) activeByGoal[benchmark.GoalId] = (activeByGoal[benchmark.GoalId] || 0) + 1;
     if (!/3 out of 4/i.test(benchmark.Description)) throw new Error('Benchmark ratio is not parser compatible.');
+    if (benchmark.TargetAccuracyPct !== undefined && benchmark.TargetAccuracyPct !== '') {
+      throw new Error('Consistency ratio was incorrectly stored as an accuracy target.');
+    }
+    if (benchmark.ConsistencyTrialsPassed !== 3 || benchmark.ConsistencyTrialsWindow !== 4) {
+      throw new Error('Benchmark consistency metadata is incomplete.');
+    }
   });
   students.forEach(student => {
     const count = goalsByStudent[student.Id];
@@ -146,7 +155,53 @@ const code = `
   goals.goals.forEach(goal => {
     if (benchmarksByGoal[goal.Id] !== 3) throw new Error('Goal does not have exactly three benchmarks.');
     if (activeByGoal[goal.Id] !== 1) throw new Error('Goal does not have exactly one active benchmark.');
+    if (goal.BenchmarkActivationMode !== 'DATE') {
+      throw new Error('Demo goal does not use date-driven benchmark activation.');
+    }
+    const ordered = benchmarkRowsByGoal[goal.Id]
+      .slice()
+      .sort((a, b) => a.OrderIndex - b.OrderIndex);
+    if (ordered.map(row => row.OrderIndex).join(',') !== '1,2,3') {
+      throw new Error('Demo benchmark order is not 1,2,3.');
+    }
+    if (ordered.slice(1).some((row, index) =>
+      row.StartDate <= ordered[index].DueDate
+    )) {
+      throw new Error('Demo benchmark date ranges overlap.');
+    }
+    if (ordered[0].GoalArchetype !== 'PROMPT_FADE' ||
+        ordered[1].GoalArchetype !== 'PROMPT_FADE' ||
+        ordered[2].GoalArchetype !== 'DISCRETE_TRIAL') {
+      throw new Error('Demo benchmark phase archetypes are incomplete.');
+    }
   });
+  const aidesByClass = Object.fromEntries(classes.map(classRow => [
+    classRow.Id,
+    aides.slice(0, 3)
+  ]));
+  const entries = buildDemoEntries_(
+    random,
+    goals.benchmarks,
+    studentClasses,
+    aidesByClass,
+    students,
+    today
+  );
+  const benchmarkById = Object.fromEntries(goals.benchmarks.map(row => [row.Id, row]));
+  entries.forEach(entry => {
+    const benchmark = benchmarkById[entry.BenchmarkId];
+    if (entry.ObservationDate < benchmark.StartDate ||
+        entry.ObservationDate > benchmark.DueDate ||
+        entry.ObservationDate > formatDate_(today)) {
+      throw new Error('Demo entry is outside its benchmark date range.');
+    }
+    if (!entry.ActualPromptLevel || entry.ActualPromptCount === undefined) {
+      throw new Error('Demo entry is missing prompt data.');
+    }
+  });
+  if (!entries.some(entry => !benchmarkById[entry.BenchmarkId].Active)) {
+    throw new Error('Demo entries do not include a recent historical benchmark phase.');
+  }
   const capacities = Object.fromEntries(aides.map(aide => [aide.FirstName, aide.WeeklyHours]));
   const expected = {
     Liane: 30, Maci: 29, Marcos: 29, Nick: 29, Katie: 29, Melanie: 29, Judy: 29,
@@ -167,7 +222,8 @@ const code = `
     students: students.length,
     classes: classes.length,
     goals: goals.goals.length,
-    benchmarks: goals.benchmarks.length
+    benchmarks: goals.benchmarks.length,
+    entries: entries.length
   };
 })()
 `;
