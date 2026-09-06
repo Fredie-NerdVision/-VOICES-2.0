@@ -21,6 +21,7 @@ const context = {
   },
   VOICES: {
     TIME_ZONE: 'UTC',
+    DATABASE_PROPERTY: 'VOICES_DATABASE_ID',
     ROLES: { AIDE: 'AIDE', TEACHER: 'TEACHER', CASE_MANAGER: 'CASE_MANAGER' }
   },
   formatDate_(value) {
@@ -201,6 +202,37 @@ const code = `
   });
   if (!entries.some(entry => !benchmarkById[entry.BenchmarkId].Active)) {
     throw new Error('Demo entries do not include a recent historical benchmark phase.');
+  }
+  const propertyValues = {
+    VOICES_DATABASE_ID: 'DEMO-ID',
+    VOICES_DEMO_DATABASE_ID: 'DEMO-ID'
+  };
+  PropertiesService = {
+    getScriptProperties: () => ({
+      getProperty: key => propertyValues[key] || '',
+      setProperty: (key, value) => { propertyValues[key] = value; }
+    })
+  };
+  let spreadsheetName = VOICES_DEMO.DATABASE_NAME;
+  SpreadsheetApp = {
+    openById: id => ({
+      getId: () => id,
+      getName: () => spreadsheetName
+    }),
+    create: () => { throw new Error('Existing demo spreadsheet should be reused.'); }
+  };
+  if (demoDatabaseSpreadsheet_().getId() !== 'DEMO-ID') {
+    throw new Error('Configured personal training database could not be refreshed.');
+  }
+  spreadsheetName = 'Production Database';
+  let refusedProduction = false;
+  try {
+    demoDatabaseSpreadsheet_();
+  } catch (error) {
+    refusedProduction = /Refusing to write training data/.test(error.message);
+  }
+  if (!refusedProduction) {
+    throw new Error('Demo refresh did not protect a non-training live database.');
   }
   const capacities = Object.fromEntries(aides.map(aide => [aide.FirstName, aide.WeeklyHours]));
   const expected = {

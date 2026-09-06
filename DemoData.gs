@@ -253,16 +253,17 @@ function demoDatabaseSpreadsheet_(options) {
   options = options || {};
   const properties = PropertiesService.getScriptProperties();
   const liveId = properties.getProperty(VOICES.DATABASE_PROPERTY);
-  const requestedId = options.spreadsheetId || properties.getProperty(VOICES_DEMO.DATABASE_PROPERTY);
-  if (requestedId && liveId && requestedId === liveId) {
-    throw new Error('The training database cannot be the live database. Clear the ' +
-      VOICES_DEMO.DATABASE_PROPERTY + ' script property and run setup again.');
-  }
+  const configuredDemoId = properties.getProperty(VOICES_DEMO.DATABASE_PROPERTY);
+  const requestedId = options.spreadsheetId || configuredDemoId;
   const spreadsheet = requestedId
     ? SpreadsheetApp.openById(requestedId)
     : SpreadsheetApp.create(VOICES_DEMO.DATABASE_NAME);
   if (liveId && spreadsheet.getId() === liveId) {
-    throw new Error('Refusing to write training data into the live database.');
+    const isConfiguredTrainingDatabase = requestedId === configuredDemoId &&
+      spreadsheet.getName() === VOICES_DEMO.DATABASE_NAME;
+    if (!isConfiguredTrainingDatabase) {
+      throw new Error('Refusing to write training data into the live database.');
+    }
   }
   properties.setProperty(VOICES_DEMO.DATABASE_PROPERTY, spreadsheet.getId());
   return spreadsheet;
