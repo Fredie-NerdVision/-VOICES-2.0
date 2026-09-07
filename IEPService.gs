@@ -161,7 +161,7 @@ function generateIep(payload) {
     FileUrl: document.getUrl()
   };
   appendRow_('IEPs', record);
-  invalidateAppDataCache_();
+  invalidateAppDataCache_('general');
   return { ok: true, id: record.Id, fileUrl: record.FileUrl };
 }
 

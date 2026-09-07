@@ -15,14 +15,14 @@ function saveDailyMessage(payload) {
     const existing = findOne_('Messages', row => String(row.Id) === String(payload.id));
     if (!existing) throw new Error('Message was not found.');
     updateRow_('Messages', existing._row, record);
-    invalidateAppDataCache_();
+    invalidateAppDataCache_('general');
     return { ok: true, id: existing.Id };
   }
   record.Id = uuid_();
   record.CreatedBy = staff.Email;
   record.CreatedAt = new Date();
   appendRow_('Messages', record);
-  invalidateAppDataCache_();
+  invalidateAppDataCache_('general');
   return { ok: true, id: record.Id };
 }
 
@@ -122,7 +122,7 @@ function saveSchoolQuarterBoundaries(payload) {
     invalidateRowsCache_('Settings');
     upsertSetting_('SchoolQuarterBoundaries', JSON.stringify(boundaries));
     invalidateRowsCache_('Settings');
-    invalidateAppDataCache_();
+    invalidateAppDataCache_('student');
     return { ok: true, boundaries: boundaries };
   } finally {
     lock.releaseLock();
@@ -205,7 +205,7 @@ function saveAdminCatalogBatch(payload) {
     });
     invalidateRowsCache_('Subjects');
     invalidateRowsCache_('Classes');
-    invalidateScheduleCache_();
+    invalidateScheduleCache_('all');
     return {
       ok: true,
       subjectsCreated: subjectsCreated,
@@ -350,7 +350,7 @@ function setDailyMessageActive(payload) {
   const existing = findOne_('Messages', row => String(row.Id) === String(payload.id));
   if (!existing) throw new Error('Message was not found.');
   updateRow_('Messages', existing._row, { Active: toBoolean_(payload.active) });
-  invalidateAppDataCache_();
+  invalidateAppDataCache_('general');
   return { ok: true };
 }
 
@@ -408,7 +408,7 @@ function saveBrandingLogo(payload) {
       console.warn('Previous logo could not be removed: ' + error.message);
     }
   }
-  invalidateAppDataCache_();
+  invalidateAppDataCache_('general');
   return { ok: true, logo: dataUriFromFile_(file) };
 }
 
@@ -580,12 +580,12 @@ function upsertStaff(payload) {
   };
   if (existing) {
     updateRow_('Staff', existing._row, record);
-    invalidateScheduleCache_();
+    invalidateScheduleCache_('all');
     return { ok: true, id: existing.Id };
   }
   record.Id = uuid_();
   appendRow_('Staff', record);
-  invalidateScheduleCache_();
+  invalidateScheduleCache_('all');
   return { ok: true, id: record.Id };
 }
 
@@ -601,7 +601,7 @@ function deleteStaff(email) {
     throw new Error('Only an administrator can remove another administrator.');
   }
   updateRow_('Staff', existing._row, { Active: false });
-  invalidateScheduleCache_();
+  invalidateScheduleCache_('all');
   return { ok: true };
 }
 
@@ -633,12 +633,12 @@ function upsertStudent(payload) {
       throw new Error('You can only update your own assigned students.');
     }
     updateRow_('Students', existing._row, record);
-    invalidateScheduleCache_();
+    invalidateScheduleCache_('all');
     return { ok: true, id: existing.Id };
   }
   record.Id = uuid_();
   appendRow_('Students', record);
-  invalidateScheduleCache_();
+  invalidateScheduleCache_('all');
   return { ok: true, id: record.Id };
 }
 
@@ -651,7 +651,7 @@ function deleteStudent(studentId) {
     throw new Error('You can only remove your own assigned students.');
   }
   updateRow_('Students', student._row, { Active: false });
-  invalidateScheduleCache_();
+  invalidateScheduleCache_('all');
   return { ok: true };
 }
 

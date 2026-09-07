@@ -15,7 +15,7 @@ function clockIn(note) {
     Verified: false
   };
   appendRow_('TimeEntries', entry);
-  invalidateAppDataCache_();
+  invalidateAppDataCache_('general');
   return { ok: true, entry: publicTimeEntry_(entry) };
 }
 
@@ -34,7 +34,7 @@ function clockOut(note) {
     Hours: hours,
     Note: sanitizeText_(note || entry.Note, 500)
   });
-  invalidateAppDataCache_();
+  invalidateAppDataCache_('general');
   return { ok: true, hours: hours };
 }
 

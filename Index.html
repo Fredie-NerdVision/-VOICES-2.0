@@ -3917,43 +3917,56 @@
     }
 
     function invalidateClientReadModels(functionName) {
-      const mutations = new Set([
+      const scheduleMutations = new Set([
         'callOff',
-        'clockIn',
-        'clockOut',
-        'createGoal',
-        'deactivateGoal',
-        'deleteBenchmark',
         'deleteStaff',
         'deleteStudent',
-        'generateIep',
         'reviewStaffRequest',
         'saveAdminCatalogBatch',
-        'saveBenchmark',
-        'saveBenchmarkEntriesBatch',
-        'saveBrandingLogo',
-        'saveBulkGoals',
-        'saveDailyMessage',
         'saveSchedule',
         'saveScheduleType',
-        'saveSchoolQuarterBoundaries',
-        'setActiveGoalBenchmark',
-        'setDailyMessageActive',
-        'setGoalCritical',
         'submitAvailability',
         'submitTimeOffRequest',
         'upsertStaff',
         'upsertStudent'
       ]);
-      if (!mutations.has(functionName)) return;
+      const studentMutations = new Set([
+        'createGoal',
+        'deactivateGoal',
+        'deleteBenchmark',
+        'deleteStudent',
+        'generateIep',
+        'saveAdminCatalogBatch',
+        'saveBenchmark',
+        'saveBenchmarkEntriesBatch',
+        'saveBulkGoals',
+        'saveSchoolQuarterBoundaries',
+        'setActiveGoalBenchmark',
+        'setGoalCritical',
+        'upsertStudent'
+      ]);
+      const generalMutations = new Set([
+        'clockIn',
+        'clockOut',
+        'saveBrandingLogo',
+        'saveDailyMessage',
+        'setDailyMessageActive'
+      ]);
+      const affectsSchedule = scheduleMutations.has(functionName);
+      const affectsStudents = studentMutations.has(functionName);
+      if (!affectsSchedule && !affectsStudents && !generalMutations.has(functionName)) return;
       state.caseManagerDataLoaded = {};
       state.caseManagerWorkspacePromise = null;
-      state.goalWorkspaceCache = {};
-      state.goalCatalogCache = {};
-      state.benchmarkEntryCache = {};
-      state.scheduleDataCache = {};
-      state.scheduleDataPromises = {};
-      state.readModelVersion += 1;
+      if (affectsStudents) {
+        state.goalWorkspaceCache = {};
+        state.goalCatalogCache = {};
+        state.benchmarkEntryCache = {};
+      }
+      if (affectsSchedule) {
+        state.scheduleDataCache = {};
+        state.scheduleDataPromises = {};
+        state.readModelVersion += 1;
+      }
     }
 
     function serverQuiet(functionName, ...args) {

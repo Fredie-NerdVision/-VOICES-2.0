@@ -692,11 +692,11 @@ function getScheduleCacheVersion_() {
   return PropertiesService.getScriptProperties().getProperty('VOICES_SCHEDULE_CACHE_VERSION') || '1';
 }
 
-function invalidateScheduleCache_() {
+function invalidateScheduleCache_(scope) {
   const properties = PropertiesService.getScriptProperties();
   const next = toNumber_(properties.getProperty('VOICES_SCHEDULE_CACHE_VERSION'), 1) + 1;
   properties.setProperty('VOICES_SCHEDULE_CACHE_VERSION', String(next));
-  invalidateAppDataCache_();
+  invalidateAppDataCache_(scope || 'schedule');
 }
 
 function getAllClasses_() {

@@ -330,7 +330,7 @@ function createGoal(payload) {
     } finally {
       lock.releaseLock();
     }
-    invalidateAppDataCache_();
+    invalidateAppDataCache_('student');
     return {
       ok: true,
       id: goalId,
@@ -1293,7 +1293,7 @@ function reconcileDateDrivenBenchmarks() {
     }
     try {
       reconcileDateDrivenBenchmarks_(new Date(), getCurrentUserEmail_());
-      invalidateAppDataCache_();
+      invalidateAppDataCache_('student');
       return { ok: true, date: formatDate_(new Date()) };
     } finally {
       lock.releaseLock();
@@ -1419,7 +1419,7 @@ function checkMissingBenchmarkObservations() {
           emailAlerts[recipient].map(message => '- ' + message).join('\n')
       ));
       invalidateRowsCache_('Notifications');
-      invalidateAppDataCache_();
+      invalidateAppDataCache_('general');
       return {
         ok: true,
         checkedAt: today,
@@ -1495,7 +1495,7 @@ function setActiveGoalBenchmark(payload) {
           EndReason: 'Quarter boundary expiration'
         });
         updateRow_('Goals', goal._row, { UpdatedAt: new Date() });
-        invalidateAppDataCache_();
+        invalidateAppDataCache_('student');
         return {
           ok: true,
           goalId: goal.Id,
@@ -1548,7 +1548,7 @@ function setActiveGoalBenchmark(payload) {
         Status: 'ACTIVE',
         Active: true
       });
-      invalidateAppDataCache_();
+      invalidateAppDataCache_('student');
       return {
         ok: true,
         goalId: goal.Id,
@@ -1912,7 +1912,7 @@ function setGoalCritical(payload) {
       .filter(row => String(row.GoalId) === String(goal.Id))
       .forEach(row => updateRow_('Benchmarks', row._row, { Critical: critical }));
     updateRow_('Goals', goal._row, { UpdatedAt: new Date() });
-    invalidateAppDataCache_();
+    invalidateAppDataCache_('student');
     return { ok: true, goalId: goal.Id, critical: critical };
   });
 }
@@ -1942,7 +1942,7 @@ function deactivateGoal(goalId) {
         EndedBy: staff.Email,
         EndReason: 'Goal deactivated'
       }));
-    invalidateAppDataCache_();
+    invalidateAppDataCache_('student');
     return { ok: true, deactivatedAt: deactivationDate };
   });
 }

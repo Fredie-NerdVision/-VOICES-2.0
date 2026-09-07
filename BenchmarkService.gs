@@ -281,7 +281,7 @@ function saveBenchmarkEntriesBatch(payload) {
     const validated = validateObservationBatch_(payload.entries, staff, batchId, fingerprint);
     if (!validated.ok) return validated;
     appendRows_('BenchmarkEntries', validated.records);
-    invalidateAppDataCache_();
+    invalidateAppDataCache_('student');
     return completedObservationBatchResult_(batchId, validated.records);
   } finally {
     lock.releaseLock();
@@ -569,7 +569,7 @@ function correctBenchmarkEntry(payload) {
       CorrectedBy: staff.Email,
       CorrectedAt: now
     });
-    invalidateAppDataCache_();
+    invalidateAppDataCache_('student');
     return {
       ok: true,
       originalEntryId: current.Id,
@@ -686,12 +686,12 @@ function saveBenchmark(payload) {
     if (!existing) throw new Error('Benchmark was not found.');
     if (payload.goalId === undefined) delete record.GoalId;
     updateRow_('Benchmarks', existing._row, record);
-    invalidateAppDataCache_();
+    invalidateAppDataCache_('student');
     return { ok: true, id: existing.Id, message: 'Benchmark updated.' };
   }
   record.Id = uuid_();
   appendRow_('Benchmarks', record);
-  invalidateAppDataCache_();
+  invalidateAppDataCache_('student');
   return { ok: true, id: record.Id, message: 'Benchmark created.' };
 }
 
@@ -705,7 +705,7 @@ function deleteBenchmark(benchmarkId) {
     throw new Error('You can only manage benchmarks for your assigned students.');
   }
   updateRow_('Benchmarks', benchmark._row, { Active: false });
-  invalidateAppDataCache_();
+  invalidateAppDataCache_('student');
   return { ok: true };
 }
 

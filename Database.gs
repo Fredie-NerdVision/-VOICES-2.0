@@ -66,6 +66,12 @@ let VOICES_INDEX_CACHE = null;
 
 const VOICES_RESPONSE_CACHE_TTL_SECONDS = 1800;
 const VOICES_RESPONSE_CACHE_CHUNK_SIZE = 45000;
+const VOICES_PERSISTENT_RESPONSE_GROUPS = Object.freeze({
+  'goal-manager': 'student',
+  'student-goal-workspace': 'student',
+  'benchmark-lookup': 'student',
+  'schedule-builder': 'schedule'
+});
 
 function withRowsCache_(callback) {
   const previousCache = VOICES_ROWS_CACHE;
@@ -88,10 +94,18 @@ function getAppDataVersion_() {
     .getProperty('VOICES_APP_DATA_VERSION') || '1';
 }
 
-function invalidateAppDataCache_() {
+function invalidateAppDataCache_(scope) {
   const next = String(new Date().getTime()) + '-' + uuid_();
-  PropertiesService.getScriptProperties()
-    .setProperty('VOICES_APP_DATA_VERSION', next);
+  const properties = PropertiesService.getScriptProperties();
+  const updates = { VOICES_APP_DATA_VERSION: next };
+  const selectedScope = String(scope || 'all').toLowerCase();
+  if (selectedScope === 'all' || selectedScope === 'student') {
+    updates.VOICES_STUDENT_READ_MODEL_VERSION = next;
+  }
+  if (selectedScope === 'all' || selectedScope === 'schedule') {
+    updates.VOICES_SCHEDULE_READ_MODEL_VERSION = next;
+  }
+  properties.setProperties(updates);
   return next;
 }
 
@@ -134,16 +148,29 @@ function cachedResponse_(namespace, keyParts, producer, ttlSeconds, forceRefresh
           if (chunk == null) throw new Error('Incomplete response cache.');
           chunks.push(chunk);
         }
-        return JSON.parse(chunks.join(''));
+        const serialized = chunks.join('');
+        writePersistentResponse_(namespace, keyParts, serialized, false);
+        return JSON.parse(serialized);
       }
     } catch (error) {
       console.warn('Response cache read failed: ' + error.message);
     }
+    const persistent = readPersistentResponse_(namespace, keyParts);
+    if (persistent.hit) {
+      writeResponseCache_(cache, cacheKey, JSON.stringify(persistent.value), ttlSeconds);
+      return persistent.value;
+    }
   }
 
   const result = producer();
+  const serialized = JSON.stringify(result);
+  writeResponseCache_(cache, cacheKey, serialized, ttlSeconds);
+  writePersistentResponse_(namespace, keyParts, serialized, true);
+  return result;
+}
+
+function writeResponseCache_(cache, cacheKey, serialized, ttlSeconds) {
   try {
-    const serialized = JSON.stringify(result);
     const chunks = [];
     for (let offset = 0; offset < serialized.length; offset += VOICES_RESPONSE_CACHE_CHUNK_SIZE) {
       chunks.push(serialized.slice(offset, offset + VOICES_RESPONSE_CACHE_CHUNK_SIZE));
@@ -154,7 +181,129 @@ function cachedResponse_(namespace, keyParts, producer, ttlSeconds, forceRefresh
   } catch (error) {
     console.warn('Response cache write failed: ' + error.message);
   }
-  return result;
+}
+
+function readPersistentResponse_(namespace, keyParts) {
+  const descriptor = persistentResponseDescriptor_(namespace, keyParts);
+  if (!descriptor) return { hit: false };
+  try {
+    const properties = PropertiesService.getScriptProperties();
+    const metadataText = properties.getProperty(descriptor.property);
+    if (!metadataText) return { hit: false };
+    const metadata = JSON.parse(metadataText);
+    if (metadata.version !== descriptor.version || !metadata.fileId) {
+      return { hit: false };
+    }
+    const stored = JSON.parse(
+      DriveApp.getFileById(metadata.fileId).getBlob().getDataAsString()
+    );
+    if (stored.key !== descriptor.key || stored.version !== descriptor.version) {
+      return { hit: false };
+    }
+    return { hit: true, value: stored.value };
+  } catch (error) {
+    console.warn('Persistent response cache read failed: ' + error.message);
+    return { hit: false };
+  }
+}
+
+function writePersistentResponse_(namespace, keyParts, serialized, overwrite) {
+  const descriptor = persistentResponseDescriptor_(namespace, keyParts);
+  if (!descriptor) return;
+  const properties = PropertiesService.getScriptProperties();
+  if (!overwrite) {
+    try {
+      const metadata = JSON.parse(
+        properties.getProperty(descriptor.property) || '{}'
+      );
+      if (metadata.fileId && metadata.version === descriptor.version) return;
+    } catch (error) {
+      console.warn('Persistent response metadata was invalid: ' + error.message);
+    }
+  }
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;
+  try {
+    const metadataText = properties.getProperty(descriptor.property);
+    const payload = JSON.stringify({
+      key: descriptor.key,
+      version: descriptor.version,
+      value: JSON.parse(serialized)
+    });
+    let file = null;
+    if (metadataText) {
+      try {
+        const metadata = JSON.parse(metadataText);
+        if (metadata.fileId) file = DriveApp.getFileById(metadata.fileId);
+      } catch (error) {
+        file = null;
+      }
+    }
+    if (file) {
+      file.setContent(payload);
+    } else {
+      file = persistentResponseFolder_().createFile(
+        'read-model-' + descriptor.digest + '.json',
+        payload
+      );
+    }
+    properties.setProperty(descriptor.property, JSON.stringify({
+      fileId: file.getId(),
+      version: descriptor.version
+    }));
+  } catch (error) {
+    console.warn('Persistent response cache write failed: ' + error.message);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function persistentResponseDescriptor_(namespace, keyParts) {
+  const group = VOICES_PERSISTENT_RESPONSE_GROUPS[namespace];
+  if (!group) return null;
+  const key = [
+    VOICES.RELEASE,
+    namespace,
+    JSON.stringify(keyParts || [])
+  ].join('|');
+  const digest = sha256Hex_(key);
+  const propertyName = group === 'schedule'
+    ? 'VOICES_SCHEDULE_READ_MODEL_VERSION'
+    : 'VOICES_STUDENT_READ_MODEL_VERSION';
+  const properties = PropertiesService.getScriptProperties();
+  return {
+    key: key,
+    digest: digest,
+    property: 'VOICES_READ_MODEL_' + digest,
+    version: properties.getProperty(propertyName) || '1'
+  };
+}
+
+function persistentResponseFolder_() {
+  const properties = PropertiesService.getScriptProperties();
+  const folderId = properties.getProperty('VOICES_READ_MODEL_FOLDER_ID');
+  if (folderId && typeof DriveApp.getFolderById === 'function') {
+    try {
+      return DriveApp.getFolderById(folderId);
+    } catch (error) {
+      console.warn('Stored read-model folder was unavailable: ' + error.message);
+    }
+  }
+  const named = DriveApp.getFoldersByName('V.O.I.C.E.S Read Models');
+  const folder = named.hasNext()
+    ? named.next()
+    : DriveApp.createFolder('V.O.I.C.E.S Read Models');
+  properties.setProperty('VOICES_READ_MODEL_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function sha256Hex_(value) {
+  return Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(value)
+  ).map(byte =>
+    ((byte + 256) % 256).toString(16).padStart(2, '0')
+  ).join('');
 }
 
 function setupVoicesDatabase(options) {

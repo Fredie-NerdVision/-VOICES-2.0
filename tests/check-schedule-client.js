@@ -80,6 +80,26 @@ const result = vm.runInContext(`
   if (fiveHours.dailyHours !== 5 || fiveHours.lunchDeducted) {
     throw new Error('A five-hour day incorrectly deducted lunch.');
   }
+  state.caseManagerDataLoaded = { overview: true };
+  state.goalWorkspaceCache = { student: {} };
+  state.goalCatalogCache = { setup: {} };
+  state.benchmarkEntryCache = { benchmark: {} };
+  state.scheduleDataCache = { schedule: {} };
+  state.scheduleDataPromises = {};
+  state.readModelVersion = 4;
+  invalidateClientReadModels('saveBenchmarkEntriesBatch');
+  if (state.scheduleDataCache.schedule === undefined ||
+      Object.keys(state.goalWorkspaceCache).length ||
+      state.readModelVersion !== 4) {
+    throw new Error('Observation writes incorrectly invalidated schedule data.');
+  }
+  state.goalWorkspaceCache = { student: {} };
+  invalidateClientReadModels('saveSchedule');
+  if (Object.keys(state.scheduleDataCache).length ||
+      state.goalWorkspaceCache.student === undefined ||
+      state.readModelVersion !== 5) {
+    throw new Error('Schedule writes incorrectly invalidated student data.');
+  }
   return hours;
 })()
 `, context);
