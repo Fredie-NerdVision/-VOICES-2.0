@@ -651,6 +651,8 @@
       caseManagerDataLoaded: {},
       caseManagerWorkspacePromise: null,
       scheduleDataCache: {},
+      scheduleDataPromises: {},
+      readModelVersion: 0,
       pendingOperations: 0
     };
 
@@ -894,6 +896,7 @@
           state.goalCatalogLoaded = true;
           ['overview', 'entry', 'people', 'requests', 'admin', 'ieps', 'benchmarks', 'schedule']
             .forEach(key => { state.caseManagerDataLoaded[key] = true; });
+          window.setTimeout(prewarmDefaultSchedule, 500);
           return data;
         })
         .finally(() => {
@@ -1048,11 +1051,7 @@
       if (workspace) workspace.innerHTML = '<div class="card empty">Loading schedule data…</div>';
       if (button) button.disabled = true;
       try {
-        const cacheKey = date + '|' + templateId;
-        const cached = !force && state.scheduleDataCache[cacheKey];
-        const response = cached ||
-          await serverQuiet('getScheduleBuilderData', date, templateId, force);
-        if (!cached) state.scheduleDataCache[cacheKey] = response;
+        const response = await requestScheduleData(date, templateId, force);
         state.scheduleData = JSON.parse(JSON.stringify(response));
         if (!state.scheduleData || !state.scheduleData.schedule) throw new Error('The schedule response was incomplete.');
         state.scheduleData.aides = safeArray(state.scheduleData.aides);
@@ -1084,6 +1083,40 @@
       } finally {
         if (button) button.disabled = false;
       }
+    }
+
+    function requestScheduleData(date, templateId, force) {
+      const cacheKey = date + '|' + templateId;
+      if (!force && state.scheduleDataCache[cacheKey]) {
+        return Promise.resolve(state.scheduleDataCache[cacheKey]);
+      }
+      if (!force && state.scheduleDataPromises[cacheKey]) {
+        return state.scheduleDataPromises[cacheKey];
+      }
+      const version = state.readModelVersion;
+      const request = serverQuiet('getScheduleBuilderData', date, templateId, Boolean(force))
+        .then(response => {
+          if (version === state.readModelVersion) {
+            state.scheduleDataCache[cacheKey] = response;
+          }
+          return response;
+        })
+        .finally(() => {
+          if (state.scheduleDataPromises[cacheKey] === request) {
+            delete state.scheduleDataPromises[cacheKey];
+          }
+        });
+      state.scheduleDataPromises[cacheKey] = request;
+      return request;
+    }
+
+    function prewarmDefaultSchedule() {
+      if (!state.data || state.data.view !== 'CASE_MANAGER') return;
+      const defaultType = safeArray(state.data.caseManager.scheduleTypes)
+        .find(item => item.isDefault);
+      if (!defaultType) return;
+      requestScheduleData(state.data.today, defaultType.id, false)
+        .catch(() => {});
     }
 
     function renderScheduleWorkspace() {
@@ -3747,6 +3780,8 @@
         state.goalCatalogCache = {};
         state.benchmarkEntryCache = {};
         state.scheduleDataCache = {};
+        state.scheduleDataPromises = {};
+        state.readModelVersion += 1;
         await loadCaseManagerWorkspace(true);
         state.selectedTab = tab;
         renderCaseManager();
@@ -3760,6 +3795,8 @@
       state.goalCatalogCache = {};
       state.benchmarkEntryCache = {};
       state.scheduleDataCache = {};
+      state.scheduleDataPromises = {};
+      state.readModelVersion += 1;
       if (state.data.logo) document.getElementById('brandLogo').src = state.data.logo;
       document.getElementById('welcomeName').textContent = 'Welcome ' + (state.data.user.firstName || '');
       document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
@@ -3780,6 +3817,9 @@
         if (button.dataset.refreshBound) return;
         button.dataset.refreshBound = 'true';
         button.addEventListener('click', async () => {
+          const label = button.textContent;
+          button.disabled = true;
+          button.textContent = 'Refreshing…';
           try {
             const section = button.dataset.refresh || state.selectedTab;
             if (section === 'benchmarks') {
@@ -3799,7 +3839,12 @@
               await renderCaseManagerTab();
             }
             toast('Data refreshed.');
-          } catch (error) { toast(safeErrorMessage(error), true); }
+          } catch (error) {
+            toast(safeErrorMessage(error), true);
+          } finally {
+            button.disabled = false;
+            button.textContent = label;
+          }
         });
       });
     }
@@ -3870,6 +3915,8 @@
       state.goalCatalogCache = {};
       state.benchmarkEntryCache = {};
       state.scheduleDataCache = {};
+      state.scheduleDataPromises = {};
+      state.readModelVersion += 1;
     }
 
     function serverQuiet(functionName, ...args) {
