@@ -137,42 +137,74 @@ function getCurrentActiveBenchmarks_() {
     .filter(benchmark => toBoolean_(benchmark.Active));
 }
 
-function lookupBenchmarks(filters) {
-  filters = filters || {};
-  const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
-  assertRequired_(filters, ['classId', 'studentIds']);
-  const studentIds = Array.isArray(filters.studentIds) ? filters.studentIds.map(String) : [String(filters.studentIds)];
-  const classRow = findOne_('Classes', row => String(row.Id) === String(filters.classId) && toBoolean_(row.Active));
-  if (!classRow) throw new Error('Class was not found.');
-  assertObservationClassAccess_(staff, classRow);
+function lookupBenchmarks(filters, force) {
+  return withRowsCache_(() => {
+    filters = filters || {};
+    const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
+    assertRequired_(filters, ['classId', 'studentIds']);
+    const studentIds = Array.isArray(filters.studentIds)
+      ? filters.studentIds.map(String)
+      : [String(filters.studentIds)];
+    const classRow = findOne_('Classes', row =>
+      String(row.Id) === String(filters.classId) && toBoolean_(row.Active)
+    );
+    if (!classRow) throw new Error('Class was not found.');
+    assertObservationClassAccess_(staff, classRow);
 
-  const enrolled = new Set(
-    rows_('ClassStudents')
-      .filter(row => String(row.ClassId) === String(classRow.Id))
-      .map(row => String(row.StudentId))
-  );
-  const selected = studentIds.filter(id => enrolled.has(id));
-  if (!selected.length) throw new Error('Select at least one student enrolled in this class.');
+    const enrolled = new Set(
+      rows_('ClassStudents')
+        .filter(row => String(row.ClassId) === String(classRow.Id))
+        .map(row => String(row.StudentId))
+    );
+    const selected = studentIds.filter(id => enrolled.has(id));
+    if (!selected.length) throw new Error('Select at least one student enrolled in this class.');
 
-  const students = indexBy_(activeRows_('Students'), 'Id');
-  const subjectId = String(classRow.SubjectId);
-  const activeGoalIds = new Set(
-    rows_('Goals').filter(isActiveGoal_).map(row => String(row.Id))
-  );
-  const entries = rows_('BenchmarkEntries')
-    .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE');
-  return getCurrentActiveBenchmarks_()
-    .filter(row =>
-      selected.includes(String(row.StudentId)) &&
-      (!row.GoalId || activeGoalIds.has(String(row.GoalId))) &&
-      benchmarkMatchesSubject_(row, subjectId)
-    )
-    .map(row => {
-      const benchmarkEntries = entries.filter(entry => String(entry.BenchmarkId) === String(row.Id));
-      const last = benchmarkEntries.sort((a, b) => String(b.Timestamp).localeCompare(String(a.Timestamp)))[0];
-      return publicBenchmark_(row, students[row.StudentId], last, benchmarkEntries.length, benchmarkEntries);
-    })
-    .sort((a, b) => Number(b.critical) - Number(a.critical) || a.studentName.localeCompare(b.studentName));
+    const producer = () => {
+      const students = indexBy_(activeRows_('Students'), 'Id');
+      const subjectId = String(classRow.SubjectId);
+      const activeGoalIds = new Set(
+        rows_('Goals').filter(isActiveGoal_).map(row => String(row.Id))
+      );
+      const entries = rows_('BenchmarkEntries')
+        .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+      return getCurrentActiveBenchmarks_()
+        .filter(row =>
+          selected.includes(String(row.StudentId)) &&
+          (!row.GoalId || activeGoalIds.has(String(row.GoalId))) &&
+          benchmarkMatchesSubject_(row, subjectId)
+        )
+        .map(row => {
+          const benchmarkEntries = entries.filter(entry =>
+            String(entry.BenchmarkId) === String(row.Id)
+          );
+          const last = benchmarkEntries.sort((a, b) =>
+            String(b.Timestamp).localeCompare(String(a.Timestamp))
+          )[0];
+          return publicBenchmark_(
+            row,
+            students[row.StudentId],
+            last,
+            benchmarkEntries.length,
+            benchmarkEntries
+          );
+        })
+        .sort((a, b) =>
+          Number(b.critical) - Number(a.critical) ||
+          a.studentName.localeCompare(b.studentName)
+        );
+    };
+    return cachedResponse_(
+      'benchmark-lookup',
+      [
+        normalizeEmail_(staff.Email),
+        classRow.Id,
+        selected.slice().sort().join('.')
+      ],
+      producer,
+      null,
+      Boolean(force)
+    );
+  });
 }
 
 function saveBenchmarkEntry(payload) {
@@ -249,6 +281,7 @@ function saveBenchmarkEntriesBatch(payload) {
     const validated = validateObservationBatch_(payload.entries, staff, batchId, fingerprint);
     if (!validated.ok) return validated;
     appendRows_('BenchmarkEntries', validated.records);
+    invalidateAppDataCache_();
     return completedObservationBatchResult_(batchId, validated.records);
   } finally {
     lock.releaseLock();
@@ -536,6 +569,7 @@ function correctBenchmarkEntry(payload) {
       CorrectedBy: staff.Email,
       CorrectedAt: now
     });
+    invalidateAppDataCache_();
     return {
       ok: true,
       originalEntryId: current.Id,
@@ -652,10 +686,12 @@ function saveBenchmark(payload) {
     if (!existing) throw new Error('Benchmark was not found.');
     if (payload.goalId === undefined) delete record.GoalId;
     updateRow_('Benchmarks', existing._row, record);
+    invalidateAppDataCache_();
     return { ok: true, id: existing.Id, message: 'Benchmark updated.' };
   }
   record.Id = uuid_();
   appendRow_('Benchmarks', record);
+  invalidateAppDataCache_();
   return { ok: true, id: record.Id, message: 'Benchmark created.' };
 }
 
@@ -669,46 +705,58 @@ function deleteBenchmark(benchmarkId) {
     throw new Error('You can only manage benchmarks for your assigned students.');
   }
   updateRow_('Benchmarks', benchmark._row, { Active: false });
+  invalidateAppDataCache_();
   return { ok: true };
 }
 
-function getBenchmarkProgress(benchmarkId) {
-  const staff = requireCaseManager_();
-  const benchmark = findOne_('Benchmarks', row => String(row.Id) === String(benchmarkId));
-  if (!benchmark) throw new Error('Benchmark was not found.');
-  const student = findOne_('Students', row => String(row.Id) === String(benchmark.StudentId));
-  if (!toBoolean_(staff.IsAdmin) && student &&
-      normalizeEmail_(student.CaseManagerEmail) !== normalizeEmail_(staff.Email)) {
-    throw new Error('You can only view progress for your assigned students.');
-  }
-  const entries = rows_('BenchmarkEntries')
-    .filter(row => String(row.BenchmarkId) === String(benchmarkId))
-    .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
-    .sort(compareObservationEntries_);
-  const frequencyChartValues = buildFrequencyChartValueIndex_(benchmark, entries);
-  return {
-    benchmark: publicBenchmark_(
-      benchmark,
-      student,
-      entries[entries.length - 1],
-      entries.length,
-      entries
-    ),
-    points: entries.map(row => ({
-      timestamp: row.Timestamp,
-      observationDate: formatDate_(row.ObservationDate || row.Timestamp),
-      percent: toNumber_(row.Percent),
-      correct: toNumber_(row.Correct),
-      attempts: toNumber_(row.Attempts),
-      actualPromptLevel: row.ActualPromptLevel || '',
-      actualPromptCount: optionalInteger_(row.ActualPromptCount),
-      frequencyQuotaProgress: frequencyChartValues[row.Id] === undefined
-        ? null
-        : frequencyChartValues[row.Id],
-      notes: row.Notes,
-      staffEmail: row.StaffEmail
-    }))
-  };
+function getBenchmarkProgress(benchmarkId, force) {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    const benchmark = findOne_('Benchmarks', row => String(row.Id) === String(benchmarkId));
+    if (!benchmark) throw new Error('Benchmark was not found.');
+    const student = findOne_('Students', row => String(row.Id) === String(benchmark.StudentId));
+    if (!toBoolean_(staff.IsAdmin) && student &&
+        normalizeEmail_(student.CaseManagerEmail) !== normalizeEmail_(staff.Email)) {
+      throw new Error('You can only view progress for your assigned students.');
+    }
+    const producer = () => {
+      const entries = rows_('BenchmarkEntries')
+        .filter(row => String(row.BenchmarkId) === String(benchmarkId))
+        .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+        .sort(compareObservationEntries_);
+      const frequencyChartValues = buildFrequencyChartValueIndex_(benchmark, entries);
+      return {
+        benchmark: publicBenchmark_(
+          benchmark,
+          student,
+          entries[entries.length - 1],
+          entries.length,
+          entries
+        ),
+        points: entries.map(row => ({
+          timestamp: row.Timestamp,
+          observationDate: formatDate_(row.ObservationDate || row.Timestamp),
+          percent: toNumber_(row.Percent),
+          correct: toNumber_(row.Correct),
+          attempts: toNumber_(row.Attempts),
+          actualPromptLevel: row.ActualPromptLevel || '',
+          actualPromptCount: optionalInteger_(row.ActualPromptCount),
+          frequencyQuotaProgress: frequencyChartValues[row.Id] === undefined
+            ? null
+            : frequencyChartValues[row.Id],
+          notes: row.Notes,
+          staffEmail: row.StaffEmail
+        }))
+      };
+    };
+    return cachedResponse_(
+      'benchmark-progress',
+      [normalizeEmail_(staff.Email), benchmark.Id],
+      producer,
+      null,
+      Boolean(force)
+    );
+  });
 }
 
 function getCriticalBenchmarks_(staff) {

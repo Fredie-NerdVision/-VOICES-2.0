@@ -634,6 +634,7 @@
       goalVisibility: {},
       currentGoalWorkspace: null,
       goalWorkspaceCache: {},
+      goalCatalogCache: {},
       goalCatalogLoaded: false,
       goalCatalogLoading: false,
       benchmarkEntryCache: {},
@@ -648,6 +649,8 @@
       observationBatchId: '',
       adminCatalogPreview: null,
       caseManagerDataLoaded: {},
+      caseManagerWorkspacePromise: null,
+      scheduleDataCache: {},
       pendingOperations: 0
     };
 
@@ -674,8 +677,10 @@
         document.getElementById('brandLogo').src = logo;
         document.getElementById('welcomeName').textContent = 'Welcome ' + state.data.user.firstName;
         document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
-        if (state.data.view === 'CASE_MANAGER') renderCaseManager();
-        else renderAide();
+        if (state.data.view === 'CASE_MANAGER') {
+          state.caseManagerWorkspacePromise = loadCaseManagerWorkspace();
+          renderCaseManager();
+        } else renderAide();
       } catch (error) {
         showFatal(error);
       } finally {
@@ -797,7 +802,7 @@
         }
         return;
       }
-      if (['entry', 'people', 'requests', 'admin'].includes(tab)) {
+      if (['entry', 'people', 'requests', 'admin', 'ieps', 'benchmarks'].includes(tab)) {
         content.innerHTML = '<article class="card empty">Loading this workspace…</article>';
         try {
           await ensureCaseManagerTabData(tab);
@@ -818,6 +823,10 @@
 
     async function ensureCaseManagerTabData(tab, force) {
       if (!force && state.caseManagerDataLoaded[tab]) return;
+      if (!force) {
+        await loadCaseManagerWorkspace();
+        return;
+      }
       const cm = state.data.caseManager;
       if (tab === 'overview') {
         const data = await serverQuiet('getCaseManagerOverviewData');
@@ -844,6 +853,56 @@
         cm.messages = await serverQuiet('getMessageManagementData');
       }
       state.caseManagerDataLoaded[tab] = true;
+    }
+
+    async function loadCaseManagerWorkspace(force) {
+      if (!force && state.caseManagerWorkspacePromise) {
+        return state.caseManagerWorkspacePromise;
+      }
+      const request = serverQuiet('getCaseManagerWorkspaceData', Boolean(force))
+        .then(data => {
+          const cm = state.data.caseManager;
+          const overview = data && data.overview || {};
+          const entry = data && data.entry || {};
+          const people = data && data.people || {};
+          const goals = data && data.goals || {};
+          cm.toDos = safeArray(overview.toDos);
+          state.data.subjects = safeArray(entry.subjects).length
+            ? safeArray(entry.subjects)
+            : safeArray(goals.subjects);
+          state.data.classes = safeArray(entry.classes);
+          state.data.students = safeArray(entry.students);
+          state.data.benchmarkLookup = entry.benchmarkLookup || {
+            currentClassId: '',
+            currentStudentId: '',
+            teachers: [],
+            classes: []
+          };
+          state.data.benchmarkLookup.teachers = safeArray(state.data.benchmarkLookup.teachers);
+          state.data.benchmarkLookup.classes = safeArray(state.data.benchmarkLookup.classes);
+          cm.students = safeArray(people.students);
+          cm.staff = safeArray(people.staff);
+          cm.caseManagers = safeArray(people.caseManagers);
+          cm.aides = safeArray(people.aides);
+          cm.requests = data && data.requests || {};
+          cm.messages = data && data.messages || {};
+          cm.ieps = safeArray(data && data.ieps);
+          cm.goals = safeArray(goals.goals);
+          cm.benchmarks = safeArray(goals.benchmarks);
+          cm.scheduleTypes = safeArray(data && data.scheduleTypes);
+          state.goalCatalogCache.setup = goals;
+          state.goalCatalogLoaded = true;
+          ['overview', 'entry', 'people', 'requests', 'admin', 'ieps', 'benchmarks', 'schedule']
+            .forEach(key => { state.caseManagerDataLoaded[key] = true; });
+          return data;
+        })
+        .finally(() => {
+          if (state.caseManagerWorkspacePromise === request) {
+            state.caseManagerWorkspacePromise = null;
+          }
+        });
+      state.caseManagerWorkspacePromise = request;
+      return request;
     }
 
     function renderDataEntry(root) {
@@ -954,7 +1013,12 @@
       if (!force && state.data.caseManager.scheduleTypes.length) return;
       select.disabled = true;
       try {
-        const types = safeArray(await serverQuiet('getScheduleTypeSummaries'));
+        if (!force && state.caseManagerWorkspacePromise) {
+          await state.caseManagerWorkspacePromise;
+        }
+        const types = !force && state.data.caseManager.scheduleTypes.length
+          ? state.data.caseManager.scheduleTypes
+          : safeArray(await serverQuiet('getScheduleTypeSummaries'));
         state.data.caseManager.scheduleTypes = types;
         const selected = select.value;
         select.innerHTML = `<option value="">Current day</option>${options(types, 'id', 'name', selected)}`;
@@ -974,7 +1038,8 @@
       loadScheduleBuilder();
     }
 
-    async function loadScheduleBuilder() {
+    async function loadScheduleBuilder(force) {
+      force = force === true;
       const date = document.getElementById('scheduleDate').value;
       if (!date) return toast('Choose a date.', true);
       const workspace = document.getElementById('scheduleWorkspace');
@@ -983,7 +1048,12 @@
       if (workspace) workspace.innerHTML = '<div class="card empty">Loading schedule data…</div>';
       if (button) button.disabled = true;
       try {
-        state.scheduleData = await serverQuiet('getScheduleBuilderData', date, templateId);
+        const cacheKey = date + '|' + templateId;
+        const cached = !force && state.scheduleDataCache[cacheKey];
+        const response = cached ||
+          await serverQuiet('getScheduleBuilderData', date, templateId, force);
+        if (!cached) state.scheduleDataCache[cacheKey] = response;
+        state.scheduleData = JSON.parse(JSON.stringify(response));
         if (!state.scheduleData || !state.scheduleData.schedule) throw new Error('The schedule response was incomplete.');
         state.scheduleData.aides = safeArray(state.scheduleData.aides);
         state.scheduleData.classes = safeArray(state.scheduleData.classes);
@@ -1686,7 +1756,8 @@
         }
         const warnings = safeArray(result.warnings);
         toast(warnings.length ? 'Saved with warnings: ' + warnings.join(' ') : 'Schedule saved.');
-        await loadScheduleBuilder();
+        state.scheduleDataCache = {};
+        await loadScheduleBuilder(true);
       } catch (error) { toast(error.message, true); }
     }
 
@@ -2073,11 +2144,19 @@
       }
     }
 
-    async function refreshGoalManagerData(studentId) {
-      const data = await serverQuiet(
+    async function refreshGoalManagerData(studentId, force) {
+      const selectedStudentId = studentId === undefined
+        ? state.benchmarkStudentId
+        : studentId;
+      const cacheKey = selectedStudentId || 'setup';
+      const data = !force && state.goalCatalogCache[cacheKey]
+        ? state.goalCatalogCache[cacheKey]
+        : await serverQuiet(
         'getGoalManagerData',
-        studentId === undefined ? state.benchmarkStudentId : studentId
-      );
+            selectedStudentId,
+            Boolean(force)
+          );
+      state.goalCatalogCache[cacheKey] = data;
       if (Array.isArray(data.students)) {
         state.data.caseManager.students = data.students;
       }
@@ -2085,14 +2164,13 @@
       state.data.caseManager.benchmarks = safeArray(data.benchmarks);
       state.data.subjects = safeArray(data.subjects);
       state.goalCatalogLoaded = true;
-      state.goalWorkspaceCache = {};
       renderBenchmarkManager(document.getElementById('cmContent'));
     }
 
     async function renderIeps(root) {
       root.innerHTML = '<article class="card empty">Loading IEPs…</article>';
       try {
-        const ieps = safeArray(await serverQuiet('getIepsForCurrentCaseManager'));
+        const ieps = safeArray(state.data.caseManager.ieps);
         root.innerHTML = `
           <div class="grid two">
             <article class="card">
@@ -2122,6 +2200,9 @@
             if (!result.fileUrl) throw new Error('The IEP was created without a document link.');
             toast('IEP generated.');
             window.open(result.fileUrl, '_blank', 'noopener');
+            state.data.caseManager.ieps = safeArray(
+              await serverQuiet('getIepsForCurrentCaseManager')
+            );
             renderIeps(root);
           } catch (error) { toast(error.message, true); }
         });
@@ -3231,7 +3312,7 @@
         workspace.innerHTML = '<div class="empty">Loading student goals…</div>';
         const data = !force && state.goalWorkspaceCache[studentId]
           ? state.goalWorkspaceCache[studentId]
-          : await serverQuiet('getStudentGoalWorkspace', studentId);
+          : await serverQuiet('getStudentGoalWorkspace', studentId, force ? { force: true } : {});
         state.goalWorkspaceCache[studentId] = data;
         renderGoalWorkspaceData(data);
       } catch (error) {
@@ -3659,16 +3740,32 @@
     }
 
     async function refreshBootstrap(tab) {
-      const nextData = normalizeBootstrap(await server('getAppBootstrap'));
+      if (tab && state.data && state.data.view === 'CASE_MANAGER') {
+        state.caseManagerDataLoaded = {};
+        state.caseManagerWorkspacePromise = null;
+        state.goalWorkspaceCache = {};
+        state.goalCatalogCache = {};
+        state.benchmarkEntryCache = {};
+        state.scheduleDataCache = {};
+        await loadCaseManagerWorkspace(true);
+        state.selectedTab = tab;
+        renderCaseManager();
+        return;
+      }
+      const nextData = normalizeBootstrap(await server('getAppBootstrap', true));
       state.data = nextData;
       state.caseManagerDataLoaded = {};
+      state.caseManagerWorkspacePromise = null;
       state.goalWorkspaceCache = {};
+      state.goalCatalogCache = {};
       state.benchmarkEntryCache = {};
+      state.scheduleDataCache = {};
       if (state.data.logo) document.getElementById('brandLogo').src = state.data.logo;
       document.getElementById('welcomeName').textContent = 'Welcome ' + (state.data.user.firstName || '');
       document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
       if (state.data.view === 'CASE_MANAGER') {
         if (tab) state.selectedTab = tab;
+        await loadCaseManagerWorkspace(true);
         document.getElementById('aideView').classList.add('hidden');
         renderCaseManager();
       } else {
@@ -3686,11 +3783,14 @@
           try {
             const section = button.dataset.refresh || state.selectedTab;
             if (section === 'benchmarks') {
-              await refreshGoalManagerData();
+              await refreshGoalManagerData(undefined, true);
             } else if (section === 'schedule') {
               await loadScheduleTypeSummaries(true);
-              if (state.scheduleData) await loadScheduleBuilder();
+              if (state.scheduleData) await loadScheduleBuilder(true);
             } else if (section === 'ieps') {
+              state.data.caseManager.ieps = safeArray(
+                await serverQuiet('getIepsForCurrentCaseManager')
+              );
               await renderIeps(document.getElementById('cmContent'));
             } else if (section === 'admin') {
               await refreshMessageManagementData();
@@ -3719,6 +3819,7 @@
                 reject(new Error('No response was returned. Refresh this view and try again.'));
                 return;
               }
+              invalidateClientReadModels(functionName);
               resolve(result);
             })
             .withFailureHandler(error => {
@@ -3731,6 +3832,44 @@
           reject(new Error(safeErrorMessage(error)));
         }
       });
+    }
+
+    function invalidateClientReadModels(functionName) {
+      const mutations = new Set([
+        'callOff',
+        'clockIn',
+        'clockOut',
+        'createGoal',
+        'deactivateGoal',
+        'deleteBenchmark',
+        'deleteStaff',
+        'deleteStudent',
+        'generateIep',
+        'reviewStaffRequest',
+        'saveAdminCatalogBatch',
+        'saveBenchmark',
+        'saveBenchmarkEntriesBatch',
+        'saveBrandingLogo',
+        'saveBulkGoals',
+        'saveDailyMessage',
+        'saveSchedule',
+        'saveScheduleType',
+        'saveSchoolQuarterBoundaries',
+        'setActiveGoalBenchmark',
+        'setDailyMessageActive',
+        'setGoalCritical',
+        'submitAvailability',
+        'submitTimeOffRequest',
+        'upsertStaff',
+        'upsertStudent'
+      ]);
+      if (!mutations.has(functionName)) return;
+      state.caseManagerDataLoaded = {};
+      state.caseManagerWorkspacePromise = null;
+      state.goalWorkspaceCache = {};
+      state.goalCatalogCache = {};
+      state.benchmarkEntryCache = {};
+      state.scheduleDataCache = {};
     }
 
     function serverQuiet(functionName, ...args) {
@@ -3859,7 +3998,7 @@
         };
       }
       if (value.caseManager) {
-        ['students', 'goals', 'benchmarks', 'iepReminders', 'toDos', 'staff', 'caseManagers', 'aides', 'scheduleTypes']
+        ['students', 'goals', 'benchmarks', 'ieps', 'iepReminders', 'toDos', 'staff', 'caseManagers', 'aides', 'scheduleTypes']
           .forEach(key => { value.caseManager[key] = safeArray(value.caseManager[key]); });
         value.caseManager.messages = value.caseManager.messages || {};
         value.caseManager.messages.messages = safeArray(value.caseManager.messages.messages);

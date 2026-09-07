@@ -39,13 +39,15 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-function getAppBootstrap() {
+function getAppBootstrap(force) {
   return withRowsCache_(() => {
     const email = getCurrentUserEmail_();
     const staff = requireAuthorizedStaff_(email);
     const isCaseManager = staff.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(staff.IsAdmin);
     const now = new Date();
     const today = formatDate_(now);
+    const timeBucket = Math.floor(now.getTime() / 300000);
+    const producer = () => {
     const response = {
       appName: VOICES.APP_NAME,
       today: today,
@@ -103,49 +105,93 @@ function getAppBootstrap() {
       };
     }
     return response;
+    };
+    return cachedResponse_(
+      'app-bootstrap',
+      [email, today, timeBucket],
+      producer,
+      null,
+      Boolean(force)
+    );
   });
 }
 
 function getCaseManagerOverviewData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
-    return {
-      toDos: getCaseManagerTodos_(staff)
-    };
+    return getCaseManagerOverviewData_(staff);
   });
+}
+
+function getCaseManagerOverviewData_(staff) {
+  return {
+    toDos: getCaseManagerTodos_(staff)
+  };
 }
 
 function getCaseManagerEntryData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
-    return {
-      subjects: activeRows_('Subjects'),
-      classes: getClassesForStaff_(staff),
-      students: getStudentsForStaff_(staff),
-      benchmarkLookup: getBenchmarkLookupContext_(staff, null)
-    };
+    return getCaseManagerEntryData_(staff);
   });
+}
+
+function getCaseManagerEntryData_(staff) {
+  return {
+    subjects: activeRows_('Subjects'),
+    classes: getClassesForStaff_(staff),
+    students: getStudentsForStaff_(staff),
+    benchmarkLookup: getBenchmarkLookupContext_(staff, null)
+  };
 }
 
 function getCaseManagerPeopleData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
-    const staffRows = activeRows_('Staff');
-    const isAdmin = toBoolean_(staff.IsAdmin);
-    return {
-      students: managedStudents_(staff).map(publicStudent_),
-      staff: staffRows.map(publicStaff_)
-        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
-      caseManagers: staffRows
-        .filter(row => row.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(row.IsAdmin))
-        .filter(row => isAdmin ||
-          normalizeEmail_(row.Email) === normalizeEmail_(staff.Email))
-        .map(publicStaff_)
-        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
-      aides: staffRows
-        .filter(row => row.Role === VOICES.ROLES.AIDE)
-        .map(publicStaff_)
-    };
+    return getCaseManagerPeopleData_(staff);
+  });
+}
+
+function getCaseManagerPeopleData_(staff) {
+  const staffRows = activeRows_('Staff');
+  const isAdmin = toBoolean_(staff.IsAdmin);
+  return {
+    students: managedStudents_(staff).map(publicStudent_),
+    staff: staffRows.map(publicStaff_)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    caseManagers: staffRows
+      .filter(row => row.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(row.IsAdmin))
+      .filter(row => isAdmin ||
+        normalizeEmail_(row.Email) === normalizeEmail_(staff.Email))
+      .map(publicStaff_)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    aides: staffRows
+      .filter(row => row.Role === VOICES.ROLES.AIDE)
+      .map(publicStaff_)
+  };
+}
+
+function getCaseManagerWorkspaceData(force) {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    const producer = () => ({
+      generatedAt: new Date().toISOString(),
+      overview: getCaseManagerOverviewData_(staff),
+      entry: getCaseManagerEntryData_(staff),
+      people: getCaseManagerPeopleData_(staff),
+      requests: getStaffRequestData_(),
+      messages: getMessageManagementData_(staff),
+      ieps: getIepsForCurrentCaseManager_(staff),
+      goals: getGoalManagerData_(staff, ''),
+      scheduleTypes: getScheduleTypeSummaries_()
+    });
+    return cachedResponse_(
+      'case-manager-workspace',
+      [normalizeEmail_(staff.Email)],
+      producer,
+      null,
+      Boolean(force)
+    );
   });
 }
 

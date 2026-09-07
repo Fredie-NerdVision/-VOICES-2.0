@@ -1,5 +1,9 @@
 function getIepsForCurrentCaseManager() {
   const staff = requireCaseManager_();
+  return getIepsForCurrentCaseManager_(staff);
+}
+
+function getIepsForCurrentCaseManager_(staff) {
   const email = normalizeEmail_(staff.Email);
   const students = indexBy_(activeRows_('Students'), 'Id');
   return rows_('IEPs')
@@ -157,6 +161,7 @@ function generateIep(payload) {
     FileUrl: document.getUrl()
   };
   appendRow_('IEPs', record);
+  invalidateAppDataCache_();
   return { ok: true, id: record.Id, fileUrl: record.FileUrl };
 }
 

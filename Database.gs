@@ -64,6 +64,9 @@ let VOICES_DATABASE_CACHE = null;
 let VOICES_DATABASE_OVERRIDE_ID = null;
 let VOICES_INDEX_CACHE = null;
 
+const VOICES_RESPONSE_CACHE_TTL_SECONDS = 1800;
+const VOICES_RESPONSE_CACHE_CHUNK_SIZE = 45000;
+
 function withRowsCache_(callback) {
   const previousCache = VOICES_ROWS_CACHE;
   const previousDatabase = VOICES_DATABASE_CACHE;
@@ -78,6 +81,80 @@ function withRowsCache_(callback) {
     VOICES_DATABASE_CACHE = previousDatabase;
     VOICES_INDEX_CACHE = previousIndexes;
   }
+}
+
+function getAppDataVersion_() {
+  return PropertiesService.getScriptProperties()
+    .getProperty('VOICES_APP_DATA_VERSION') || '1';
+}
+
+function invalidateAppDataCache_() {
+  const next = String(new Date().getTime()) + '-' + uuid_();
+  PropertiesService.getScriptProperties()
+    .setProperty('VOICES_APP_DATA_VERSION', next);
+  return next;
+}
+
+function cachedResponse_(namespace, keyParts, producer, ttlSeconds, forceRefresh) {
+  const cache = CacheService.getScriptCache();
+  const suffix = (keyParts || [])
+    .map(value => String(value == null ? '' : value).replace(/[^a-zA-Z0-9_.@-]/g, '_'))
+    .join('-');
+  const dataVersion = getAppDataVersion_();
+  let cacheKey = [
+    'voices',
+    VOICES.RELEASE,
+    namespace,
+    dataVersion,
+    suffix
+  ].filter(Boolean).join(':');
+  if (cacheKey.length > 200) {
+    const digest = Utilities.computeDigest(
+      Utilities.DigestAlgorithm.SHA_256,
+      cacheKey
+    ).map(value =>
+      ((value + 256) % 256).toString(16).padStart(2, '0')
+    ).join('');
+    cacheKey = [
+      'voices',
+      VOICES.RELEASE,
+      namespace,
+      dataVersion,
+      digest
+    ].join(':');
+  }
+  if (!forceRefresh) {
+    try {
+      const metadataText = cache.get(cacheKey);
+      if (metadataText) {
+        const metadata = JSON.parse(metadataText);
+        const chunks = [];
+        for (let index = 0; index < metadata.chunks; index += 1) {
+          const chunk = cache.get(cacheKey + ':' + index);
+          if (chunk == null) throw new Error('Incomplete response cache.');
+          chunks.push(chunk);
+        }
+        return JSON.parse(chunks.join(''));
+      }
+    } catch (error) {
+      console.warn('Response cache read failed: ' + error.message);
+    }
+  }
+
+  const result = producer();
+  try {
+    const serialized = JSON.stringify(result);
+    const chunks = [];
+    for (let offset = 0; offset < serialized.length; offset += VOICES_RESPONSE_CACHE_CHUNK_SIZE) {
+      chunks.push(serialized.slice(offset, offset + VOICES_RESPONSE_CACHE_CHUNK_SIZE));
+    }
+    const ttl = ttlSeconds || VOICES_RESPONSE_CACHE_TTL_SECONDS;
+    chunks.forEach((chunk, index) => cache.put(cacheKey + ':' + index, chunk, ttl));
+    cache.put(cacheKey, JSON.stringify({ chunks: chunks.length }), ttl);
+  } catch (error) {
+    console.warn('Response cache write failed: ' + error.message);
+  }
+  return result;
 }
 
 function setupVoicesDatabase(options) {
@@ -758,5 +835,6 @@ function saveSetting(key, value) {
   } else {
     appendRow_('Settings', { Key: sanitizeText_(key, 100), Value: sanitizeText_(value, 5000) });
   }
+  invalidateAppDataCache_();
   return true;
 }

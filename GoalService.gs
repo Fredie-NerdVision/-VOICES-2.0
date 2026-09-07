@@ -330,6 +330,7 @@ function createGoal(payload) {
     } finally {
       lock.releaseLock();
     }
+    invalidateAppDataCache_();
     return {
       ok: true,
       id: goalId,
@@ -641,10 +642,18 @@ function rollbackGoalCreation_(goalId, benchmarkIds) {
     .forEach(row => deleteRow_('Goals', row._row));
 }
 
-function getGoalManagerData(studentId) {
+function getGoalManagerData(studentId, force) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
-    return getGoalManagerData_(staff, studentId);
+    const selectedStudentId = String(studentId || '');
+    const producer = () => getGoalManagerData_(staff, selectedStudentId);
+    return cachedResponse_(
+      'goal-manager',
+      [normalizeEmail_(staff.Email), selectedStudentId || 'setup'],
+      producer,
+      null,
+      Boolean(force)
+    );
   });
 }
 
@@ -728,6 +737,7 @@ function getStudentGoalWorkspace(studentId, options) {
     options = options || {};
     const staff = requireCaseManager_();
     const student = requireManagedStudent_(staff, studentId);
+    const producer = () => {
     const asOfDate = formatDate_(options.endDate || new Date());
     const availableGoals = rows_('Goals')
       .filter(row => ['ACTIVE', 'COMPLETED', 'INACTIVE'].includes(goalStatus_(row)))
@@ -889,6 +899,21 @@ function getStudentGoalWorkspace(studentId, options) {
         }),
       asOfDate: asOfDate
     };
+    };
+    return cachedResponse_(
+      'student-goal-workspace',
+      [
+        normalizeEmail_(staff.Email),
+        student.Id,
+        options.goalId || 'current',
+        options.startDate || '',
+        options.endDate || '',
+        options.entryLimit || 500
+      ],
+      producer,
+      null,
+      Boolean(options.force)
+    );
   });
 }
 
@@ -1268,6 +1293,7 @@ function reconcileDateDrivenBenchmarks() {
     }
     try {
       reconcileDateDrivenBenchmarks_(new Date(), getCurrentUserEmail_());
+      invalidateAppDataCache_();
       return { ok: true, date: formatDate_(new Date()) };
     } finally {
       lock.releaseLock();
@@ -1393,6 +1419,7 @@ function checkMissingBenchmarkObservations() {
           emailAlerts[recipient].map(message => '- ' + message).join('\n')
       ));
       invalidateRowsCache_('Notifications');
+      invalidateAppDataCache_();
       return {
         ok: true,
         checkedAt: today,
@@ -1468,6 +1495,7 @@ function setActiveGoalBenchmark(payload) {
           EndReason: 'Quarter boundary expiration'
         });
         updateRow_('Goals', goal._row, { UpdatedAt: new Date() });
+        invalidateAppDataCache_();
         return {
           ok: true,
           goalId: goal.Id,
@@ -1520,6 +1548,7 @@ function setActiveGoalBenchmark(payload) {
         Status: 'ACTIVE',
         Active: true
       });
+      invalidateAppDataCache_();
       return {
         ok: true,
         goalId: goal.Id,
@@ -1883,6 +1912,7 @@ function setGoalCritical(payload) {
       .filter(row => String(row.GoalId) === String(goal.Id))
       .forEach(row => updateRow_('Benchmarks', row._row, { Critical: critical }));
     updateRow_('Goals', goal._row, { UpdatedAt: new Date() });
+    invalidateAppDataCache_();
     return { ok: true, goalId: goal.Id, critical: critical };
   });
 }
@@ -1912,11 +1942,12 @@ function deactivateGoal(goalId) {
         EndedBy: staff.Email,
         EndReason: 'Goal deactivated'
       }));
+    invalidateAppDataCache_();
     return { ok: true, deactivatedAt: deactivationDate };
   });
 }
 
-function getBenchmarkEntryDetails(benchmarkId) {
+function getBenchmarkEntryDetails(benchmarkId, force) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
     const benchmark = findOne_('Benchmarks', row =>
@@ -1924,6 +1955,7 @@ function getBenchmarkEntryDetails(benchmarkId) {
     );
     if (!benchmark) throw new Error('Benchmark was not found.');
     const student = requireManagedStudent_(staff, benchmark.StudentId);
+    const producer = () => {
     const staffIndex = rows_('Staff').reduce((map, row) => {
       map[normalizeEmail_(row.Email)] = publicStaff_(row);
       return map;
@@ -1955,6 +1987,14 @@ function getBenchmarkEntryDetails(benchmarkId) {
           };
         })
     };
+    };
+    return cachedResponse_(
+      'benchmark-entry-details',
+      [normalizeEmail_(staff.Email), benchmark.Id],
+      producer,
+      null,
+      Boolean(force)
+    );
   });
 }
 

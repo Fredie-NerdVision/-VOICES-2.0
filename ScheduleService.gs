@@ -18,17 +18,21 @@ function getScheduleTypes_() {
 function getScheduleTypeSummaries() {
   return withRowsCache_(() => {
     requireCaseManager_();
-    return activeRows_('ScheduleTypes')
-      .map(type => ({
-        id: type.Id,
-        name: type.Name,
-        isDefault: toBoolean_(type.IsDefault)
-      }))
-      .sort((a, b) =>
-        Number(b.isDefault) - Number(a.isDefault) ||
-        a.name.localeCompare(b.name)
-      );
+    return getScheduleTypeSummaries_();
   });
+}
+
+function getScheduleTypeSummaries_() {
+  return activeRows_('ScheduleTypes')
+    .map(type => ({
+      id: type.Id,
+      name: type.Name,
+      isDefault: toBoolean_(type.IsDefault)
+    }))
+    .sort((a, b) =>
+      Number(b.isDefault) - Number(a.isDefault) ||
+      a.name.localeCompare(b.name)
+    );
 }
 
 function publicPeriod_(row) {
@@ -41,43 +45,52 @@ function publicPeriod_(row) {
   };
 }
 
-function getScheduleBuilderData(dateText, templateId) {
+function getScheduleBuilderData(dateText, templateId, force) {
   return withRowsCache_(() => {
-    requireCaseManager_();
+    const staff = requireCaseManager_();
     const date = dateText || formatDate_(new Date());
     const selectedTemplateId = String(templateId || '');
-    const scheduleTypes = getScheduleTypes_().map(type =>
-      !selectedTemplateId || String(type.id) !== selectedTemplateId
-        ? {
-            id: type.id,
-            name: type.name,
-            isDefault: type.isDefault,
-            periods: [],
-            assignments: []
-          }
-        : type
-    );
-    return {
-      date: date,
-      schedule: getDaySchedule_(date),
-      scheduleTypes: scheduleTypes,
-      aides: activeRows_('Staff')
-        .filter(row => row.Role === VOICES.ROLES.AIDE)
-        .map(publicStaff_),
-      classes: getAllClasses_(),
-      oneToOneStudents: activeRows_('Students')
-        .filter(row => toBoolean_(row.IsOneToOne))
-        .map(publicStudent_),
-      training: rows_('AideTraining').map(row => ({
-        aideEmail: normalizeEmail_(row.AideEmail),
-        studentId: row.StudentId
-      })),
-      staffingStatus: getScheduleStaffingStatus_(date),
-      dailyHours: getDailyHoursForDate_(date),
-      unavailable: getUnavailableAidesForDate_(date),
-      unassignedOneToOnes: getUnassignedOneToOnes_(date),
-      week: getCompactWeeklyScheduleData_(date)
+    const producer = () => {
+      const scheduleTypes = getScheduleTypes_().map(type =>
+        !selectedTemplateId || String(type.id) !== selectedTemplateId
+          ? {
+              id: type.id,
+              name: type.name,
+              isDefault: type.isDefault,
+              periods: [],
+              assignments: []
+            }
+          : type
+      );
+      return {
+        date: date,
+        schedule: getDaySchedule_(date),
+        scheduleTypes: scheduleTypes,
+        aides: activeRows_('Staff')
+          .filter(row => row.Role === VOICES.ROLES.AIDE)
+          .map(publicStaff_),
+        classes: getAllClasses_(),
+        oneToOneStudents: activeRows_('Students')
+          .filter(row => toBoolean_(row.IsOneToOne))
+          .map(publicStudent_),
+        training: rows_('AideTraining').map(row => ({
+          aideEmail: normalizeEmail_(row.AideEmail),
+          studentId: row.StudentId
+        })),
+        staffingStatus: getScheduleStaffingStatus_(date),
+        dailyHours: getDailyHoursForDate_(date),
+        unavailable: getUnavailableAidesForDate_(date),
+        unassignedOneToOnes: getUnassignedOneToOnes_(date),
+        week: getCompactWeeklyScheduleData_(date)
+      };
     };
+    return cachedResponse_(
+      'schedule-builder',
+      [normalizeEmail_(staff.Email), date, selectedTemplateId || 'current'],
+      producer,
+      null,
+      Boolean(force)
+    );
   });
 }
 
@@ -174,40 +187,59 @@ function getScheduleStaffingStatus_(dateText) {
     });
 }
 
-function getFullSchedule(dateText) {
+function getFullSchedule(dateText, force) {
   return withRowsCache_(() => {
-    requireAuthorizedStaff_(getCurrentUserEmail_());
+    const email = getCurrentUserEmail_();
+    requireAuthorizedStaff_(email);
     const date = dateText || formatDate_(new Date());
-    const schedule = getDaySchedule_(date);
-    const staff = activeRows_('Staff').reduce((map, row) => {
-      map[normalizeEmail_(row.Email)] = publicStaff_(row);
-      return map;
-    }, {});
-    return {
-      date: date,
-      name: schedule.name,
-      periods: schedule.periods,
-      assignments: schedule.assignments.map(item => Object.assign({}, item, {
-        aideName: staff[normalizeEmail_(item.aideEmail)]
-          ? staff[normalizeEmail_(item.aideEmail)].displayName
-          : item.aideEmail
-      }))
+    const producer = () => {
+      const schedule = getDaySchedule_(date);
+      const staff = activeRows_('Staff').reduce((map, row) => {
+        map[normalizeEmail_(row.Email)] = publicStaff_(row);
+        return map;
+      }, {});
+      return {
+        date: date,
+        name: schedule.name,
+        periods: schedule.periods,
+        assignments: schedule.assignments.map(item => Object.assign({}, item, {
+          aideName: staff[normalizeEmail_(item.aideEmail)]
+            ? staff[normalizeEmail_(item.aideEmail)].displayName
+            : item.aideEmail
+        }))
+      };
     };
+    return cachedResponse_(
+      'full-schedule',
+      [email, date],
+      producer,
+      null,
+      Boolean(force)
+    );
   });
 }
 
-function getWeeklyScheduleData(dateText) {
+function getWeeklyScheduleData(dateText, force) {
   return withRowsCache_(() => {
-    requireCaseManager_();
-    return getWeeklyScheduleData_(dateText || formatDate_(new Date()));
+    const staff = requireCaseManager_();
+    const date = dateText || formatDate_(new Date());
+    return cachedResponse_(
+      'weekly-schedule',
+      [normalizeEmail_(staff.Email), weekStart_(date)],
+      () => getWeeklyScheduleData_(date),
+      null,
+      Boolean(force)
+    );
   });
 }
 
-function getAideWeek(dateText) {
+function getAideWeek(dateText, force) {
   return withRowsCache_(() => {
     const email = getCurrentUserEmail_();
     const staff = requireAuthorizedStaff_(email);
-    const week = getWeeklyScheduleData_(dateText || formatDate_(new Date()));
+    const date = dateText || formatDate_(new Date());
+    const producer = () => {
+    const week = getWeeklyScheduleData_(date);
     const aide = week.aides.find(item => normalizeEmail_(item.email) === email) || publicStaff_(staff);
     const summary = week.summary.aides.find(item => normalizeEmail_(item.email) === email) || {
       email: email,
@@ -248,6 +280,14 @@ function getAideWeek(dateText) {
         };
       })
     };
+    };
+    return cachedResponse_(
+      'aide-week',
+      [email, weekStart_(date)],
+      producer,
+      null,
+      Boolean(force)
+    );
   });
 }
 
@@ -656,6 +696,7 @@ function invalidateScheduleCache_() {
   const properties = PropertiesService.getScriptProperties();
   const next = toNumber_(properties.getProperty('VOICES_SCHEDULE_CACHE_VERSION'), 1) + 1;
   properties.setProperty('VOICES_SCHEDULE_CACHE_VERSION', String(next));
+  invalidateAppDataCache_();
 }
 
 function getAllClasses_() {
