@@ -9,6 +9,9 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 if (!scheduleService.includes('function getScheduleTypeSummaries()') ||
     !html.includes("serverQuiet('getScheduleTypeSummaries')") ||
     !html.includes("serverQuiet('getScheduleBuilderData'") ||
+    !/if \(state\.data\.view === 'CASE_MANAGER'\) \{\s*prewarmDefaultSchedule\(\);\s*state\.caseManagerWorkspacePromise/.test(html) ||
+    !html.includes("scheduleSelectMarkup_('classId'") ||
+    !html.includes("input.addEventListener('focus', () => hydrateScheduleOptions_(input)") ||
     /bindRefreshButtons\(root\);\s*loadScheduleBuilder\(\);/.test(html)) {
   throw new Error('Schedule template loading or non-blocking on-demand schedule loading regressed.');
 }

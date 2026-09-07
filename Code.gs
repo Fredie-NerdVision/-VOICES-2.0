@@ -78,7 +78,7 @@ function getAppBootstrap(force) {
         staff: [],
         caseManagers: [],
         aides: [],
-        scheduleTypes: [],
+        scheduleTypes: getScheduleTypeSummaries_(),
         requests: {
           pending: [],
           timeOffHistory: [],

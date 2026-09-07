@@ -680,6 +680,7 @@
         document.getElementById('welcomeName').textContent = 'Welcome ' + state.data.user.firstName;
         document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
         if (state.data.view === 'CASE_MANAGER') {
+          prewarmDefaultSchedule();
           state.caseManagerWorkspacePromise = loadCaseManagerWorkspace();
           renderCaseManager();
         } else renderAide();
@@ -1328,6 +1329,9 @@
       table.querySelectorAll('.schedule-cell [data-field]').forEach(input => input.addEventListener('change', () => {
         scheduleDraftChanged();
       }));
+      table.querySelectorAll('select[data-schedule-options]').forEach(input => {
+        input.addEventListener('focus', () => hydrateScheduleOptions_(input), { once: true });
+      });
       table.querySelectorAll('[data-shift-field]').forEach(input => input.addEventListener('change', () => {
         const hours = scheduleHoursForAide_(input.dataset.aideEmail, true);
         hours[input.dataset.shiftField] = input.value;
@@ -1403,8 +1407,8 @@
         <div class="schedule-cell" data-cell="${key}" data-period-id="${escapeAttr(period.periodId)}" data-aide-email="${escapeAttr(aide.email)}">
           ${status.blockingReason ? `<div class="schedule-cell-alert blocked">${escapeHtml(status.blockingReason)}</div>` : ''}
           ${!status.blockingReason && status.warningReason ? `<div class="schedule-cell-alert warning">${escapeHtml(status.warningReason)}</div>` : ''}
-          <select data-field="classId" ${blocked}><option value="">No class</option>${options(state.scheduleData.classes, 'id', 'name', assignment.classId)}</select>
-          <select data-field="studentId" ${blocked}><option value="">No 1:1</option>${options(state.scheduleData.oneToOneStudents, 'id', 'name', assignment.studentId)}</select>
+          ${scheduleSelectMarkup_('classId', state.scheduleData.classes, 'No class', assignment.classId, blocked)}
+          ${scheduleSelectMarkup_('studentId', state.scheduleData.oneToOneStudents, 'No 1:1', assignment.studentId, blocked)}
           <input data-field="duty" placeholder="Duty / OFF" value="${escapeAttr(assignment.duty || '')}" ${blocked}>
           <input data-field="note" placeholder="Note" value="${escapeAttr(assignment.note || '')}" ${blocked}>
           <label class="check small"><input type="checkbox" data-lunch-check data-aide-email="${escapeAttr(aide.email)}" ${scheduleLunchIsInPeriod_(aide.email, period) ? 'checked' : ''} ${blocked}> Lunch</label>
@@ -1412,6 +1416,35 @@
           ${status.coveredTime ? `<div class="muted small">Covered ${escapeHtml(status.coveredTime)}</div>` : ''}
         </div>
       </td>`;
+    }
+
+    function scheduleSelectMarkup_(field, items, emptyLabel, selectedId, blocked) {
+      const selected = safeArray(items).find(item =>
+        String(item.id) === String(selectedId || '')
+      );
+      return `<select data-field="${escapeAttr(field)}" data-schedule-options="${escapeAttr(field)}" ${blocked}>
+        <option value="">${escapeHtml(emptyLabel)}</option>
+        ${selected ? `<option value="${escapeAttr(selected.id)}" selected>${escapeHtml(selected.name)}</option>` : ''}
+      </select>`;
+    }
+
+    function hydrateScheduleOptions_(select) {
+      if (!select || select.dataset.optionsLoaded === 'true') return;
+      const selected = select.value;
+      const isClass = select.dataset.scheduleOptions === 'classId';
+      const items = isClass
+        ? state.scheduleData.classes
+        : state.scheduleData.oneToOneStudents;
+      select.innerHTML = `<option value="">${isClass ? 'No class' : 'No 1:1'}</option>` +
+        options(items, 'id', 'name', selected);
+      select.value = selected;
+      select.dataset.optionsLoaded = 'true';
+    }
+
+    function setScheduleSelectValue_(select, value) {
+      if (!select) return;
+      hydrateScheduleOptions_(select);
+      select.value = value || '';
     }
 
     function renderScheduleAideHeader(aide) {
@@ -1757,12 +1790,16 @@
       if (source) {
         source.querySelectorAll('[data-field]').forEach(input => {
           const targetInput = target.querySelector(`[data-field="${input.dataset.field}"]`);
-          if (targetInput) targetInput.value = input.value;
+          if (targetInput && targetInput.tagName === 'SELECT') {
+            setScheduleSelectValue_(targetInput, input.value);
+          } else if (targetInput) {
+            targetInput.value = input.value;
+          }
           input.value = '';
         });
       } else {
         const student = target.querySelector('[data-field="studentId"]');
-        if (student) student.value = button.dataset.studentId;
+        setScheduleSelectValue_(student, button.dataset.studentId);
       }
       state.scheduleData.schedule.assignments = collectScheduleAssignments();
       scheduleDraftChanged();

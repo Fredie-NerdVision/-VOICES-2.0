@@ -662,7 +662,10 @@ function rows_(name) {
   }
   const sheet = sheet_(name);
   const values = sheet.getDataRange().getValues();
-  if (values.length < 2) return [];
+  if (values.length < 2) {
+    if (VOICES_ROWS_CACHE) VOICES_ROWS_CACHE[name] = [];
+    return [];
+  }
   const headers = values[0];
   const records = values.slice(1)
     .filter(row => row.some(value => value !== ''))
@@ -693,7 +696,11 @@ function rowsByColumnValues_(name, columnName, values) {
   const column = headers ? headers.indexOf(columnName) : -1;
   const target = sheet_(name);
   const lastRow = target.getLastRow();
-  if (column < 0 || lastRow < 2) return [];
+  if (column < 0) return [];
+  if (lastRow < 2) {
+    if (VOICES_ROWS_CACHE) VOICES_ROWS_CACHE[name] = [];
+    return [];
+  }
   const matchingRows = target.getRange(2, column + 1, lastRow - 1, 1)
     .getValues()
     .reduce((rows, value, index) => {
