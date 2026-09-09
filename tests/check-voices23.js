@@ -12,6 +12,9 @@ const html = read('Index.html');
 const iepService = read('IEPService.gs');
 const adminService = read('AdminService.gs');
 const code = read('Code.gs');
+const entryBadgeFunction = html.match(
+  /function entryComparisonBadgeClass\(count, average, active\) \{[\s\S]*?\n    \}/
+);
 
 [
   'GoalPhaseHistory',
@@ -156,7 +159,13 @@ if (/function getAppBootstrap\(\)[\s\S]{0,500}tryReconcileDateDrivenBenchmarks_/
   throw new Error('Read-only app loads still perform global benchmark writes or eagerly load the goal catalog.');
 }
 if (!html.includes('activeEntryAverage') ||
-    !html.includes('entryBadgeClass') ||
+    !html.includes('entryComparisonBadgeClass') ||
+    !html.includes('item.activeGoalEntryAverage') ||
+    !html.includes('item.comparedActiveGoalCount') ||
+    !benchmarkService.includes('buildActiveGoalEntryComparisonIndex_') ||
+    !benchmarkService.includes('activeGoalEntryAverage') ||
+    !/buildActiveGoalEntryComparisonIndex_\([\s\S]*?return activeBenchmarks\s*\.filter\(row => benchmarkMatchesSubject_/.test(benchmarkService) ||
+    !entryBadgeFunction ||
     !benchmarkService.includes('Benchmark observation overdue') ||
     !benchmarkService.includes('function applicationBenchmarkText_') ||
     !benchmarkService.includes("replace(") ||
@@ -214,6 +223,8 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(goalService, context);
+vm.runInContext(benchmarkService, context);
+vm.runInContext(entryBadgeFunction[0], context);
 
 const result = vm.runInContext(`
 (() => {
@@ -394,7 +405,38 @@ const result = vm.runInContext(`
   }, '2026-09-01') !== 'CURRENT') {
     throw new Error('Goal workspace current, future, and history grouping failed.');
   }
-  return { phases: parsed.length, latestThree: metrics.currentPhaseLastThreeAccuracy };
+  const comparisonIndex = buildActiveGoalEntryComparisonIndex_([
+    { Id: 'B10', StudentId: 'S1', GoalId: 'G10' },
+    { Id: 'B10-duplicate', StudentId: 'S1', GoalId: 'G10' },
+    { Id: 'B20', StudentId: 'S1', GoalId: 'G20' },
+    { Id: 'B30', StudentId: 'S1', GoalId: 'G30' },
+    { Id: 'B40', StudentId: 'S2', GoalId: 'G40' }
+  ], {
+    B10: [{}, {}, {}],
+    'B10-duplicate': [{}],
+    B20: [{}, {}],
+    B30: [],
+    B40: [{}, {}, {}, {}, {}, {}]
+  });
+  if (comparisonIndex.B10.activeGoalEntryCount !== 4 ||
+      comparisonIndex.B10.activeGoalEntryAverage !== 2 ||
+      comparisonIndex.B10.comparedActiveGoalCount !== 3 ||
+      comparisonIndex.B20.activeGoalEntryCount !== 2 ||
+      comparisonIndex.B40.activeGoalEntryAverage !== 6 ||
+      comparisonIndex.B40.comparedActiveGoalCount !== 1) {
+    throw new Error('Benchmark lookup comparison did not average one sample per student goal.');
+  }
+  if (entryComparisonBadgeClass(4, 4, true) !== 'status-approved' ||
+      entryComparisonBadgeClass(2, 4, true) !== 'status-pending' ||
+      entryComparisonBadgeClass(1, 4, true) !== 'critical' ||
+      entryComparisonBadgeClass(1, 4, false) !== '') {
+    throw new Error('Entry-count comparison badge thresholds regressed.');
+  }
+  return {
+    phases: parsed.length,
+    latestThree: metrics.currentPhaseLastThreeAccuracy,
+    activeGoalAverage: comparisonIndex.B10.activeGoalEntryAverage
+  };
 })()
 `, context);
 

@@ -2763,7 +2763,19 @@
             <h3 style="margin-top:12px">${escapeHtml(item.studentName)}</h3>
             <div>${escapeHtml(item.display)}</div>
             ${item.description ? `<p class="muted" style="margin-top:8px">${escapeHtml(item.description)}</p>` : ''}
-            <div class="small muted">${item.entryCount} inputs${item.lastEntry ? ' · Last ' + escapeHtml(String(item.lastEntry.percent)) + '%' : ''}</div>
+            <div class="row" style="margin-top:8px">
+              <span class="chip ${entryComparisonBadgeClass(
+                Number(item.activeGoalEntryCount || 0),
+                Number(item.activeGoalEntryAverage || 0),
+                Number(item.comparedActiveGoalCount || 0) > 0
+              )}" title="${escapeAttr(
+                'This active benchmark has ' + Number(item.activeGoalEntryCount || 0) +
+                ' entries; the student average across ' + Number(item.comparedActiveGoalCount || 0) +
+                ' current active goals is ' +
+                (Math.round(Number(item.activeGoalEntryAverage || 0) * 10) / 10) + '.'
+              )}">${escapeHtml(String(item.activeGoalEntryCount || 0))} entries</span>
+              ${item.lastEntry ? '<span class="small muted">Last ' + escapeHtml(String(item.lastEntry.percent)) + '%</span>' : ''}
+            </div>
           </div>
           <form class="benchmark-entry-form">
             <input type="hidden" name="benchmarkId" value="${escapeAttr(item.id)}">
@@ -3409,12 +3421,6 @@
       const activeEntryAverage = activeEntryCounts.length
         ? activeEntryCounts.reduce((total, count) => total + count, 0) / activeEntryCounts.length
         : 0;
-      const entryBadgeClass = (count, active) => {
-        if (!active) return '';
-        if (count >= activeEntryAverage) return 'status-approved';
-        if (count >= activeEntryAverage * 0.5) return 'status-pending';
-        return 'critical';
-      };
       const masteryChip = benchmark => {
         const mastery = benchmark && benchmark.mastery;
         if (!mastery || !mastery.available) {
@@ -3435,7 +3441,7 @@
             <div class="row" style="justify-content:space-between;align-items:flex-start">
               <div><div class="eyebrow">Goal ${goalIndex + 1}</div><h3>${escapeHtml(goal.goal)}</h3></div>
               <div class="row">
-                <span class="chip ${entryBadgeClass(activeCount, Boolean(activeForBadge))}" title="Goal total; color compares its active benchmark with this student’s active-goal average">${escapeHtml(String(goal.totalEntryCount || 0))} entries</span>
+                <span class="chip ${entryComparisonBadgeClass(activeCount, activeEntryAverage, Boolean(activeForBadge))}" title="Goal total; color compares its active benchmark with this student’s active-goal average">${escapeHtml(String(goal.totalEntryCount || 0))} entries</span>
                 ${goal.critical ? '<span class="chip critical">Critical</span>' : ''}
                 <span class="chip">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</span>
               </div>
@@ -3467,7 +3473,7 @@
                   <div class="muted small">${escapeHtml(activeBenchmark.skill)}</div>
                   <div class="muted small">${escapeHtml(activeBenchmark.startDate || '—')}–${escapeHtml(activeBenchmark.dueDate || '—')}</div>
                 </button>
-                <div class="row"><span class="chip ${entryBadgeClass(Number(activeBenchmark.entryCount || 0), true)}">${escapeHtml(String(activeBenchmark.entryCount || 0))} entries</span>${masteryChip(activeBenchmark)}<span class="chip status-approved">${escapeHtml(activeLabel)}</span></div>
+                <div class="row"><span class="chip ${entryComparisonBadgeClass(Number(activeBenchmark.entryCount || 0), activeEntryAverage, true)}">${escapeHtml(String(activeBenchmark.entryCount || 0))} entries</span>${masteryChip(activeBenchmark)}<span class="chip status-approved">${escapeHtml(activeLabel)}</span></div>
               </div>` : '<div class="empty">No benchmark is active because all configured date ranges have ended.</div>'}</div>
               ${inactiveBenchmarks.length ? `<details style="margin-top:10px">
                 <summary class="muted small">Manage other benchmarks (${inactiveBenchmarks.length})</summary>
@@ -4285,6 +4291,12 @@
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
+    }
+    function entryComparisonBadgeClass(count, average, active) {
+      if (!active) return '';
+      if (count >= average) return 'status-approved';
+      if (count >= average * 0.5) return 'status-pending';
+      return 'critical';
     }
     function roleLabel(role) { return titleCase(String(role).replace('_', ' ')); }
     function titleCase(value) { return String(value).toLowerCase().replace(/\b\w/g, char => char.toUpperCase()); }

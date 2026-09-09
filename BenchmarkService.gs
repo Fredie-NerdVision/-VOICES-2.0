@@ -162,31 +162,48 @@ function lookupBenchmarks(filters, force) {
     const producer = () => {
       const students = indexBy_(activeRows_('Students'), 'Id');
       const subjectId = String(classRow.SubjectId);
-      const activeGoalIds = new Set(
-        rows_('Goals').filter(isActiveGoal_).map(row => String(row.Id))
-      );
+      const activeGoals = rows_('Goals')
+        .filter(isActiveGoal_)
+        .filter(row => selected.includes(String(row.StudentId)));
+      const activeGoalIds = new Set(activeGoals.map(row => String(row.Id)));
+      const currentGoalIds = new Set(activeGoals
+        .filter(row => goalWorkspaceSection_(row, new Date()) === 'CURRENT')
+        .map(row => String(row.Id)));
       const entries = rows_('BenchmarkEntries')
         .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE');
-      return getCurrentActiveBenchmarks_()
+      const entriesByBenchmark = entries.reduce((index, entry) => {
+        const benchmarkId = String(entry.BenchmarkId);
+        if (!index[benchmarkId]) index[benchmarkId] = [];
+        index[benchmarkId].push(entry);
+        return index;
+      }, {});
+      const activeBenchmarks = getCurrentActiveBenchmarks_()
         .filter(row =>
           selected.includes(String(row.StudentId)) &&
-          (!row.GoalId || activeGoalIds.has(String(row.GoalId))) &&
-          benchmarkMatchesSubject_(row, subjectId)
-        )
+          (!row.GoalId || activeGoalIds.has(String(row.GoalId)))
+        );
+      const comparisons = buildActiveGoalEntryComparisonIndex_(
+        activeBenchmarks.filter(row => currentGoalIds.has(String(row.GoalId))),
+        entriesByBenchmark
+      );
+      return activeBenchmarks
+        .filter(row => benchmarkMatchesSubject_(row, subjectId))
         .map(row => {
-          const benchmarkEntries = entries.filter(entry =>
-            String(entry.BenchmarkId) === String(row.Id)
-          );
+          const benchmarkEntries = entriesByBenchmark[String(row.Id)] || [];
           const last = benchmarkEntries.sort((a, b) =>
             String(b.Timestamp).localeCompare(String(a.Timestamp))
           )[0];
-          return publicBenchmark_(
+          return Object.assign({
+            activeGoalEntryCount: benchmarkEntries.length,
+            activeGoalEntryAverage: benchmarkEntries.length,
+            comparedActiveGoalCount: 0
+          }, publicBenchmark_(
             row,
             students[row.StudentId],
             last,
             benchmarkEntries.length,
             benchmarkEntries
-          );
+          ), comparisons[String(row.Id)] || {});
         })
         .sort((a, b) =>
           Number(b.critical) - Number(a.critical) ||
@@ -205,6 +222,48 @@ function lookupBenchmarks(filters, force) {
       Boolean(force)
     );
   });
+}
+
+function buildActiveGoalEntryComparisonIndex_(benchmarks, entriesByBenchmark) {
+  const goals = {};
+  (benchmarks || []).forEach(benchmark => {
+    const studentId = String(benchmark.StudentId || '');
+    const goalId = String(benchmark.GoalId || '');
+    const key = studentId + '|' + goalId;
+    if (!studentId || !goalId) return;
+    if (!goals[key]) {
+      goals[key] = {
+        studentId: studentId,
+        count: 0,
+        benchmarkIds: []
+      };
+    }
+    const benchmarkId = String(benchmark.Id);
+    goals[key].benchmarkIds.push(benchmarkId);
+    goals[key].count += (entriesByBenchmark[benchmarkId] || []).length;
+  });
+  const studentStats = Object.keys(goals).reduce((index, key) => {
+    const goal = goals[key];
+    if (!index[goal.studentId]) {
+      index[goal.studentId] = { total: 0, goalCount: 0 };
+    }
+    index[goal.studentId].total += goal.count;
+    index[goal.studentId].goalCount += 1;
+    return index;
+  }, {});
+  return Object.keys(goals).reduce((index, key) => {
+    const goal = goals[key];
+    const stats = studentStats[goal.studentId];
+    const comparison = {
+      activeGoalEntryCount: goal.count,
+      activeGoalEntryAverage: stats.goalCount ? stats.total / stats.goalCount : 0,
+      comparedActiveGoalCount: stats.goalCount
+    };
+    goal.benchmarkIds.forEach(benchmarkId => {
+      index[benchmarkId] = comparison;
+    });
+    return index;
+  }, {});
 }
 
 function saveBenchmarkEntry(payload) {
