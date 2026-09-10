@@ -1403,11 +1403,12 @@
       const status = scheduleCellStatus(aide.email, period);
       const blocked = status.blockingReason ? 'disabled' : '';
       const key = encodeURIComponent(period.periodId + '|' + aide.email);
+      const classOptions = scheduleClassOptionsForPeriod_(period.periodId, assignment.classId);
       return `<td class="schedule-assignment-cell ${escapeAttr(status.level)}">
         <div class="schedule-cell" data-cell="${key}" data-period-id="${escapeAttr(period.periodId)}" data-aide-email="${escapeAttr(aide.email)}">
           ${status.blockingReason ? `<div class="schedule-cell-alert blocked">${escapeHtml(status.blockingReason)}</div>` : ''}
           ${!status.blockingReason && status.warningReason ? `<div class="schedule-cell-alert warning">${escapeHtml(status.warningReason)}</div>` : ''}
-          ${scheduleSelectMarkup_('classId', state.scheduleData.classes, 'No class', assignment.classId, blocked)}
+          ${scheduleSelectMarkup_('classId', classOptions, 'No class', assignment.classId, blocked)}
           ${scheduleSelectMarkup_('studentId', state.scheduleData.oneToOneStudents, 'No 1:1', assignment.studentId, blocked)}
           <input data-field="duty" placeholder="Duty / OFF" value="${escapeAttr(assignment.duty || '')}" ${blocked}>
           <input data-field="note" placeholder="Note" value="${escapeAttr(assignment.note || '')}" ${blocked}>
@@ -1428,12 +1429,34 @@
       </select>`;
     }
 
+    function scheduleClassOptionKey_(item) {
+      const name = String(item && item.name || '').trim().toLowerCase();
+      return name || 'class:' + String(item && item.id || '');
+    }
+
+    function scheduleClassOptionsForPeriod_(periodId, selectedId) {
+      const grouped = safeArray(state.scheduleData && state.scheduleData.classes)
+        .reduce((index, item) => {
+          const key = scheduleClassOptionKey_(item);
+          if (!index[key]) index[key] = [];
+          index[key].push(item);
+          return index;
+        }, {});
+      return Object.keys(grouped).map(key => {
+        const matches = grouped[key];
+        return matches.find(item => String(item.id) === String(selectedId || '')) ||
+          matches.find(item => String(item.periodId) === String(periodId || '')) ||
+          matches[0];
+      }).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    }
+
     function hydrateScheduleOptions_(select) {
       if (!select || select.dataset.optionsLoaded === 'true') return;
       const selected = select.value;
       const isClass = select.dataset.scheduleOptions === 'classId';
+      const cell = select.closest('.schedule-cell');
       const items = isClass
-        ? state.scheduleData.classes
+        ? scheduleClassOptionsForPeriod_(cell && cell.dataset.periodId, selected)
         : state.scheduleData.oneToOneStudents;
       select.innerHTML = `<option value="">${isClass ? 'No class' : 'No 1:1'}</option>` +
         options(items, 'id', 'name', selected);
@@ -1443,8 +1466,17 @@
 
     function setScheduleSelectValue_(select, value) {
       if (!select) return;
+      let nextValue = value || '';
+      if (select.dataset.scheduleOptions === 'classId' && nextValue) {
+        const source = safeArray(state.scheduleData && state.scheduleData.classes)
+          .find(item => String(item.id) === String(nextValue));
+        const cell = select.closest('.schedule-cell');
+        const target = source && scheduleClassOptionsForPeriod_(cell && cell.dataset.periodId, '')
+          .find(item => scheduleClassOptionKey_(item) === scheduleClassOptionKey_(source));
+        if (target) nextValue = target.id;
+      }
       hydrateScheduleOptions_(select);
-      select.value = value || '';
+      select.value = nextValue;
     }
 
     function renderScheduleAideHeader(aide) {

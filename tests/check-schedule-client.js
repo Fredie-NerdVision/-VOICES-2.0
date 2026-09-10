@@ -55,8 +55,32 @@ const result = vm.runInContext(`
           byDay: [{ date: '2026-09-01', hours: 4 }]
         }]
       }
-    }
+    },
+    classes: [
+      { id: 'KING-P1', name: 'King 13', periodId: 'P1' },
+      { id: 'KING-P2', name: 'King 13', periodId: 'P2' },
+      { id: 'KING-P3', name: 'King 13', periodId: 'P3' },
+      { id: 'LEE-P1', name: 'Lee 21', periodId: 'P1' }
+    ]
   };
+  const p1ClassOptions = scheduleClassOptionsForPeriod_('P1', '');
+  if (p1ClassOptions.length !== 2 ||
+      p1ClassOptions.find(item => item.name === 'King 13').id !== 'KING-P1') {
+    throw new Error('Schedule locations were not deduplicated with the period class preferred.');
+  }
+  const preservedClassOptions = scheduleClassOptionsForPeriod_('P2', 'KING-P1');
+  if (preservedClassOptions.find(item => item.name === 'King 13').id !== 'KING-P1') {
+    throw new Error('A saved class selection was not preserved.');
+  }
+  const copiedClassSelect = {
+    dataset: { scheduleOptions: 'classId', optionsLoaded: 'true' },
+    value: '',
+    closest() { return { dataset: { periodId: 'P2' } }; }
+  };
+  setScheduleSelectValue_(copiedClassSelect, 'KING-P1');
+  if (copiedClassSelect.value !== 'KING-P2') {
+    throw new Error('A copied location did not resolve to the target period class.');
+  }
   const assignments = [
     { periodId: 'P1', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' },
     { periodId: 'P2', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' }
