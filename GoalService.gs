@@ -341,6 +341,74 @@ function createGoal(payload) {
   });
 }
 
+function updateGoalSubjects(payload) {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    payload = payload || {};
+    assertRequired_(payload, ['goalId']);
+    let goal = findOne_('Goals', row => String(row.Id) === String(payload.goalId));
+    if (!goal) throw new Error('Goal was not found.');
+    requireManagedStudent_(staff, goal.StudentId);
+    const requestedSubjectIds = Array.from(new Set(
+      (Array.isArray(payload.subjectIds) ? payload.subjectIds : [])
+        .map(String)
+        .filter(Boolean)
+    ));
+    if (!requestedSubjectIds.length) {
+      throw new Error('Choose at least one relevant class or subject for the goal.');
+    }
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(25000)) {
+      return {
+        ok: false,
+        code: 'WRITE_BUSY',
+        retryable: true,
+        message: 'Goal relevance saving is busy. Retry shortly.'
+      };
+    }
+    try {
+      ['Benchmarks', 'BenchmarkSubjects', 'Goals', 'Students', 'Subjects']
+        .forEach(invalidateRowsCache_);
+      goal = findOne_('Goals', row => String(row.Id) === String(payload.goalId));
+      if (!goal) throw new Error('Goal was not found.');
+      requireManagedStudent_(staff, goal.StudentId);
+      const subjects = indexBy_(activeRows_('Subjects'), 'Id');
+      const invalidSubjectId = requestedSubjectIds.find(id => !subjects[id]);
+      if (invalidSubjectId) {
+        throw new Error('A selected class or subject is inactive or unknown.');
+      }
+      const subjectIds = requestedSubjectIds;
+      const benchmarks = rows_('Benchmarks').filter(row =>
+        String(row.GoalId) === String(goal.Id)
+      );
+      if (!benchmarks.length) {
+        throw new Error('Add at least one benchmark before editing this goal’s relevance tags.');
+      }
+      const benchmarkIds = new Set(benchmarks.map(row => String(row.Id)));
+      replaceRowsUnlocked_(
+        'BenchmarkSubjects',
+        row => benchmarkIds.has(String(row.BenchmarkId)),
+        benchmarks.flatMap(benchmark => subjectIds.map(subjectId => ({
+          BenchmarkId: benchmark.Id,
+          SubjectId: subjectId
+        })))
+      );
+      benchmarks.forEach(benchmark =>
+        updateRow_('Benchmarks', benchmark._row, { SubjectId: subjectIds[0] })
+      );
+      invalidateAppDataCache_('student');
+      return {
+        ok: true,
+        goalId: goal.Id,
+        subjectIds: subjectIds,
+        message: 'Goal relevance tags saved.'
+      };
+    } finally {
+      lock.releaseLock();
+    }
+  });
+}
+
 function previewBulkGoals(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};

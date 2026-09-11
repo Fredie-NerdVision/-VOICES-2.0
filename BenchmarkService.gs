@@ -282,6 +282,137 @@ function saveBenchmarkEntry(payload) {
   };
 }
 
+function getObservationDraft() {
+  return withRowsCache_(() => {
+    const email = getCurrentUserEmail_();
+    requireAuthorizedStaff_(email);
+    return getObservationDraft_(email);
+  });
+}
+
+function getObservationDraft_(email) {
+  const cutoff = new Date().getTime() - (30 * 24 * 60 * 60 * 1000);
+  const draftRows = rows_('ObservationDrafts')
+    .filter(row =>
+      normalizeEmail_(row.OwnerEmail) === normalizeEmail_(email) &&
+      new Date(row.UpdatedAt).getTime() >= cutoff
+    )
+    .sort((a, b) => Number(a.SortOrder) - Number(b.SortOrder));
+  if (!draftRows.length) {
+    return {
+      ok: true,
+      submissionBatchId: '',
+      entries: [],
+      updatedAt: ''
+    };
+  }
+  const batchId = String(draftRows[0].SubmissionBatchId || '');
+  const entries = draftRows
+    .filter(row => String(row.SubmissionBatchId || '') === batchId)
+    .map(row => {
+      try {
+        const item = JSON.parse(String(row.PayloadJson || ''));
+        return item && typeof item === 'object' && !Array.isArray(item) ? item : null;
+      } catch (error) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  return {
+    ok: true,
+    submissionBatchId: entries.length ? batchId : '',
+    entries: entries,
+    updatedAt: draftRows[0].UpdatedAt
+  };
+}
+
+function saveObservationDraft(payload) {
+  const email = getCurrentUserEmail_();
+  requireAuthorizedStaff_(email);
+  payload = payload || {};
+  const batchId = sanitizeText_(payload.submissionBatchId, 100);
+  if (!batchId) throw new Error('A draft batch ID is required.');
+  if (!Array.isArray(payload.entries) || payload.entries.length > 200) {
+    throw new Error('Save no more than 200 draft observations.');
+  }
+  const serialized = payload.entries.map(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('A draft observation is invalid.');
+    }
+    const json = JSON.stringify(entry);
+    if (json.length > 20000) {
+      throw new Error('A draft observation is too large to save.');
+    }
+    return json;
+  });
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Draft saving is busy. The browser copy is still intact.'
+    };
+  }
+  try {
+    invalidateRowsCache_('ObservationDrafts');
+    const now = new Date();
+    replaceRowsUnlocked_(
+      'ObservationDrafts',
+      row => normalizeEmail_(row.OwnerEmail) === normalizeEmail_(email),
+      serialized.map((json, index) => ({
+        Id: uuid_(),
+        OwnerEmail: normalizeEmail_(email),
+        SubmissionBatchId: batchId,
+        SortOrder: index + 1,
+        PayloadJson: json,
+        UpdatedAt: now
+      }))
+    );
+    return {
+      ok: true,
+      submissionBatchId: batchId,
+      count: serialized.length,
+      updatedAt: now
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function clearObservationDraft(submissionBatchId) {
+  const email = getCurrentUserEmail_();
+  requireAuthorizedStaff_(email);
+  const batchId = sanitizeText_(submissionBatchId, 100);
+  if (!batchId) return { ok: true };
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Draft cleanup will be retried later.'
+    };
+  }
+  try {
+    clearObservationDraftUnlocked_(email, batchId);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function clearObservationDraftUnlocked_(email, batchId) {
+  invalidateRowsCache_('ObservationDrafts');
+  replaceRowsUnlocked_(
+    'ObservationDrafts',
+    row =>
+      normalizeEmail_(row.OwnerEmail) === normalizeEmail_(email) &&
+      String(row.SubmissionBatchId || '') === String(batchId),
+    []
+  );
+}
+
 function saveBenchmarkEntriesBatch(payload) {
   payload = payload || {};
   const email = getCurrentUserEmail_();
@@ -298,12 +429,21 @@ function saveBenchmarkEntriesBatch(payload) {
 
   const existing = getCompletedObservationBatch_(batchId);
   if (existing.length) {
-    return completedObservationBatchResult_(
+    const completedResult = completedObservationBatchResult_(
       batchId,
       existing,
       payload.entries.length,
       fingerprint
     );
+    const cleanupLock = LockService.getScriptLock();
+    if (cleanupLock.tryLock(5000)) {
+      try {
+        clearObservationDraftUnlocked_(email, batchId);
+      } finally {
+        cleanupLock.releaseLock();
+      }
+    }
+    return completedResult;
   }
 
   const initial = validateObservationBatch_(payload.entries, staff, batchId, fingerprint);
@@ -326,20 +466,24 @@ function saveBenchmarkEntriesBatch(payload) {
       'BenchmarkSubjects',
       'Classes',
       'GoalPhaseHistory',
-      'Goals'
+      'Goals',
+      'ObservationDrafts'
     ].forEach(invalidateRowsCache_);
     const completed = getCompletedObservationBatch_(batchId);
     if (completed.length) {
-      return completedObservationBatchResult_(
+      const completedResult = completedObservationBatchResult_(
         batchId,
         completed,
         payload.entries.length,
         fingerprint
       );
+      clearObservationDraftUnlocked_(email, batchId);
+      return completedResult;
     }
     const validated = validateObservationBatch_(payload.entries, staff, batchId, fingerprint);
     if (!validated.ok) return validated;
     appendRows_('BenchmarkEntries', validated.records);
+    clearObservationDraftUnlocked_(email, batchId);
     invalidateAppDataCache_('student');
     return completedObservationBatchResult_(batchId, validated.records);
   } finally {

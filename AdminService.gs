@@ -580,12 +580,12 @@ function upsertStaff(payload) {
   };
   if (existing) {
     updateRow_('Staff', existing._row, record);
-    invalidateScheduleCache_('all');
+    invalidateAppDataCache_('all');
     return { ok: true, id: existing.Id };
   }
   record.Id = uuid_();
   appendRow_('Staff', record);
-  invalidateScheduleCache_('all');
+  invalidateAppDataCache_('all');
   return { ok: true, id: record.Id };
 }
 
@@ -601,7 +601,7 @@ function deleteStaff(email) {
     throw new Error('Only an administrator can remove another administrator.');
   }
   updateRow_('Staff', existing._row, { Active: false });
-  invalidateScheduleCache_('all');
+  invalidateAppDataCache_('all');
   return { ok: true };
 }
 
@@ -633,12 +633,12 @@ function upsertStudent(payload) {
       throw new Error('You can only update your own assigned students.');
     }
     updateRow_('Students', existing._row, record);
-    invalidateScheduleCache_('all');
+    invalidateAppDataCache_('all');
     return { ok: true, id: existing.Id };
   }
   record.Id = uuid_();
   appendRow_('Students', record);
-  invalidateScheduleCache_('all');
+  invalidateAppDataCache_('all');
   return { ok: true, id: record.Id };
 }
 
@@ -651,8 +651,101 @@ function deleteStudent(studentId) {
     throw new Error('You can only remove your own assigned students.');
   }
   updateRow_('Students', student._row, { Active: false });
-  invalidateScheduleCache_('all');
+  invalidateAppDataCache_('all');
   return { ok: true };
+}
+
+function getClassRosterData_(staff) {
+  const email = normalizeEmail_(staff.Email);
+  const isAdmin = toBoolean_(staff.IsAdmin);
+  const subjects = indexBy_(activeRows_('Subjects'), 'Id');
+  const enrollments = rows_('ClassStudents').reduce((index, row) => {
+    const classId = String(row.ClassId);
+    if (!index[classId]) index[classId] = [];
+    index[classId].push(String(row.StudentId));
+    return index;
+  }, {});
+  const classes = activeRows_('Classes')
+    .filter(row => isAdmin || normalizeEmail_(row.TeacherEmail) === email)
+    .map(row => ({
+      id: row.Id,
+      name: row.Name,
+      teacherEmail: normalizeEmail_(row.TeacherEmail),
+      periodId: row.PeriodId,
+      subjectName: subjects[row.SubjectId] ? subjects[row.SubjectId].Name : '',
+      studentIds: enrollments[String(row.Id)] || []
+    }))
+    .sort((a, b) =>
+      a.teacherEmail.localeCompare(b.teacherEmail) ||
+      String(a.periodId).localeCompare(String(b.periodId), undefined, { numeric: true }) ||
+      a.name.localeCompare(b.name)
+    );
+  return {
+    classes: classes,
+    students: activeRows_('Students')
+      .map(publicStudent_)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  };
+}
+
+function saveClassRoster(payload) {
+  const staff = requireCaseManager_();
+  payload = payload || {};
+  assertRequired_(payload, ['classId']);
+  const classId = String(payload.classId);
+  let classRow = findOne_('Classes', row =>
+    String(row.Id) === classId && toBoolean_(row.Active)
+  );
+  if (!classRow) throw new Error('Class was not found.');
+  if (!toBoolean_(staff.IsAdmin) &&
+      normalizeEmail_(classRow.TeacherEmail) !== normalizeEmail_(staff.Email)) {
+    throw new Error('You can only edit rosters for classes assigned to you.');
+  }
+  const studentIds = Array.from(new Set(
+    (Array.isArray(payload.studentIds) ? payload.studentIds : [])
+      .map(String)
+      .filter(Boolean)
+  ));
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Roster saving is busy. Retry shortly.'
+    };
+  }
+  try {
+    ['Classes', 'ClassStudents', 'Students'].forEach(invalidateRowsCache_);
+    classRow = findOne_('Classes', row =>
+      String(row.Id) === classId && toBoolean_(row.Active)
+    );
+    if (!classRow) throw new Error('Class was not found.');
+    if (!toBoolean_(staff.IsAdmin) &&
+        normalizeEmail_(classRow.TeacherEmail) !== normalizeEmail_(staff.Email)) {
+      throw new Error('You can only edit rosters for classes assigned to you.');
+    }
+    const activeStudentIds = new Set(activeRows_('Students').map(row => String(row.Id)));
+    const invalidStudentId = studentIds.find(id => !activeStudentIds.has(id));
+    if (invalidStudentId) throw new Error('The roster contains an inactive or unknown student.');
+    replaceRowsUnlocked_(
+      'ClassStudents',
+      row => String(row.ClassId) === classId,
+      studentIds.map(studentId => ({
+        ClassId: classId,
+        StudentId: studentId
+      }))
+    );
+    invalidateAppDataCache_('all');
+    return {
+      ok: true,
+      classId: classId,
+      studentCount: studentIds.length,
+      message: 'Class roster saved.'
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function sendEmail_(to, subject, body) {

@@ -28,6 +28,9 @@ const SHEET_SCHEMAS = Object.freeze({
     'ActualPromptCount', 'SubmissionBatchId', 'SubmissionFingerprint', 'Status', 'CorrectionOfEntryId',
     'CorrectionReason', 'CorrectedBy', 'CorrectedAt'
   ],
+  ObservationDrafts: [
+    'Id', 'OwnerEmail', 'SubmissionBatchId', 'SortOrder', 'PayloadJson', 'UpdatedAt'
+  ],
   GoalPhaseHistory: [
     'Id', 'GoalId', 'BenchmarkId', 'ActivatedAt', 'EndedAt',
     'ChangedBy', 'ChangeReason', 'Source', 'EndedBy', 'EndReason'

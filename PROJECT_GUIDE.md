@@ -85,6 +85,8 @@ Case managers can manage assigned students, goals, schedules, staff requests, me
 
 Deactivating a staff or student row revokes active access without deleting historical records.
 
+The branded entry screen does not implement a separate password database. It starts the server-side Workspace identity and whitelist check. After 30 minutes without meaningful pointer, keyboard, touch, or foreground server activity, the browser locks the application screen and requires another bootstrap authorization check to resume. This is an application lock, not a Google sign-out. Account switching uses Google's account chooser.
+
 The app should be deployed:
 
 - from the intended owner account;
@@ -132,6 +134,7 @@ Emails are sent from the deployment owner's account under the display name `V.O.
 - `Benchmarks`: zero or more ordered phases with separate task, accuracy, prompt, and consecutive-session targets.
 - `BenchmarkSubjects`: many-to-many subject relevance inherited from the goal.
 - `BenchmarkEntries`: raw successes/trials, calculated percentage, observation date, actual prompt condition, notes, class, evaluator, batch ID, and correction audit.
+- `ObservationDrafts`: per-staff queued-observation recovery rows, ordered by submission batch.
 - `GoalPhaseHistory`: auditable activation boundaries used for backdated-entry validation and charts.
 
 ### Scheduling
@@ -152,9 +155,11 @@ Emails are sent from the deployment owner's account under the display name `V.O.
 - `IEPs`: generated document metadata and Drive URL.
 - `Settings`: school/application settings and schedule weekdays.
 
+The canonical database remains one spreadsheet workbook with normalized tabs. Splitting these tables into independent spreadsheet files is not a first-line performance optimization: it adds `openById` calls, cross-file joins, permission coordination, locking boundaries, cache invalidation, migration, and backup complexity. Hot student, benchmark, and schedule reads should use batched tab reads plus versioned CacheService/Drive read models; cold historical data can be archived later only when measured volume requires it.
+
 ## 7. Application startup
 
-`doGet()` renders `Index.html`. The browser calls `getAppBootstrap()`, which:
+`doGet()` renders `Index.html`. The user selects **Continue with school Google account**, then the browser calls `getAppBootstrap()`, which:
 
 1. reads the signed-in email;
 2. requires an active matching staff record;
@@ -164,7 +169,7 @@ Emails are sent from the deployment owner's account under the display name `V.O.
 
 Data is cached only for the current server invocation to reduce repeated Sheet reads without creating stale cross-request state.
 
-The browser displays an operation overlay and prevents competing clicks while an RPC request is running. Targeted refresh actions reload only the necessary dashboard data.
+The browser displays an operation overlay and prevents competing clicks while an RPC request is running. Targeted refresh actions reload only the necessary dashboard data. A two-minute warning precedes the 30-minute inactivity lock; resume revalidates Workspace identity and preserves any durable observation draft.
 
 ## 8. Goal creation
 
@@ -182,6 +187,8 @@ The parser:
 - requires an editable preview before save.
 
 Creation is protected by a script lock. It creates one annual `Goals` row, ordered benchmark rows with individual start/due dates, subject relationships, and an initial date-selection history boundary. The active benchmark is the currently eligible record with the nearest due date; if no date window is open, the next upcoming benchmark is selected. Draft and completed lifecycle states are retained for management but excluded from active lookup, analytics, and IEP export.
+
+For an existing goal with benchmarks, the case-manager goal workspace can edit its relevance tags. One locked operation validates active subjects, updates every phase's `BenchmarkSubjects` rows, sets the first selected subject as each benchmark's primary `SubjectId`, preserves goal/benchmark/entry IDs, and invalidates student read models. Tags are relevance filters; they do not change goal lifecycle or benchmark activation.
 
 The bulk-paste dialog accepts tab-separated rows copied from the documented Google Sheets template. IDs must match exactly; the server returns row-level errors and requires a preview before saving. A stable import batch ID, goal key, and fingerprint make an unchanged retry skip goals already created by a partially completed attempt.
 
@@ -212,6 +219,12 @@ Multiple students may be selected. Each saved entry records:
 - entering staff email.
 
 Staff may queue individual entries or paste up to 200 tab-separated rows. One submission batch ID and normalized fingerprint are reused across retries; reusing an ID with different data is rejected. Validation runs before and after a 25-second script lock; `WRITE_BUSY` and validation responses leave the browser queue intact. Historical-phase choices are persisted into that queue before retrying so a lost response can be submitted with the same fingerprint. Staff can download a tab-separated backup before retrying or navigating away. Backdated phase conflicts require an explicit historical-phase choice.
+
+Every queue mutation is written immediately to versioned, per-account browser session storage and debounced to `ObservationDrafts` for server recovery. Background writes retry after transient failures. Reload prefers the newest valid browser/server copy; malformed rows are discarded safely. The same batch ID survives recovery, and successful `saveBenchmarkEntriesBatch()` clears the server draft while holding the observation write lock. Removing the last queued item clears both copies. Only one server draft is retained per staff member, so the most recently edited tab wins server recovery; each open tab keeps its own browser-session copy.
+
+### Roster editing
+
+The People workspace edits student profiles separately from class enrollment. Administrators can edit every active class roster. A non-admin case manager can edit only active classes whose `TeacherEmail` matches their own account. Saving validates every selected active student and replaces only that class's `ClassStudents` rows under a script lock; no `Students`, classes, observations, or historical records are deleted. `ClassAides` and `AideTraining` remain separate administrator/import-managed relationships.
 
 Case-manager analytics preserve raw counts and calculate latest-three current-benchmark accuracy from combined successes/trials. Mastery uses each benchmark’s archetype: explicit accuracy and trial consistency for discrete/task benchmarks, prompt ceilings/levels for prompt-fade benchmarks, and rolling or period-based raw occurrence quotas for frequency benchmarks. Evaluation units may be observation dates, two-week windows, or configured grading periods; corrected entries never count, and incomplete targets report mastery as unavailable. Goal and benchmark cards show valid-entry totals; active counts are green at/above the student’s active-goal average, yellow from 50% to below average, and red below 50% (a zero average is green). Pure SVG charts retain local goal visibility and neutral benchmark dividers while separating percentage accuracy, prompt counts, and frequency quotas into compatible metric panels. Printable progress summaries provide standardized IEP statements.
 
@@ -328,7 +341,7 @@ Do not run this function against current production as part of code deployment.
 
 ### Existing pre-2.3 database
 
-`upgradeVoices23Database()` opens the database already configured in `VOICES_DATABASE_ID`. It makes additive schema changes, derives safe legacy values, seeds phase history, normalizes historical observation dates/status, adds schedule revision metadata, validates relationships, and records schema version 2.3. `upgradeVoices22Database()` delegates to this migration.
+`upgradeVoices23Database()` opens the database already configured in `VOICES_DATABASE_ID`. It makes additive schema changes, including the `ObservationDrafts` tab, derives safe legacy values, seeds phase history, normalizes historical observation dates/status, adds schedule revision metadata, validates relationships, and records schema version 2.3. `upgradeVoices22Database()` delegates to this migration. Re-running the 2.3 upgrade after copying this revision is idempotent and is required before server-side queue recovery is available.
 
 Use it only against a backed-up or copied database first. Production and training must not be upgraded or deployed until separately approved.
 
@@ -359,7 +372,7 @@ The local tests:
 - parse every `.gs` file;
 - extract and parse the browser JavaScript from `Index.html`;
 - validate deterministic demo relationships and counts;
-- validate 2.3 migration/schema safeguards, archetype parsing, mastery windows, pure SVG metric panels, phase chronology, batch locking, accessible dialogs, bulk tools, and IEP null handling;
+- validate 2.3 migration/schema safeguards, roster and relevance editors, durable queue recovery, Workspace entry/idle-lock controls, archetype parsing, mastery windows, pure SVG metric panels, phase chronology, batch locking, accessible dialogs, bulk tools, and IEP null handling;
 - validate Monday-Sunday weekly calculations;
 - validate shift-based hours, fixed lunch deductions, and partial-period overlap;
 - validate availability/time-off scheduling signals;
@@ -413,11 +426,11 @@ Updating the existing deployment preserves its `/exec` URL. Creating a new deplo
 - Do not commit `.clasp.json`, OAuth tokens, or credentials.
 - Keep Fredie the aide separate from any owner/admin identity.
 - Treat Kaitlin's weekly capacity as 29 hours.
-- Do not reintroduce the canceled first-login walkthrough unless it is requested again.
+- Keep the Workspace access gate focused on identity and lock/resume; do not turn it into the canceled first-login walkthrough.
 - Keep critical status and subject relevance at the goal level.
 - Preserve existing IDs/history and allow zero or any number of phases per goal.
 - Never infer missing historical prompt metadata.
-- Keep unsaved observation queues intact after contention or validation failures.
+- Keep unsaved observation queues intact after reloads, idle locks, contention, and validation failures.
 - Use the account-choice guidance for Google multi-login; Apps Script cannot force an account.
 
 ## 20. Release history
@@ -436,7 +449,7 @@ Added a realistic isolated training database, weekly aide capacities, Monday-Sun
 
 ### 2.3
 
-Added flexible goal phases, four benchmark archetypes, separate accuracy/prompt/task/consistency conditions, raw-trial observations, window-aware mastery, phase chronology, idempotent queued and bulk writes, visibility-controlled pure SVG metric panels, printable progress summaries, correction audit fields, date-specific aide shifts and lunches, partial-period coverage, schedule revision protection, accessible branded dialogs, and Google multi-account guidance.
+Added flexible goal phases, four benchmark archetypes, separate accuracy/prompt/task/consistency conditions, raw-trial observations, window-aware mastery, phase chronology, idempotent queued and bulk writes with durable draft recovery, class-roster and existing relevance-tag editors, a Workspace access gate with a 30-minute idle lock, visibility-controlled pure SVG metric panels, printable progress summaries, correction audit fields, date-specific aide shifts and lunches, partial-period coverage, schedule revision protection, accessible branded dialogs, and Google multi-account guidance.
 
 ## 21. Current status
 

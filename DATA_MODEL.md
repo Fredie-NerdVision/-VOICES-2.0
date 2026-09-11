@@ -88,6 +88,10 @@ Each goal has subject relevance tags shared by all of its phases. A benchmark is
 
 Each active row preserves raw successes/trials, calculated accuracy, observation date, actual prompt level/count, class, evaluator, notes, an idempotent submission batch ID, and a normalized batch fingerprint. The fingerprint rejects accidental batch-ID reuse with different data. Correction fields retain the original entry and a required correction reason rather than overwriting history; superseded rows are excluded from current lookup and analytics.
 
+### ObservationDrafts
+
+Each row stores one queued observation for an authorized staff member: `Id`, `OwnerEmail`, `SubmissionBatchId`, `SortOrder`, `PayloadJson`, and `UpdatedAt`. The browser keeps the active queue in memory and `sessionStorage` for instant reload recovery, while this table provides a debounced server recovery copy. Drafts expire from recovery after 30 days, are replaced per staff member, and are cleared under the same lock after a batch is confirmed saved. Malformed payload rows are ignored rather than restored.
+
 ### Settings and Notifications
 
 `Settings.SchoolQuarterBoundaries` stores five chronological dates: Q1, Q2, Q3, Q4, and the next school-year start. Notifications record all-ended benchmark warnings and retry-safe missing-observation alerts. Missing-observation keys include the benchmark, reset date, and 14/21/28-day alert interval so the daily monitor sends once at 14 days and then weekly until a new valid entry resets the cycle.
@@ -146,6 +150,7 @@ BenchmarkSubjects.BenchmarkId -> Benchmarks.Id
 BenchmarkSubjects.SubjectId   -> Subjects.Id
 GoalPhaseHistory.GoalId       -> Goals.Id
 GoalPhaseHistory.BenchmarkId  -> Benchmarks.Id
+ObservationDrafts.OwnerEmail  -> Staff.Email
 AideDailyHours.AideEmail      -> Staff.Email
 ```
 

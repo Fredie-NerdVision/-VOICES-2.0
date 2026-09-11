@@ -23,6 +23,7 @@ const entryBadgeFunction = html.match(
   'ActualPromptLevel',
   'SubmissionBatchId',
   'SubmissionFingerprint',
+  'ObservationDrafts',
   'CorrectionOfEntryId',
   'ImportBatchId',
   'ImportFingerprint',
@@ -39,6 +40,14 @@ if (!benchmarkService.includes('tryLock(25000)') ||
     !benchmarkService.includes('getCompletedObservationBatch_') ||
     !benchmarkService.includes('observationBatchFingerprint_')) {
   throw new Error('Observation batching is missing locking or idempotency safeguards.');
+}
+if (!benchmarkService.includes('function getObservationDraft()') ||
+    !benchmarkService.includes('function saveObservationDraft(payload)') ||
+    !benchmarkService.includes('function clearObservationDraft(submissionBatchId)') ||
+    !benchmarkService.includes('clearObservationDraftUnlocked_(email, batchId)') ||
+    !benchmarkService.includes('JSON.parse(String(row.PayloadJson') ||
+    !database.includes("'OwnerEmail', 'SubmissionBatchId', 'SortOrder', 'PayloadJson', 'UpdatedAt'")) {
+  throw new Error('Durable observation drafts are missing recovery, cleanup, or malformed-data safeguards.');
 }
 if (!benchmarkService.includes("String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE'") ||
     !benchmarkService.includes('The historical benchmark does not belong to this student and goal.') ||
@@ -72,6 +81,22 @@ if (!code.includes('function requireAdmin_()') ||
     !html.includes("server('saveAdminCatalogBatch'")) {
   throw new Error('Admin subject/class batching is missing authorization, review, or retry safeguards.');
 }
+if (!adminService.includes('function getClassRosterData_(staff)') ||
+    !adminService.includes('function saveClassRoster(payload)') ||
+    !adminService.includes('You can only edit rosters for classes assigned to you.') ||
+    !adminService.includes("replaceRowsUnlocked_(\n      'ClassStudents'") ||
+    !code.includes('roster: getClassRosterData_(staff)') ||
+    !html.includes('id="classRosterForm"') ||
+    !html.includes("server('saveClassRoster'")) {
+  throw new Error('Role-aware class roster editing is incomplete.');
+}
+if (!goalService.includes('function updateGoalSubjects(payload)') ||
+    !goalService.includes("replaceRowsUnlocked_(\n        'BenchmarkSubjects'") ||
+    !goalService.includes("updateRow_('Benchmarks', benchmark._row, { SubjectId: subjectIds[0] })") ||
+    !html.includes('data-goal-subject-form') ||
+    !html.includes("server('updateGoalSubjects'")) {
+  throw new Error('Existing goal relevance-tag editing is incomplete.');
+}
 if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
   throw new Error('Native browser confirmation or prompt dialogs remain.');
 }
@@ -84,6 +109,15 @@ if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
   'previewBulkObservations_',
   'previewBulkGoals_',
   'downloadObservationQueue_',
+  'restoreObservationQueue_',
+  'persistObservationQueue_',
+  'syncObservationDraft_',
+  'clearObservationQueuePersistence_',
+  'OBSERVATION_DRAFT_STORAGE_VERSION',
+  'Continue with school Google account',
+  'IDLE_LOCK_MS = 30 * 60 * 1000',
+  'Locked after 30 minutes of inactivity',
+  'This lock protects the app screen; it does not sign your browser out of Google.',
   'window.print()'
 ].forEach(value => {
   if (!html.includes(value)) throw new Error('Missing 2.3 client behavior: ' + value);

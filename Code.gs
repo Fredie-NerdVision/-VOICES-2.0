@@ -167,7 +167,8 @@ function getCaseManagerPeopleData_(staff) {
       .sort((a, b) => a.displayName.localeCompare(b.displayName)),
     aides: staffRows
       .filter(row => row.Role === VOICES.ROLES.AIDE)
-      .map(publicStaff_)
+      .map(publicStaff_),
+    roster: getClassRosterData_(staff)
   };
 }
 
