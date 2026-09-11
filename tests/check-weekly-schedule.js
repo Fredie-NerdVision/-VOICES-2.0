@@ -23,6 +23,10 @@ const tables = {
   Students: [],
   Classes: [],
   Availability: [],
+  AideDailyHours: [
+    { Date: '2026-08-31', AideEmail: 'aide@example.org', StartTime: '08:00', EndTime: '10:00', LunchStartTime: '', LunchMinutes: 0 },
+    { Date: '2026-09-05', AideEmail: 'aide@example.org', StartTime: '08:00', EndTime: '09:00', LunchStartTime: '', LunchMinutes: 0 }
+  ],
   TimeOffRequests: [],
   Settings: [{ Key: 'ScheduleWeekdays', Value: 'MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY' }]
 };
@@ -101,7 +105,7 @@ const result = vm.runInContext(`
   );
   const aide = summary.aides[0];
   if (aide.assignedHours !== 11) {
-    throw new Error('Overlap union or weekend total is incorrect: ' + aide.assignedHours);
+    throw new Error('Shift-based weekday and weekend total is incorrect: ' + aide.assignedHours);
   }
   if (aide.status !== 'OVER' || aide.deltaHours !== 5) {
     throw new Error('Capacity status is incorrect.');
@@ -115,7 +119,8 @@ const result = vm.runInContext(`
     [
       { periodId: 'P1', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' },
       { periodId: 'P2', aideEmail: 'aide@example.org', duty: 'OFF', type: 'OFF' }
-    ]
+    ],
+    [{ aideEmail: 'aide@example.org', startTime: '08:00', endTime: '09:00' }]
   );
   const draftHours = scheduledHoursForAide_(draft, 'aide@example.org');
   if (draftHours !== 1) throw new Error('OFF rows were included in draft hours.');
@@ -128,7 +133,8 @@ const result = vm.runInContext(`
     [
       { periodId: 'P1', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' },
       { periodId: 'P2', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' }
-    ]
+    ],
+    [{ aideEmail: 'aide@example.org', startTime: '08:00', endTime: '14:00', lunchStartTime: '13:00', lunchMinutes: 30 }]
   );
   const lunchHours = scheduledHoursForAide_(lunchDay, 'aide@example.org');
   if (lunchHours !== 5.5) throw new Error('Six-hour day did not deduct a half-hour lunch.');

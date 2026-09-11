@@ -9,6 +9,8 @@ const tables = {
     { Email: 'approved@example.org', FirstName: 'Approved', LastName: 'Off', Role: 'AIDE', Active: true },
     { Email: 'pending@example.org', FirstName: 'Pending', LastName: 'Off', Role: 'AIDE', Active: true },
     { Email: 'partial@example.org', FirstName: 'Partial', LastName: 'Hours', Role: 'AIDE', Active: true },
+    { Email: 'override@example.org', FirstName: 'Daily', LastName: 'Override', Role: 'AIDE', Active: true },
+    { Email: 'calledoff@example.org', FirstName: 'Called', LastName: 'Off', Role: 'AIDE', Active: true },
     { Email: 'availability@example.org', FirstName: 'Pending', LastName: 'Availability', Role: 'AIDE', Active: true }
   ],
   TimeOffRequests: [
@@ -17,7 +19,15 @@ const tables = {
   ],
   Availability: [
     { AideEmail: 'partial@example.org', DayOfWeek: 'TUESDAY', Available: true, StartTime: '08:30', EndTime: '12:00', Status: 'APPROVED' },
+    { AideEmail: 'override@example.org', DayOfWeek: 'TUESDAY', Available: false, Status: 'APPROVED' },
     { AideEmail: 'availability@example.org', DayOfWeek: 'TUESDAY', Available: false, Status: 'PENDING' }
+  ],
+  AideDailyHours: [
+    { AideEmail: 'override@example.org', Date: '2026-09-01', StartTime: '08:45', EndTime: '12:00' },
+    { AideEmail: 'calledoff@example.org', Date: '2026-09-01', StartTime: '08:00', EndTime: '12:00' }
+  ],
+  Assignments: [
+    { AideEmail: 'calledoff@example.org', Date: '2026-09-01', PeriodId: 'P1', Duty: 'OFF', Type: 'OFF' }
   ]
 };
 
@@ -37,6 +47,7 @@ const context = {
   normalizeEmail_: value => String(value || '').trim().toLowerCase(),
   normalizeTime_: value => String(value || '').slice(0, 5),
   toBoolean_: value => value === true || String(value).toLowerCase() === 'true',
+  toNumber_: value => Number(value) || 0,
   formatDate_: value => typeof value === 'string' ? value.slice(0, 10) : value.toISOString().slice(0, 10),
   parseDate_(value) {
     const parts = String(value).slice(0, 10).split('-').map(Number);
@@ -48,7 +59,15 @@ const context = {
 };
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(projectRoot, 'ScheduleService.gs'), 'utf8'), context);
+const scheduleService = fs.readFileSync(path.join(projectRoot, 'ScheduleService.gs'), 'utf8');
+vm.runInContext(scheduleService, context);
+const unresolvedCallOff = scheduleService.slice(scheduleService.indexOf('if (failures.length)'));
+if (!unresolvedCallOff.includes("replaceRows_('Assignments'") ||
+    !unresolvedCallOff.includes('Aide marked OFF; unresolved 1:1 coverage') ||
+    !scheduleService.includes('absentStudentIds') ||
+    !scheduleService.includes("assignment.Duty = '';")) {
+  throw new Error('Unresolved call-offs do not persist the absent aide OFF state.');
+}
 
 const result = vm.runInContext(`
 (() => {
@@ -75,8 +94,28 @@ const result = vm.runInContext(`
   const pendingAvailability = getAideConflict_('availability@example.org', date, period);
   if (!approved.startsWith('Approved time off')) throw new Error('Approved request conflict is incorrect.');
   if (!pending.startsWith('Pending time off request')) throw new Error('Pending request warning is incorrect.');
-  if (partial !== 'Outside approved hours') throw new Error('Partial availability conflict is incorrect.');
-  if (pendingAvailability !== 'Pending availability request') throw new Error('Pending availability warning is incorrect.');
+  if (partial !== '') throw new Error('Partial-period overlap should be allowed.');
+  if (pendingAvailability !== 'Shift hours are not configured for this date') {
+    throw new Error('Missing shift hours should block before pending availability warnings.');
+  }
+  getDaySchedule_ = () => ({
+    periods: [{ periodId: 'P1', startTime: '08:00', endTime: '09:00' }]
+  });
+  if (isAideAvailableForPeriod_('approved@example.org', date, 'P1')) {
+    throw new Error('Approved time off should exclude call-off replacements.');
+  }
+  if (isAideAvailableForPeriod_('pending@example.org', date, 'P1')) {
+    throw new Error('Pending call-off/time-off requests should exclude automatic replacements.');
+  }
+  if (!isAideAvailableForPeriod_('partial@example.org', date, 'P1')) {
+    throw new Error('Partial recurring shift overlap should allow call-off replacement.');
+  }
+  if (!isAideAvailableForPeriod_('override@example.org', date, 'P1')) {
+    throw new Error('A date-specific partial shift should override recurring unavailability.');
+  }
+  if (isAideAvailableForPeriod_('calledoff@example.org', date, 'P1')) {
+    throw new Error('An OFF assignment should exclude a call-off replacement.');
+  }
   return { unavailable: unavailable.length, approved, pending, partial, pendingAvailability };
 })()
 `, context);

@@ -4,7 +4,17 @@ const vm = require('vm');
 
 const projectRoot = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(projectRoot, 'Index.html'), 'utf8');
+const scheduleService = fs.readFileSync(path.join(projectRoot, 'ScheduleService.gs'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+if (!scheduleService.includes('function getScheduleTypeSummaries()') ||
+    !html.includes("serverQuiet('getScheduleTypeSummaries')") ||
+    !html.includes("serverQuiet('getScheduleBuilderData'") ||
+    !/if \(state\.data\.view === 'CASE_MANAGER'\) \{\s*prewarmDefaultSchedule\(\);\s*state\.caseManagerWorkspacePromise/.test(html) ||
+    !html.includes("scheduleSelectMarkup_('classId'") ||
+    !html.includes("input.addEventListener('focus', () => hydrateScheduleOptions_(input)") ||
+    /bindRefreshButtons\(root\);\s*loadScheduleBuilder\(\);/.test(html)) {
+  throw new Error('Schedule template loading or non-blocking on-demand schedule loading regressed.');
+}
 const context = {
   console,
   document: {
@@ -12,7 +22,7 @@ const context = {
     getElementById() { return null; },
     querySelectorAll() { return []; }
   },
-  window: {}
+  window: { addEventListener() {} }
 };
 
 vm.createContext(context);
@@ -30,6 +40,13 @@ const result = vm.runInContext(`
       ],
       assignments: []
     },
+    dailyHours: [{
+      aideEmail: 'aide@example.org',
+      startTime: '08:00',
+      endTime: '14:00',
+      lunchStartTime: '13:00',
+      lunchMinutes: 30
+    }],
     week: {
       summary: {
         aides: [{
@@ -38,13 +55,37 @@ const result = vm.runInContext(`
           byDay: [{ date: '2026-09-01', hours: 4 }]
         }]
       }
-    }
+    },
+    classes: [
+      { id: 'KING-P1', name: 'King 13', periodId: 'P1' },
+      { id: 'KING-P2', name: 'King 13', periodId: 'P2' },
+      { id: 'KING-P3', name: 'King 13', periodId: 'P3' },
+      { id: 'LEE-P1', name: 'Lee 21', periodId: 'P1' }
+    ]
   };
+  const p1ClassOptions = scheduleClassOptionsForPeriod_('P1', '');
+  if (p1ClassOptions.length !== 2 ||
+      p1ClassOptions.find(item => item.name === 'King 13').id !== 'KING-P1') {
+    throw new Error('Schedule locations were not deduplicated with the period class preferred.');
+  }
+  const preservedClassOptions = scheduleClassOptionsForPeriod_('P2', 'KING-P1');
+  if (preservedClassOptions.find(item => item.name === 'King 13').id !== 'KING-P1') {
+    throw new Error('A saved class selection was not preserved.');
+  }
+  const copiedClassSelect = {
+    dataset: { scheduleOptions: 'classId', optionsLoaded: 'true' },
+    value: '',
+    closest() { return { dataset: { periodId: 'P2' } }; }
+  };
+  setScheduleSelectValue_(copiedClassSelect, 'KING-P1');
+  if (copiedClassSelect.value !== 'KING-P2') {
+    throw new Error('A copied location did not resolve to the target period class.');
+  }
   const assignments = [
     { periodId: 'P1', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' },
     { periodId: 'P2', aideEmail: 'aide@example.org', duty: 'Support', type: 'STANDARD' }
   ];
-  const hours = scheduleLiveHoursForAide_('aide@example.org', assignments);
+  const hours = scheduleLiveHoursForAide_('aide@example.org');
   if (hours.dailyHours !== 5.5 || !hours.lunchDeducted) {
     throw new Error('Six-hour day did not deduct a half-hour lunch.');
   }
@@ -52,9 +93,36 @@ const result = vm.runInContext(`
     throw new Error('Projected weekly hours did not replace the selected day.');
   }
   state.scheduleData.schedule.periods = [{ periodId: 'P1', startTime: '08:00', endTime: '13:00' }];
-  const fiveHours = scheduleLiveHoursForAide_('aide@example.org', [assignments[0]]);
+  state.scheduleData.dailyHours = [{
+    aideEmail: 'aide@example.org',
+    startTime: '08:00',
+    endTime: '13:00',
+    lunchStartTime: '',
+    lunchMinutes: 0
+  }];
+  const fiveHours = scheduleLiveHoursForAide_('aide@example.org');
   if (fiveHours.dailyHours !== 5 || fiveHours.lunchDeducted) {
     throw new Error('A five-hour day incorrectly deducted lunch.');
+  }
+  state.caseManagerDataLoaded = { overview: true };
+  state.goalWorkspaceCache = { student: {} };
+  state.goalCatalogCache = { setup: {} };
+  state.benchmarkEntryCache = { benchmark: {} };
+  state.scheduleDataCache = { schedule: {} };
+  state.scheduleDataPromises = {};
+  state.readModelVersion = 4;
+  invalidateClientReadModels('saveBenchmarkEntriesBatch');
+  if (state.scheduleDataCache.schedule === undefined ||
+      Object.keys(state.goalWorkspaceCache).length ||
+      state.readModelVersion !== 4) {
+    throw new Error('Observation writes incorrectly invalidated schedule data.');
+  }
+  state.goalWorkspaceCache = { student: {} };
+  invalidateClientReadModels('saveSchedule');
+  if (Object.keys(state.scheduleDataCache).length ||
+      state.goalWorkspaceCache.student === undefined ||
+      state.readModelVersion !== 5) {
+    throw new Error('Schedule writes incorrectly invalidated student data.');
   }
   return hours;
 })()

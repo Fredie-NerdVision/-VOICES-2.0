@@ -1,8 +1,28 @@
 const VOICES = Object.freeze({
   APP_NAME: 'V.O.I.C.E.S 2.0',
+  RELEASE: '2.3',
   DATABASE_PROPERTY: 'VOICES_DATABASE_ID',
   LOGO_FILE_PROPERTY: 'VOICES_LOGO_FILE_ID',
   TIME_ZONE: Session.getScriptTimeZone(),
+  PROMPT_LEVELS: Object.freeze([
+    'Independent',
+    'Verbal',
+    'Gestural/Visual',
+    'Model',
+    'Physical'
+  ]),
+  GOAL_ARCHETYPES: Object.freeze([
+    'DISCRETE_TRIAL',
+    'PROMPT_FADE',
+    'TASK_EXPANSION',
+    'FREQUENCY_QUOTA'
+  ]),
+  EVALUATION_WINDOW_UNITS: Object.freeze([
+    'SESSION',
+    'DATA_DAY',
+    'TWO_WEEK',
+    'GRADING_PERIOD'
+  ]),
   ROLES: Object.freeze({
     AIDE: 'AIDE',
     TEACHER: 'TEACHER',
@@ -19,32 +39,64 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-function getAppBootstrap() {
+function getAppBootstrap(force) {
   return withRowsCache_(() => {
     const email = getCurrentUserEmail_();
     const staff = requireAuthorizedStaff_(email);
     const isCaseManager = staff.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(staff.IsAdmin);
     const now = new Date();
     const today = formatDate_(now);
-    const currentAssignment = getCurrentAssignment_(email, now);
+    const timeBucket = Math.floor(now.getTime() / 300000);
+    const producer = () => {
     const response = {
       appName: VOICES.APP_NAME,
       today: today,
       user: publicStaff_(staff),
       view: isCaseManager ? 'CASE_MANAGER' : 'AIDE',
-      logo: getBrandingLogo_(),
+      logo: getBrandingLogo_(false),
       dailyMessages: getDailyMessages_(today),
-      criticalBenchmarks: getCriticalBenchmarks_(staff),
-      subjects: activeRows_('Subjects'),
-      classes: getClassesForStaff_(staff),
-      students: getStudentsForStaff_(staff),
-      currentAssignment: currentAssignment,
-      benchmarkLookup: getBenchmarkLookupContext_(currentAssignment)
+      criticalBenchmarks: [],
+      subjects: [],
+      classes: [],
+      students: [],
+      currentAssignment: null,
+      benchmarkLookup: {
+        currentClassId: '',
+        currentStudentId: '',
+        teachers: [],
+        classes: []
+      }
     };
 
     if (isCaseManager) {
-      response.caseManager = getCaseManagerDashboard_(staff);
+      const students = managedStudents_(staff).map(publicStudent_);
+      response.caseManager = {
+        students: students,
+        goals: [],
+        benchmarks: [],
+        toDos: [],
+        staff: [],
+        caseManagers: [],
+        aides: [],
+        scheduleTypes: getScheduleTypeSummaries_(),
+        requests: {
+          pending: [],
+          timeOffHistory: [],
+          currentAvailability: []
+        },
+        messages: {
+          messages: [],
+          activeToday: []
+        }
+      };
     } else {
+      const currentAssignment = getCurrentAssignment_(email, now);
+      response.criticalBenchmarks = getCriticalBenchmarks_(staff);
+      response.subjects = activeRows_('Subjects');
+      response.classes = getClassesForStaff_(staff);
+      response.students = getStudentsForStaff_(staff);
+      response.currentAssignment = currentAssignment;
+      response.benchmarkLookup = getBenchmarkLookupContext_(staff, currentAssignment);
       response.aide = {
         schedule: getStaffSchedule_(email, today),
         trainedStudents: getTrainedStudents_(email),
@@ -53,6 +105,94 @@ function getAppBootstrap() {
       };
     }
     return response;
+    };
+    return cachedResponse_(
+      'app-bootstrap',
+      [email, today, timeBucket],
+      producer,
+      null,
+      Boolean(force)
+    );
+  });
+}
+
+function getCaseManagerOverviewData() {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    return getCaseManagerOverviewData_(staff);
+  });
+}
+
+function getCaseManagerOverviewData_(staff) {
+  return {
+    toDos: getCaseManagerTodos_(staff)
+  };
+}
+
+function getCaseManagerEntryData() {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    return getCaseManagerEntryData_(staff);
+  });
+}
+
+function getCaseManagerEntryData_(staff) {
+  return {
+    subjects: activeRows_('Subjects'),
+    classes: getClassesForStaff_(staff),
+    students: getStudentsForStaff_(staff),
+    benchmarkLookup: getBenchmarkLookupContext_(staff, null)
+  };
+}
+
+function getCaseManagerPeopleData() {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    return getCaseManagerPeopleData_(staff);
+  });
+}
+
+function getCaseManagerPeopleData_(staff) {
+  const staffRows = activeRows_('Staff');
+  const isAdmin = toBoolean_(staff.IsAdmin);
+  return {
+    students: managedStudents_(staff).map(publicStudent_),
+    staff: staffRows.map(publicStaff_)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    caseManagers: staffRows
+      .filter(row => row.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(row.IsAdmin))
+      .filter(row => isAdmin ||
+        normalizeEmail_(row.Email) === normalizeEmail_(staff.Email))
+      .map(publicStaff_)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    aides: staffRows
+      .filter(row => row.Role === VOICES.ROLES.AIDE)
+      .map(publicStaff_),
+    roster: getClassRosterData_(staff)
+  };
+}
+
+function getCaseManagerWorkspaceData(force) {
+  return withRowsCache_(() => {
+    const staff = requireCaseManager_();
+    const producer = () => ({
+      generatedAt: new Date().toISOString(),
+      overview: getCaseManagerOverviewData_(staff),
+      entry: getCaseManagerEntryData_(staff),
+      people: getCaseManagerPeopleData_(staff),
+      requests: getStaffRequestData_(),
+      messages: getMessageManagementData_(staff),
+      ieps: getIepsForCurrentCaseManager_(staff),
+      goals: getGoalManagerData_(staff, ''),
+      scheduleTypes: getScheduleTypeSummaries_()
+    });
+    return cachedResponse_(
+      'case-manager-workspace',
+      [normalizeEmail_(staff.Email)],
+      producer,
+      null,
+      Boolean(force)
+    );
   });
 }
 
@@ -110,6 +250,14 @@ function requireCaseManager_() {
   return staff;
 }
 
+function requireAdmin_() {
+  const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
+  if (!toBoolean_(staff.IsAdmin)) {
+    throw new Error('Administrator access is required.');
+  }
+  return staff;
+}
+
 function normalizeEmail_(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -121,6 +269,12 @@ function toBoolean_(value) {
 function toNumber_(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : (fallback || 0);
+}
+
+function optionalNumber_(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function uuid_() {

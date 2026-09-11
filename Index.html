@@ -21,6 +21,7 @@
       --shadow: 0 18px 50px rgba(0, 0, 0, .32);
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
       margin: 0;
       min-height: 100vh;
@@ -44,7 +45,15 @@
       transition: opacity .4s ease, visibility .4s ease;
     }
     .loading.done { opacity: 0; visibility: hidden; }
-    .loading-inner { text-align: center; }
+    .loading-inner {
+      width: min(460px, calc(100vw - 32px));
+      padding: 32px;
+      text-align: center;
+      border: 1px solid var(--border);
+      border-radius: 26px;
+      background: linear-gradient(145deg, rgba(31,33,38,.96), rgba(18,20,24,.96));
+      box-shadow: var(--shadow);
+    }
     .loading-logo {
       width: 150px;
       height: 110px;
@@ -59,6 +68,9 @@
       text-transform: uppercase;
       color: #d5d6d8;
     }
+    .access-actions { display: grid; gap: 10px; margin-top: 22px; }
+    .access-actions .btn { width: 100%; text-decoration: none; }
+    body.app-locked main { filter: blur(8px); pointer-events: none; user-select: none; }
     .loading-dots::after {
       content: "";
       animation: dots 1.5s steps(4, end) infinite;
@@ -423,6 +435,10 @@
     }
     dialog.wide-dialog { width: min(1000px, calc(100vw - 30px)); }
     dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
+    dialog.dialog-fallback-open { display: block; position: fixed; z-index: 1002; inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
+    #dialogFallbackBackdrop { display: none; position: fixed; inset: 0; z-index: 1001; background: rgba(0,0,0,.76); backdrop-filter: blur(5px); }
+    body.dialog-open #dialogFallbackBackdrop { display: block; }
+    body.dialog-open > *:not(dialog):not(#dialogFallbackBackdrop):not(script) { pointer-events: none; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
     .empty { padding: 24px; text-align: center; color: var(--muted); }
     @media (max-width: 900px) {
@@ -442,13 +458,28 @@
       .card { padding: 16px; border-radius: 18px; }
       .toolbar { flex-wrap: wrap; }
     }
+    @media print {
+      body * { visibility: hidden !important; }
+      #goalReportDialog, #goalReportDialog * { visibility: visible !important; }
+      #goalReportDialog { position: absolute; inset: 0; width: 100%; max-width: none; max-height: none; background: #fff; color: #111; border: 0; box-shadow: none; }
+      #goalReportDialog .no-print { display: none !important; }
+      #goalReportDialog .card, #goalReportDialog .message { background: #fff; color: #111; border-color: #bbb; break-inside: avoid; }
+      #goalReportDialog .muted { color: #444; }
+    }
   </style>
 </head>
 <body>
   <div id="loading" class="loading">
     <div class="loading-inner">
       <img id="loadingLogo" class="loading-logo" src="<?!= defaultLogo ?>" alt="V.O.I.C.E.S logo">
-      <div class="loading-title">V.O.I.C.E.S 2.0 Initializing<span class="loading-dots"></span></div>
+      <div class="loading-title" id="accessTitle">V.O.I.C.E.S 2.0</div>
+      <h2 id="accessHeading">Student support workspace</h2>
+      <p id="accessDescription" class="muted">Continue with your authorized school Google Workspace account.</p>
+      <div class="access-actions">
+        <button id="continueWithGoogle" class="btn primary" type="button">Continue with school Google account</button>
+        <a id="switchGoogleAccount" class="btn ghost" href="#" target="_top">Choose a different Google account</a>
+      </div>
+      <div id="accessStatus" class="muted small" style="margin-top:14px">Access is limited to active V.O.I.C.E.S staff.</div>
     </div>
   </div>
 
@@ -463,6 +494,7 @@
       </div>
       <div class="user-block">
         <button id="globalRefresh" class="btn ghost small-btn" type="button">Refresh</button>
+        <button id="lockApp" class="btn ghost small-btn" type="button">Lock</button>
         <div class="welcome">
           <div id="welcomeName">Welcome</div>
           <span id="roleChip" class="role-chip"></span>
@@ -552,6 +584,63 @@
     <div id="benchmarkHistoryContent"></div>
   </dialog>
 
+  <dialog id="goalReportDialog" class="wide-dialog">
+    <div class="card-header no-print">
+      <div><div class="eyebrow">IEP meeting export</div><h2>Progress summary</h2></div>
+      <div class="toolbar"><button id="printGoalReport" class="btn primary small-btn" type="button">Print / Save as PDF</button><button class="btn ghost small-btn" type="button" onclick="closeDialog('goalReportDialog')">Close</button></div>
+    </div>
+    <div id="goalReportContent"></div>
+  </dialog>
+
+  <dialog id="bulkObservationDialog" class="wide-dialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk observations</h2></div>
+      <button class="btn ghost small-btn" type="button" onclick="closeDialog('bulkObservationDialog')">Close</button>
+    </div>
+    <p class="muted">Columns: BenchmarkId, ClassId, ObservationDate, Successes, Trials, PromptLevel, PromptCount, Notes. Include the header row; IDs must match exactly.</p>
+    <div class="field"><label for="bulkObservationText">Copied rows</label><textarea id="bulkObservationText" style="min-height:220px"></textarea></div>
+    <div id="bulkObservationPreview" class="list" style="margin-top:12px"></div>
+    <div class="dialog-actions"><button id="previewBulkObservations" class="btn ghost" type="button">Preview</button><button id="queueBulkObservations" class="btn primary" type="button" disabled>Add previewed rows to queue</button></div>
+  </dialog>
+
+  <dialog id="bulkGoalDialog" class="wide-dialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Paste from Google Sheets</div><h2>Bulk goals and benchmarks</h2></div>
+      <button class="btn ghost small-btn" type="button" onclick="closeDialog('bulkGoalDialog')">Close</button>
+    </div>
+    <p class="muted">Columns: GoalKey, StudentId, Goal, Domain, Status, StartDate, DueDate, SubjectIds, BenchmarkOrder, TaskDemand, GoalArchetype, TargetAccuracyPct, TargetPromptLevel, TargetPromptCeiling, ConsistencyTrialsPassed, ConsistencyTrialsWindow, TargetConsecutiveSessions, EvaluationWindowUnit, BenchmarkStartDate, BenchmarkDueDate. Use one row per benchmark and repeat the goal fields; separate multiple subject IDs with commas.</p>
+    <div class="field"><label for="bulkGoalText">Copied rows</label><textarea id="bulkGoalText" style="min-height:240px"></textarea></div>
+    <div id="bulkGoalPreview" class="list" style="margin-top:12px"></div>
+    <div class="dialog-actions"><button id="previewBulkGoals" class="btn ghost" type="button">Preview</button><button id="saveBulkGoals" class="btn primary" type="button" disabled>Save previewed goals</button></div>
+  </dialog>
+
+  <dialog id="adminCatalogDialog" class="wide-dialog">
+    <div class="card-header">
+      <div><div class="eyebrow">Administrator bulk entry</div><h2>Subjects and classes</h2></div>
+      <button class="btn ghost small-btn" type="button" onclick="closeDialog('adminCatalogDialog')">Close</button>
+    </div>
+    <p class="muted">Paste either or both tables from Google Sheets. New IDs are generated automatically.</p>
+    <div class="field">
+      <label for="adminSubjectText">Subjects — column: Name</label>
+      <textarea id="adminSubjectText" style="min-height:130px" placeholder="Name&#10;Life Skills"></textarea>
+    </div>
+    <div class="field">
+      <label for="adminClassText">Classes — columns: ClassName, Subject, TeacherEmail, PeriodId</label>
+      <textarea id="adminClassText" style="min-height:180px" placeholder="ClassName&#9;Subject&#9;TeacherEmail&#9;PeriodId"></textarea>
+    </div>
+    <div id="adminCatalogPreview" class="list" style="margin-top:12px"></div>
+    <div class="dialog-actions"><button id="previewAdminCatalog" class="btn ghost" type="button">Preview</button><button id="saveAdminCatalog" class="btn primary" type="button" disabled>Save previewed records</button></div>
+  </dialog>
+
+  <div id="dialogFallbackBackdrop" aria-hidden="true"></div>
+  <dialog id="appDecisionDialog" role="dialog" aria-modal="true" aria-labelledby="appDecisionTitle" aria-describedby="appDecisionDescription">
+    <h2 id="appDecisionTitle">Confirm</h2>
+    <p id="appDecisionDescription" class="muted"></p>
+    <div id="appDecisionInputWrap" class="field" hidden><label id="appDecisionInputLabel" for="appDecisionInput">Value</label><input id="appDecisionInput"></div>
+    <label id="appDecisionCheckboxWrap" class="check" hidden><input id="appDecisionCheckbox" type="checkbox"><span id="appDecisionCheckboxLabel"></span></label>
+    <div class="dialog-actions"><button id="appDecisionCancel" class="btn ghost" type="button">Cancel</button><button id="appDecisionConfirm" class="btn primary" type="button">Confirm</button></div>
+  </dialog>
+
   <script>
     const state = {
       data: null,
@@ -561,41 +650,165 @@
       editingBenchmarkId: null,
       benchmarkStudentId: '',
       goalStudentId: '',
+      goalVisibility: {},
+      currentGoalWorkspace: null,
       goalWorkspaceCache: {},
+      goalCatalogCache: {},
+      goalCatalogLoaded: false,
+      goalCatalogLoading: false,
       benchmarkEntryCache: {},
       parsedObjectives: [],
       editingMessageId: '',
       editingStaffEmail: '',
       editingStudentId: '',
+      rosterClassId: '',
       lookupClassId: '',
       aideWeekDate: '',
       fullScheduleDate: '',
+      observationQueue: [],
+      observationBatchId: '',
+      observationDraftRevision: 0,
+      observationDraftSavedRevision: 0,
+      observationDraftStatus: '',
+      isLocked: true,
+      lastActivityAt: 0,
+      adminCatalogPreview: null,
+      caseManagerDataLoaded: {},
+      caseManagerWorkspacePromise: null,
+      scheduleDataCache: {},
+      scheduleDataPromises: {},
+      readModelVersion: 0,
       pendingOperations: 0
     };
+    const OBSERVATION_DRAFT_STORAGE_VERSION = 1;
+    const IDLE_LOCK_MS = 30 * 60 * 1000;
+    const IDLE_WARNING_MS = 28 * 60 * 1000;
+    let observationDraftTimer = null;
+    let observationDraftRetryCount = 0;
+    let idleWarningTimer = null;
+    let idleLockTimer = null;
+    let lastPointerActivityAt = 0;
 
     document.addEventListener('DOMContentLoaded', init);
+    window.addEventListener('beforeunload', event => {
+      if (!state.observationQueue.length) return;
+      event.preventDefault();
+      event.returnValue = '';
+    });
 
     async function init() {
       bindStaticForms();
       renderAvailabilityDays();
+      const chooser = 'https:' + '/' + '/accounts.google.com/AccountChooser?continue=' +
+        encodeURIComponent(window.location.href);
+      document.getElementById('switchGoogleAccount').href = chooser;
+      document.getElementById('continueWithGoogle').addEventListener('click', () =>
+        state.data ? resumeWorkspace_() : enterWorkspace_()
+      );
+      document.getElementById('lockApp').addEventListener('click', () => lockWorkspace_(false));
       document.getElementById('globalRefresh').addEventListener('click', async () => {
         try {
           await refreshBootstrap(state.selectedTab);
           toast('Data refreshed.');
         } catch (error) { toast(safeErrorMessage(error), true); }
       });
+      ['pointerdown', 'keydown', 'touchstart'].forEach(eventName =>
+        document.addEventListener(eventName, recordUserActivity_, { passive: true })
+      );
+      document.addEventListener('pointermove', () => {
+        const now = Date.now();
+        if (now - lastPointerActivityAt < 60000) return;
+        lastPointerActivityAt = now;
+        recordUserActivity_();
+      }, { passive: true });
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden || !state.data || state.isLocked) return;
+        if (Date.now() - state.lastActivityAt >= IDLE_LOCK_MS) {
+          lockWorkspace_(true);
+        } else {
+          recordUserActivity_();
+        }
+      });
+    }
+
+    async function enterWorkspace_() {
+      const button = document.getElementById('continueWithGoogle');
+      button.disabled = true;
+      document.getElementById('accessStatus').innerHTML =
+        'Verifying Workspace access<span class="loading-dots"></span>';
       try {
         state.data = normalizeBootstrap(await server('getAppBootstrap'));
-        document.getElementById('loadingLogo').src = state.data.logo;
-        document.getElementById('brandLogo').src = state.data.logo;
+        restoreObservationQueue_();
+        document.getElementById('fatalError').classList.add('hidden');
+        document.getElementById('fatalError').innerHTML = '';
+        const logo = state.data.logo || document.getElementById('loadingLogo').src;
+        document.getElementById('loadingLogo').src = logo;
+        document.getElementById('brandLogo').src = logo;
         document.getElementById('welcomeName').textContent = 'Welcome ' + state.data.user.firstName;
         document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
-        if (state.data.view === 'CASE_MANAGER') renderCaseManager();
-        else renderAide();
+        if (state.data.view === 'CASE_MANAGER') {
+          prewarmDefaultSchedule();
+          state.caseManagerWorkspacePromise = loadCaseManagerWorkspace();
+          renderCaseManager();
+        } else renderAide();
+        state.isLocked = false;
+        document.body.classList.remove('app-locked');
+        recordUserActivity_();
       } catch (error) {
         showFatal(error);
+        document.getElementById('accessStatus').textContent =
+          'Access could not be verified. Review the message below.';
       } finally {
         window.setTimeout(() => document.getElementById('loading').classList.add('done'), 650);
+        button.disabled = false;
+      }
+    }
+
+    function recordUserActivity_() {
+      if (!state.data || state.isLocked) return;
+      state.lastActivityAt = Date.now();
+      window.clearTimeout(idleWarningTimer);
+      window.clearTimeout(idleLockTimer);
+      idleWarningTimer = window.setTimeout(() => {
+        if (!state.isLocked) toast('V.O.I.C.E.S will lock in 2 minutes due to inactivity.');
+      }, IDLE_WARNING_MS);
+      idleLockTimer = window.setTimeout(() => lockWorkspace_(true), IDLE_LOCK_MS);
+    }
+
+    function lockWorkspace_(automatic) {
+      if (!state.data || state.isLocked) return;
+      if (state.observationQueue.length) persistObservationQueue_();
+      state.isLocked = true;
+      window.clearTimeout(idleWarningTimer);
+      window.clearTimeout(idleLockTimer);
+      document.querySelectorAll('dialog[open]').forEach(dialog => closeDialog(dialog.id));
+      document.body.classList.add('app-locked');
+      document.getElementById('accessHeading').textContent = automatic
+        ? 'Locked after 30 minutes of inactivity'
+        : 'Workspace locked';
+      document.getElementById('accessDescription').textContent =
+        'Resume by revalidating your authorized school Google Workspace account. Unsaved observations remain recoverable.';
+      document.getElementById('continueWithGoogle').textContent = 'Resume V.O.I.C.E.S';
+      document.getElementById('accessStatus').textContent =
+        'This lock protects the app screen; it does not sign your browser out of Google.';
+      document.getElementById('loading').classList.remove('done');
+    }
+
+    async function resumeWorkspace_() {
+      const button = document.getElementById('continueWithGoogle');
+      button.disabled = true;
+      document.getElementById('accessStatus').innerHTML =
+        'Revalidating Workspace access<span class="loading-dots"></span>';
+      try {
+        await refreshBootstrap(state.selectedTab);
+        state.isLocked = false;
+        document.body.classList.remove('app-locked');
+        document.getElementById('loading').classList.add('done');
+        recordUserActivity_();
+      } catch (error) {
+        document.getElementById('accessStatus').textContent = safeErrorMessage(error);
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -700,16 +913,121 @@
       renderCaseManagerTab();
     }
 
-    function renderCaseManagerTab() {
+    async function renderCaseManagerTab() {
       const content = document.getElementById('cmContent');
-      if (state.selectedTab === 'overview') renderOverview(content);
-      if (state.selectedTab === 'entry') renderDataEntry(content);
-      if (state.selectedTab === 'schedule') renderScheduleShell(content);
-      if (state.selectedTab === 'benchmarks') renderBenchmarkManager(content);
-      if (state.selectedTab === 'people') renderPeople(content);
-      if (state.selectedTab === 'ieps') renderIeps(content);
-      if (state.selectedTab === 'requests') renderRequests(content);
-      if (state.selectedTab === 'admin') renderAdmin(content);
+      const tab = state.selectedTab;
+      if (tab === 'overview') {
+        renderOverview(content);
+        try {
+          await ensureCaseManagerTabData('overview');
+          if (state.selectedTab === 'overview') renderCaseManagerTodos();
+        } catch (error) {
+          toast(safeErrorMessage(error), true);
+        }
+        return;
+      }
+      if (['entry', 'people', 'requests', 'admin', 'ieps', 'benchmarks'].includes(tab)) {
+        content.innerHTML = '<article class="card empty">Loading this workspace…</article>';
+        try {
+          await ensureCaseManagerTabData(tab);
+        } catch (error) {
+          content.innerHTML = `<article class="card red-tint">${escapeHtml(safeErrorMessage(error))}</article>`;
+          return;
+        }
+        if (state.selectedTab !== tab) return;
+      }
+      if (tab === 'entry') renderDataEntry(content);
+      if (tab === 'schedule') renderScheduleShell(content);
+      if (tab === 'benchmarks') renderBenchmarkManager(content);
+      if (tab === 'people') renderPeople(content);
+      if (tab === 'ieps') renderIeps(content);
+      if (tab === 'requests') renderRequests(content);
+      if (tab === 'admin') renderAdmin(content);
+    }
+
+    async function ensureCaseManagerTabData(tab, force) {
+      if (!force && state.caseManagerDataLoaded[tab]) return;
+      if (!force) {
+        await loadCaseManagerWorkspace();
+        return;
+      }
+      const cm = state.data.caseManager;
+      if (tab === 'overview') {
+        const data = await serverQuiet('getCaseManagerOverviewData');
+        cm.toDos = safeArray(data && data.toDos);
+      } else if (tab === 'entry') {
+        const data = await serverQuiet('getCaseManagerEntryData');
+        state.data.subjects = safeArray(data && data.subjects);
+        state.data.classes = safeArray(data && data.classes);
+        state.data.students = safeArray(data && data.students);
+        state.data.benchmarkLookup = data && data.benchmarkLookup
+          ? data.benchmarkLookup
+          : { currentClassId: '', currentStudentId: '', teachers: [], classes: [] };
+        state.data.benchmarkLookup.teachers = safeArray(state.data.benchmarkLookup.teachers);
+        state.data.benchmarkLookup.classes = safeArray(state.data.benchmarkLookup.classes);
+      } else if (tab === 'people') {
+        const data = await serverQuiet('getCaseManagerPeopleData');
+        cm.students = safeArray(data && data.students);
+        cm.staff = safeArray(data && data.staff);
+        cm.caseManagers = safeArray(data && data.caseManagers);
+        cm.aides = safeArray(data && data.aides);
+      } else if (tab === 'requests') {
+        cm.requests = await serverQuiet('getStaffRequestData');
+      } else if (tab === 'admin') {
+        cm.messages = await serverQuiet('getMessageManagementData');
+      }
+      state.caseManagerDataLoaded[tab] = true;
+    }
+
+    async function loadCaseManagerWorkspace(force) {
+      if (!force && state.caseManagerWorkspacePromise) {
+        return state.caseManagerWorkspacePromise;
+      }
+      const request = serverQuiet('getCaseManagerWorkspaceData', Boolean(force))
+        .then(data => {
+          const cm = state.data.caseManager;
+          const overview = data && data.overview || {};
+          const entry = data && data.entry || {};
+          const people = data && data.people || {};
+          const goals = data && data.goals || {};
+          cm.toDos = safeArray(overview.toDos);
+          state.data.subjects = safeArray(entry.subjects).length
+            ? safeArray(entry.subjects)
+            : safeArray(goals.subjects);
+          state.data.classes = safeArray(entry.classes);
+          state.data.students = safeArray(entry.students);
+          state.data.benchmarkLookup = entry.benchmarkLookup || {
+            currentClassId: '',
+            currentStudentId: '',
+            teachers: [],
+            classes: []
+          };
+          state.data.benchmarkLookup.teachers = safeArray(state.data.benchmarkLookup.teachers);
+          state.data.benchmarkLookup.classes = safeArray(state.data.benchmarkLookup.classes);
+          cm.students = safeArray(people.students);
+          cm.staff = safeArray(people.staff);
+          cm.caseManagers = safeArray(people.caseManagers);
+          cm.aides = safeArray(people.aides);
+          cm.requests = data && data.requests || {};
+          cm.messages = data && data.messages || {};
+          cm.ieps = safeArray(data && data.ieps);
+          cm.goals = safeArray(goals.goals);
+          cm.benchmarks = safeArray(goals.benchmarks);
+          cm.scheduleTypes = safeArray(data && data.scheduleTypes);
+          state.goalCatalogCache.setup = goals;
+          state.goalCatalogLoaded = true;
+          ['overview', 'entry', 'people', 'requests', 'admin', 'ieps', 'benchmarks', 'schedule']
+            .forEach(key => { state.caseManagerDataLoaded[key] = true; });
+          window.setTimeout(prewarmDefaultSchedule, 500);
+          return data;
+        })
+        .finally(() => {
+          if (state.caseManagerWorkspacePromise === request) {
+            state.caseManagerWorkspacePromise = null;
+          }
+        });
+      state.caseManagerWorkspacePromise = request;
+      return request;
     }
 
     function renderDataEntry(root) {
@@ -724,7 +1042,6 @@
     function renderOverview(root) {
       const cm = state.data.caseManager;
       const messages = safeArray(state.data.dailyMessages);
-      if (!state.goalStudentId && cm.students[0]) state.goalStudentId = cm.students[0].id;
       root.innerHTML = `
         <div class="section-tools" style="margin-bottom:14px"><div><div class="eyebrow">Case manager dashboard</div><h2>Overview</h2></div><button class="btn ghost small-btn" type="button" data-refresh="overview">Refresh</button></div>
         <article class="card mobile-cm-note">
@@ -742,8 +1059,8 @@
               </div>`).join('') : '<div class="empty">No global messages today.</div>'}
           </article>
           <article class="card">
-            <div class="card-header"><div><div class="eyebrow">Action center</div><h2>To-do list</h2></div><span class="chip">${cm.toDos.length}</span></div>
-            <div class="list">${cm.toDos.length ? cm.toDos.map(item => `
+            <div class="card-header"><div><div class="eyebrow">Action center</div><h2>To-do list</h2></div><span id="caseManagerTodoCount" class="chip">${cm.toDos.length}</span></div>
+            <div id="caseManagerTodos" class="list">${cm.toDos.length ? cm.toDos.map(item => `
               <div class="list-item ${item.urgent ? 'urgent' : ''}">
                 <div class="row"><span class="chip ${item.urgent ? 'critical' : ''}">${escapeHtml(item.type)}</span><strong>${escapeHtml(item.title)}</strong></div>
                 <div class="muted small" style="margin-top:7px">${escapeHtml(item.detail)}</div>
@@ -752,10 +1069,10 @@
           <article class="card desktop-cm-only">
             <div class="card-header"><div><div class="eyebrow">Student workspace</div><h2>Goal progress</h2></div></div>
             <div class="field"><label>Student</label><select id="goalStudent"><option value="">Choose student</option>${options(cm.students, 'id', 'name', state.goalStudentId)}</select></div>
-            <p class="muted small" style="margin:12px 0 0">Each colored line combines chronological entries from that annual goal’s three benchmarks.</p>
+            <p class="muted small" style="margin:12px 0 0">Goal lines can be hidden locally; benchmark annotations and prompt colors remain visible without reloading data.</p>
           </article>
           <article class="card span-2 desktop-cm-only">
-            <div class="card-header"><div><div class="eyebrow">Annual goals</div><h2>Progress over time</h2></div></div>
+            <div class="card-header"><div><div class="eyebrow">Annual goals</div><h2>Progress over time</h2></div><button class="btn ghost small-btn" id="openGoalReport" type="button">Progress summary</button></div>
             <div id="goalProgressChart" class="chart"><div class="empty">Choose a student to load goal progress.</div></div>
             <div id="goalLegend" class="goal-legend"></div>
           </article>
@@ -769,9 +1086,23 @@
       if (!studentSelect) return;
       studentSelect.addEventListener('change', () => {
         state.goalStudentId = studentSelect.value;
+        state.goalVisibility = {};
         loadGoalWorkspace(state.goalStudentId);
       });
       if (state.goalStudentId) loadGoalWorkspace(state.goalStudentId);
+    }
+
+    function renderCaseManagerTodos() {
+      const items = safeArray(state.data && state.data.caseManager && state.data.caseManager.toDos);
+      const count = document.getElementById('caseManagerTodoCount');
+      const root = document.getElementById('caseManagerTodos');
+      if (!count || !root) return;
+      count.textContent = String(items.length);
+      root.innerHTML = items.length ? items.map(item => `
+        <div class="list-item ${item.urgent ? 'urgent' : ''}">
+          <div class="row"><span class="chip ${item.urgent ? 'critical' : ''}">${escapeHtml(item.type)}</span><strong>${escapeHtml(item.title)}</strong></div>
+          <div class="muted small" style="margin-top:7px">${escapeHtml(item.detail)}</div>
+        </div>`).join('') : '<div class="empty">Nothing needs attention.</div>';
     }
 
     function renderScheduleShell(root) {
@@ -798,7 +1129,29 @@
       document.getElementById('previousScheduleWeek').addEventListener('click', () => shiftScheduleDate(-7));
       document.getElementById('nextScheduleWeek').addEventListener('click', () => shiftScheduleDate(7));
       bindRefreshButtons(root);
-      loadScheduleBuilder();
+      loadScheduleTypeSummaries();
+    }
+
+    async function loadScheduleTypeSummaries(force) {
+      const select = document.getElementById('scheduleTemplate');
+      if (!select) return;
+      if (!force && state.data.caseManager.scheduleTypes.length) return;
+      select.disabled = true;
+      try {
+        if (!force && state.caseManagerWorkspacePromise) {
+          await state.caseManagerWorkspacePromise;
+        }
+        const types = !force && state.data.caseManager.scheduleTypes.length
+          ? state.data.caseManager.scheduleTypes
+          : safeArray(await serverQuiet('getScheduleTypeSummaries'));
+        state.data.caseManager.scheduleTypes = types;
+        const selected = select.value;
+        select.innerHTML = `<option value="">Current day</option>${options(types, 'id', 'name', selected)}`;
+      } catch (error) {
+        toast(safeErrorMessage(error), true);
+      } finally {
+        select.disabled = false;
+      }
     }
 
     function shiftScheduleDate(days) {
@@ -810,11 +1163,18 @@
       loadScheduleBuilder();
     }
 
-    async function loadScheduleBuilder() {
+    async function loadScheduleBuilder(force) {
+      force = force === true;
       const date = document.getElementById('scheduleDate').value;
       if (!date) return toast('Choose a date.', true);
+      const workspace = document.getElementById('scheduleWorkspace');
+      const button = document.getElementById('loadSchedule');
+      const templateId = document.getElementById('scheduleTemplate').value;
+      if (workspace) workspace.innerHTML = '<div class="card empty">Loading schedule data…</div>';
+      if (button) button.disabled = true;
       try {
-        state.scheduleData = await server('getScheduleBuilderData', date);
+        const response = await requestScheduleData(date, templateId, force);
+        state.scheduleData = JSON.parse(JSON.stringify(response));
         if (!state.scheduleData || !state.scheduleData.schedule) throw new Error('The schedule response was incomplete.');
         state.scheduleData.aides = safeArray(state.scheduleData.aides);
         state.scheduleData.classes = safeArray(state.scheduleData.classes);
@@ -822,12 +1182,12 @@
         state.scheduleData.scheduleTypes = safeArray(state.scheduleData.scheduleTypes);
         state.scheduleData.training = safeArray(state.scheduleData.training);
         state.scheduleData.staffingStatus = safeArray(state.scheduleData.staffingStatus);
+        state.scheduleData.dailyHours = safeArray(state.scheduleData.dailyHours);
         state.scheduleData.unassignedOneToOnes = safeArray(state.scheduleData.unassignedOneToOnes);
         state.scheduleData.unavailable = safeArray(state.scheduleData.unavailable);
         state.scheduleData.schedule.periods = safeArray(state.scheduleData.schedule.periods);
         state.scheduleData.schedule.assignments = safeArray(state.scheduleData.schedule.assignments);
         state.scheduleData.week = normalizeWeekData(state.scheduleData.week);
-        const templateId = document.getElementById('scheduleTemplate').value;
         if (templateId) {
           const template = state.scheduleData.scheduleTypes.find(item => String(item.id) === templateId);
           if (template) {
@@ -839,7 +1199,46 @@
         }
         renderScheduleWorkspace();
         if (templateId) scheduleDraftChanged();
-      } catch (error) { toast(error.message, true); }
+      } catch (error) {
+        if (workspace) workspace.innerHTML = `<div class="card empty">${escapeHtml(error.message)}</div>`;
+        toast(error.message, true);
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    function requestScheduleData(date, templateId, force) {
+      const cacheKey = date + '|' + templateId;
+      if (!force && state.scheduleDataCache[cacheKey]) {
+        return Promise.resolve(state.scheduleDataCache[cacheKey]);
+      }
+      if (!force && state.scheduleDataPromises[cacheKey]) {
+        return state.scheduleDataPromises[cacheKey];
+      }
+      const version = state.readModelVersion;
+      const request = serverQuiet('getScheduleBuilderData', date, templateId, Boolean(force))
+        .then(response => {
+          if (version === state.readModelVersion) {
+            state.scheduleDataCache[cacheKey] = response;
+          }
+          return response;
+        })
+        .finally(() => {
+          if (state.scheduleDataPromises[cacheKey] === request) {
+            delete state.scheduleDataPromises[cacheKey];
+          }
+        });
+      state.scheduleDataPromises[cacheKey] = request;
+      return request;
+    }
+
+    function prewarmDefaultSchedule() {
+      if (!state.data || state.data.view !== 'CASE_MANAGER') return;
+      const defaultType = safeArray(state.data.caseManager.scheduleTypes)
+        .find(item => item.isDefault);
+      if (!defaultType) return;
+      requestScheduleData(state.data.today, defaultType.id, false)
+        .catch(() => {});
     }
 
     function renderScheduleWorkspace() {
@@ -976,6 +1375,7 @@
     function scheduleDraftChanged() {
       if (!state.scheduleData || !document.getElementById('scheduleTable')) return;
       state.scheduleData.schedule.assignments = collectScheduleAssignments();
+      collectScheduleDailyHours_();
       refreshScheduleCellStatusIndicators_();
       updateScheduleHeaderHours_();
       renderScheduleCoverageAssistant();
@@ -1050,6 +1450,33 @@
       table.querySelectorAll('.schedule-cell [data-field]').forEach(input => input.addEventListener('change', () => {
         scheduleDraftChanged();
       }));
+      table.querySelectorAll('select[data-schedule-options]').forEach(input => {
+        input.addEventListener('focus', () => hydrateScheduleOptions_(input), { once: true });
+      });
+      table.querySelectorAll('[data-shift-field]').forEach(input => input.addEventListener('change', () => {
+        const hours = scheduleHoursForAide_(input.dataset.aideEmail, true);
+        hours[input.dataset.shiftField] = input.value;
+        scheduleDraftChanged();
+      }));
+      table.querySelectorAll('[data-lunch-check]').forEach(input => input.addEventListener('change', () => {
+        if (input.checked) {
+          table.querySelectorAll('[data-lunch-check]').forEach(other => {
+            if (other !== input && normalizeEmail(other.dataset.aideEmail) === normalizeEmail(input.dataset.aideEmail)) {
+              other.checked = false;
+            }
+          });
+          const time = input.closest('.schedule-cell').querySelector('[data-lunch-time]');
+          if (time && !time.value) {
+            const period = safeArray(state.scheduleData.schedule.periods)
+              .find(item => String(item.periodId) === String(input.closest('.schedule-cell').dataset.periodId));
+            time.value = period ? period.startTime : '';
+          }
+        }
+        scheduleDraftChanged();
+      }));
+      table.querySelectorAll('[data-lunch-time]').forEach(input =>
+        input.addEventListener('change', scheduleDraftChanged)
+      );
       table.querySelectorAll('[data-mark-aide-off]').forEach(button =>
         button.addEventListener('click', () => markScheduleAideOff_(button.dataset.markAideOff))
       );
@@ -1095,36 +1522,108 @@
         String(item.periodId) === String(period.periodId) && normalizeEmail(item.aideEmail) === normalizeEmail(aide.email)
       ) || {};
       const status = scheduleCellStatus(aide.email, period);
+      const blocked = status.blockingReason ? 'disabled' : '';
       const key = encodeURIComponent(period.periodId + '|' + aide.email);
+      const classOptions = scheduleClassOptionsForPeriod_(period.periodId, assignment.classId);
       return `<td class="schedule-assignment-cell ${escapeAttr(status.level)}">
         <div class="schedule-cell" data-cell="${key}" data-period-id="${escapeAttr(period.periodId)}" data-aide-email="${escapeAttr(aide.email)}">
           ${status.blockingReason ? `<div class="schedule-cell-alert blocked">${escapeHtml(status.blockingReason)}</div>` : ''}
           ${!status.blockingReason && status.warningReason ? `<div class="schedule-cell-alert warning">${escapeHtml(status.warningReason)}</div>` : ''}
-          <select data-field="classId"><option value="">No class</option>${options(state.scheduleData.classes, 'id', 'name', assignment.classId)}</select>
-          <select data-field="studentId"><option value="">No 1:1</option>${options(state.scheduleData.oneToOneStudents, 'id', 'name', assignment.studentId)}</select>
-          <input data-field="duty" placeholder="Duty / OFF" value="${escapeAttr(assignment.duty || '')}">
-          <input data-field="note" placeholder="Note" value="${escapeAttr(assignment.note || '')}">
+          ${scheduleSelectMarkup_('classId', classOptions, 'No class', assignment.classId, blocked)}
+          ${scheduleSelectMarkup_('studentId', state.scheduleData.oneToOneStudents, 'No 1:1', assignment.studentId, blocked)}
+          <input data-field="duty" placeholder="Duty / OFF" value="${escapeAttr(assignment.duty || '')}" ${blocked}>
+          <input data-field="note" placeholder="Note" value="${escapeAttr(assignment.note || '')}" ${blocked}>
+          <label class="check small"><input type="checkbox" data-lunch-check data-aide-email="${escapeAttr(aide.email)}" ${scheduleLunchIsInPeriod_(aide.email, period) ? 'checked' : ''} ${blocked}> Lunch</label>
+          <input type="time" data-lunch-time value="${scheduleLunchIsInPeriod_(aide.email, period) ? escapeAttr(scheduleHoursForAide_(aide.email).lunchStartTime || '') : ''}" aria-label="Lunch start time" ${blocked}>
+          ${status.coveredTime ? `<div class="muted small">Covered ${escapeHtml(status.coveredTime)}</div>` : ''}
         </div>
       </td>`;
     }
 
+    function scheduleSelectMarkup_(field, items, emptyLabel, selectedId, blocked) {
+      const selected = safeArray(items).find(item =>
+        String(item.id) === String(selectedId || '')
+      );
+      return `<select data-field="${escapeAttr(field)}" data-schedule-options="${escapeAttr(field)}" ${blocked}>
+        <option value="">${escapeHtml(emptyLabel)}</option>
+        ${selected ? `<option value="${escapeAttr(selected.id)}" selected>${escapeHtml(selected.name)}</option>` : ''}
+      </select>`;
+    }
+
+    function scheduleClassOptionKey_(item) {
+      const name = String(item && item.name || '').trim().toLowerCase();
+      return name || 'class:' + String(item && item.id || '');
+    }
+
+    function scheduleClassOptionsForPeriod_(periodId, selectedId) {
+      const grouped = safeArray(state.scheduleData && state.scheduleData.classes)
+        .reduce((index, item) => {
+          const key = scheduleClassOptionKey_(item);
+          if (!index[key]) index[key] = [];
+          index[key].push(item);
+          return index;
+        }, {});
+      return Object.keys(grouped).map(key => {
+        const matches = grouped[key];
+        return matches.find(item => String(item.id) === String(selectedId || '')) ||
+          matches.find(item => String(item.periodId) === String(periodId || '')) ||
+          matches[0];
+      }).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    }
+
+    function hydrateScheduleOptions_(select) {
+      if (!select || select.dataset.optionsLoaded === 'true') return;
+      const selected = select.value;
+      const isClass = select.dataset.scheduleOptions === 'classId';
+      const cell = select.closest('.schedule-cell');
+      const items = isClass
+        ? scheduleClassOptionsForPeriod_(cell && cell.dataset.periodId, selected)
+        : state.scheduleData.oneToOneStudents;
+      select.innerHTML = `<option value="">${isClass ? 'No class' : 'No 1:1'}</option>` +
+        options(items, 'id', 'name', selected);
+      select.value = selected;
+      select.dataset.optionsLoaded = 'true';
+    }
+
+    function setScheduleSelectValue_(select, value) {
+      if (!select) return;
+      let nextValue = value || '';
+      if (select.dataset.scheduleOptions === 'classId' && nextValue) {
+        const source = safeArray(state.scheduleData && state.scheduleData.classes)
+          .find(item => String(item.id) === String(nextValue));
+        const cell = select.closest('.schedule-cell');
+        const target = source && scheduleClassOptionsForPeriod_(cell && cell.dataset.periodId, '')
+          .find(item => scheduleClassOptionKey_(item) === scheduleClassOptionKey_(source));
+        if (target) nextValue = target.id;
+      }
+      hydrateScheduleOptions_(select);
+      select.value = nextValue;
+    }
+
     function renderScheduleAideHeader(aide) {
       const status = scheduleCellStatus(aide.email, null);
-      const hours = scheduleLiveHoursForAide_(aide.email, safeArray(state.scheduleData.schedule.assignments));
+      const shift = scheduleHoursForAide_(aide.email);
+      const hours = scheduleLiveHoursForAide_(aide.email);
       const availability = status.availabilityLabel
         ? `<div class="muted">${escapeHtml(status.availabilityLabel)}</div>`
         : '';
       const badge = status.blockingReason
         ? `<span class="chip status-denied">${escapeHtml(status.shortLabel)}</span>`
         : (status.warningReason ? `<span class="chip status-pending">Pending request</span>` : '');
-      return `<th>${escapeHtml(aide.displayName)}<div class="muted">${escapeHtml(aide.email)}</div><div class="schedule-header-hours" data-aide-hours="${escapeAttr(aide.email)}">${scheduleHeaderHoursMarkup_(hours)}</div>${availability}${badge}<button class="btn danger small-btn schedule-aide-off" type="button" data-mark-aide-off="${escapeAttr(aide.email)}" aria-label="Mark ${escapeAttr(aide.displayName)} off for all periods">Mark off</button></th>`;
+      return `<th>${escapeHtml(aide.displayName)}<div class="muted">${escapeHtml(aide.email)}</div>
+        <div class="form-grid"><div class="field"><label>Start</label><input type="time" data-shift-field="startTime" data-aide-email="${escapeAttr(aide.email)}" value="${escapeAttr(shift.startTime || '')}"></div><div class="field"><label>End</label><input type="time" data-shift-field="endTime" data-aide-email="${escapeAttr(aide.email)}" value="${escapeAttr(shift.endTime || '')}"></div></div>
+        <div class="schedule-header-hours" data-aide-hours="${escapeAttr(aide.email)}">${scheduleHeaderHoursMarkup_(hours)}</div>${availability}${badge}<button class="btn danger small-btn schedule-aide-off" type="button" data-mark-aide-off="${escapeAttr(aide.email)}" aria-label="Mark ${escapeAttr(aide.displayName)} off for all periods">Mark off</button></th>`;
     }
 
-    function markScheduleAideOff_(email) {
+    async function markScheduleAideOff_(email) {
       const aide = safeArray(state.scheduleData && state.scheduleData.aides)
         .find(item => normalizeEmail(item.email) === normalizeEmail(email));
       const displayName = aide ? aide.displayName : email;
-      if (!confirm(`Mark ${displayName} OFF for every period? Their class, 1:1, duty, and note assignments will be cleared from this draft.`)) return;
+      if (!await confirmDialog({
+        title: 'Mark aide off',
+        message: `Mark ${displayName} OFF for every period? Their class, 1:1, duty, and note assignments will be cleared from this draft.`,
+        confirmLabel: 'Mark off'
+      })) return;
       document.querySelectorAll('.schedule-cell').forEach(cell => {
         if (normalizeEmail(cell.dataset.aideEmail) !== normalizeEmail(email)) return;
         cell.querySelectorAll('[data-field]').forEach(input => {
@@ -1145,6 +1644,9 @@
           tableCell.classList.remove('blocked', 'warning', 'available');
           tableCell.classList.add(status.level);
         }
+        cell.querySelectorAll('[data-field], [data-lunch-check], [data-lunch-time]').forEach(input => {
+          input.disabled = Boolean(status.blockingReason);
+        });
         cell.querySelectorAll(':scope > .schedule-cell-alert').forEach(alert => alert.remove());
         if (status.blockingReason) {
           cell.insertAdjacentHTML('afterbegin', `<div class="schedule-cell-alert blocked">${escapeHtml(status.blockingReason)}</div>`);
@@ -1156,12 +1658,9 @@
 
     function updateScheduleHeaderHours_() {
       if (!state.scheduleData) return;
-      const assignments = document.getElementById('scheduleTable')
-        ? collectScheduleAssignments()
-        : safeArray(state.scheduleData.schedule.assignments);
       document.querySelectorAll('[data-aide-hours]').forEach(element => {
         element.innerHTML = scheduleHeaderHoursMarkup_(
-          scheduleLiveHoursForAide_(element.dataset.aideHours, assignments)
+          scheduleLiveHoursForAide_(element.dataset.aideHours)
         );
       });
     }
@@ -1171,32 +1670,56 @@
       return `Day ${roundClientHours(hours.dailyHours)} hrs · Week ${roundClientHours(hours.weeklyHours)}${capacity} hrs${hours.lunchDeducted ? '<div class="muted">0.5 hr lunch deducted</div>' : ''}`;
     }
 
-    function scheduleLiveHoursForAide_(email, assignments) {
-      const intervals = safeArray(assignments)
-        .filter(item => normalizeEmail(item.aideEmail) === normalizeEmail(email))
-        .filter(item => {
-          if (String(item.type || '').toUpperCase() === 'OFF') return false;
-          if (String(item.duty || '').trim().toUpperCase() === 'OFF') return false;
-          return Boolean(item.classId || item.studentId || String(item.duty || '').trim() || String(item.note || '').trim());
-        })
-        .map(item => {
-          const period = safeArray(state.scheduleData.schedule.periods)
-            .find(row => String(row.periodId) === String(item.periodId));
-          return period ? [scheduleTimeToMinutes_(period.startTime), scheduleTimeToMinutes_(period.endTime)] : null;
-        })
-        .filter(item => item && item[0] >= 0 && item[1] > item[0])
-        .sort((a, b) => a[0] - b[0]);
-      const merged = [];
-      intervals.forEach(interval => {
-        const current = merged[merged.length - 1];
-        if (current && interval[0] <= current[1]) current[1] = Math.max(current[1], interval[1]);
-        else merged.push(interval.slice());
+    function scheduleHoursForAide_(email, create) {
+      let hours = safeArray(state.scheduleData && state.scheduleData.dailyHours)
+        .find(item => normalizeEmail(item.aideEmail) === normalizeEmail(email));
+      if (!hours && create) {
+        hours = { aideEmail: email, startTime: '', endTime: '', lunchStartTime: '', lunchMinutes: 0, source: 'DATE' };
+        state.scheduleData.dailyHours.push(hours);
+      }
+      return hours || {};
+    }
+
+    function scheduleLunchIsInPeriod_(email, period) {
+      const lunch = scheduleTimeToMinutes_(scheduleHoursForAide_(email).lunchStartTime);
+      return lunch >= scheduleTimeToMinutes_(period.startTime) &&
+        lunch < scheduleTimeToMinutes_(period.endTime);
+    }
+
+    function collectScheduleDailyHours_() {
+      const values = safeArray(state.scheduleData.dailyHours).map(item => ({...item}));
+      document.querySelectorAll('[data-shift-field]').forEach(input => {
+        let item = values.find(row => normalizeEmail(row.aideEmail) === normalizeEmail(input.dataset.aideEmail));
+        if (!item) {
+          item = { aideEmail: input.dataset.aideEmail, startTime: '', endTime: '', lunchStartTime: '', lunchMinutes: 0 };
+          values.push(item);
+        }
+        item[input.dataset.shiftField] = input.value;
       });
-      const grossHours = roundClientHours(
-        merged.reduce((total, interval) => total + interval[1] - interval[0], 0) / 60
-      );
-      const lunchDeducted = grossHours > 5;
-      const dailyHours = roundClientHours(grossHours - (lunchDeducted ? .5 : 0));
+      values.forEach(item => {
+        item.lunchStartTime = '';
+        item.lunchMinutes = 0;
+      });
+      document.querySelectorAll('[data-lunch-check]:checked').forEach(input => {
+        const item = values.find(row => normalizeEmail(row.aideEmail) === normalizeEmail(input.dataset.aideEmail));
+        const time = input.closest('.schedule-cell').querySelector('[data-lunch-time]');
+        if (item) {
+          item.lunchStartTime = time ? time.value : '';
+          item.lunchMinutes = item.lunchStartTime ? 30 : 0;
+        }
+      });
+      state.scheduleData.dailyHours = values;
+      return values.filter(item => item.startTime || item.endTime);
+    }
+
+    function scheduleLiveHoursForAide_(email) {
+      const shift = scheduleHoursForAide_(email);
+      const start = scheduleTimeToMinutes_(shift.startTime);
+      const end = scheduleTimeToMinutes_(shift.endTime);
+      const lunchDeducted = Boolean(shift.lunchStartTime);
+      const dailyHours = start >= 0 && end > start
+        ? roundClientHours((end - start - (lunchDeducted ? 30 : 0)) / 60)
+        : 0;
       const summary = safeArray(state.scheduleData.week && state.scheduleData.week.summary && state.scheduleData.week.summary.aides)
         .find(item => normalizeEmail(item.email) === normalizeEmail(email)) || {};
       const priorDay = safeArray(summary.byDay)
@@ -1228,18 +1751,31 @@
       const staffing = safeArray(state.scheduleData && state.scheduleData.staffingStatus)
         .find(item => normalizeEmail(item.email) === normalizeEmail(email)) || {};
       const approvedAvailability = staffing.approvedAvailability || null;
+      const shift = scheduleHoursForAide_(email);
       let blockingReason = '';
       let warningReason = '';
       let shortLabel = '';
+      let coveredTime = '';
       if (staffing.approvedTimeOff) {
         blockingReason = 'Approved time off: ' + (staffing.approvedTimeOff.type || 'Time off');
         shortLabel = 'Time off';
       } else if (approvedAvailability && !approvedAvailability.available) {
         blockingReason = 'Not available';
         shortLabel = 'Unavailable';
-      } else if (period && approvedAvailability && approvedAvailability.available &&
-          (approvedAvailability.startTime > period.startTime || approvedAvailability.endTime < period.endTime)) {
-        blockingReason = `Outside approved hours (${approvedAvailability.startTime}–${approvedAvailability.endTime})`;
+      } else if (!shift.startTime || !shift.endTime) {
+        blockingReason = 'Set shift hours for this date';
+        shortLabel = 'Hours missing';
+      } else if (period) {
+        const overlapStart = Math.max(scheduleTimeToMinutes_(shift.startTime), scheduleTimeToMinutes_(period.startTime));
+        const overlapEnd = Math.min(scheduleTimeToMinutes_(shift.endTime), scheduleTimeToMinutes_(period.endTime));
+        if (overlapEnd <= overlapStart) {
+          blockingReason = `Outside shift hours (${shift.startTime}–${shift.endTime})`;
+          shortLabel = 'Outside hours';
+        } else {
+          coveredTime = scheduleMinutesToTime_(overlapStart) + '–' + scheduleMinutesToTime_(overlapEnd);
+        }
+      }
+      if (period && blockingReason && !shortLabel) {
         shortLabel = 'Outside hours';
       }
       if (staffing.pendingTimeOff) {
@@ -1252,10 +1788,16 @@
         blockingReason: blockingReason,
         warningReason: warningReason,
         shortLabel: shortLabel,
-        availabilityLabel: approvedAvailability && approvedAvailability.available
-          ? `Available ${approvedAvailability.startTime}–${approvedAvailability.endTime}`
+        coveredTime: coveredTime,
+        availabilityLabel: shift.startTime && shift.endTime
+          ? `Shift ${shift.startTime}–${shift.endTime}`
           : ''
       };
+    }
+
+    function scheduleMinutesToTime_(minutes) {
+      return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' +
+        String(minutes % 60).padStart(2, '0');
     }
 
     function renderScheduleCoverageAssistant() {
@@ -1266,6 +1808,7 @@
         ? collectScheduleAssignments()
         : safeArray(state.scheduleData.schedule.assignments);
       const conflicts = assignments
+        .filter(scheduleAssignmentCounts_)
         .map(assignment => {
           const period = safeArray(state.scheduleData.schedule.periods)
             .find(item => String(item.periodId) === String(assignment.periodId));
@@ -1274,6 +1817,7 @@
         })
         .filter(Boolean);
       const pending = assignments
+        .filter(scheduleAssignmentCounts_)
         .map(assignment => {
           const period = safeArray(state.scheduleData.schedule.periods)
             .find(item => String(item.periodId) === String(assignment.periodId));
@@ -1399,12 +1943,16 @@
       if (source) {
         source.querySelectorAll('[data-field]').forEach(input => {
           const targetInput = target.querySelector(`[data-field="${input.dataset.field}"]`);
-          if (targetInput) targetInput.value = input.value;
+          if (targetInput && targetInput.tagName === 'SELECT') {
+            setScheduleSelectValue_(targetInput, input.value);
+          } else if (targetInput) {
+            targetInput.value = input.value;
+          }
           input.value = '';
         });
       } else {
         const student = target.querySelector('[data-field="studentId"]');
-        if (student) student.value = button.dataset.studentId;
+        setScheduleSelectValue_(student, button.dataset.studentId);
       }
       state.scheduleData.schedule.assignments = collectScheduleAssignments();
       scheduleDraftChanged();
@@ -1419,39 +1967,83 @@
           const details = overCapacity.map(item =>
             `${item.displayName}: ${item.assignedHours}/${item.capacityHours} hours`
           ).join('\n');
-          if (!confirm('This schedule places staff above weekly capacity:\n\n' + details + '\n\nSave anyway?')) return;
+          if (!await confirmDialog({
+            title: 'Weekly capacity exceeded',
+            message: 'This schedule places staff above weekly capacity:\n\n' + details,
+            confirmLabel: 'Save anyway'
+          })) return;
         }
         const result = await server('saveSchedule', payload);
+        if (!result || result.ok === false) {
+          throw new Error(result && result.message ? result.message : 'The schedule could not be saved.');
+        }
         const warnings = safeArray(result.warnings);
         toast(warnings.length ? 'Saved with warnings: ' + warnings.join(' ') : 'Schedule saved.');
-        await loadScheduleBuilder();
+        state.scheduleDataCache = {};
+        await loadScheduleBuilder(true);
       } catch (error) { toast(error.message, true); }
     }
 
     function currentSchedulePayload() {
       return {
         id: state.scheduleData.schedule.id,
+        revision: state.scheduleData.schedule.revision || 0,
         date: state.scheduleData.date,
         name: document.getElementById('scheduleName').value,
         baseScheduleTypeId: document.getElementById('scheduleBase').value,
         temporary: true,
         periods: state.scheduleData.schedule.periods,
-        assignments: collectScheduleAssignments()
+        assignments: collectScheduleAssignments(),
+        dailyHours: collectScheduleDailyHours_()
       };
     }
 
+    function scheduleAssignmentCounts_(item) {
+      if (!item) return false;
+      if (String(item.type || '').toUpperCase() === 'OFF') return false;
+      if (String(item.duty || '').trim().toUpperCase() === 'OFF') return false;
+      return Boolean(item.classId || item.studentId ||
+        String(item.duty || '').trim() || String(item.note || '').trim());
+    }
+
     async function saveCurrentAsScheduleType() {
-      const name = prompt('Name this reusable schedule type:');
-      if (!name) return;
+      const decision = await requestDialog({
+        title: 'Save schedule type',
+        message: 'Name this reusable schedule type.',
+        inputLabel: 'Schedule type name',
+        checkboxLabel: 'Make this the default when no daily schedule exists',
+        confirmLabel: 'Save type'
+      });
+      if (!decision.confirmed || !decision.value.trim()) return;
       try {
-        await server('saveScheduleType', {
-          name,
-          isDefault: confirm('Make this the default schedule when no daily schedule exists?'),
+        const assignments = collectScheduleAssignments();
+        const result = await server('saveScheduleType', {
+          name: decision.value.trim(),
+          isDefault: decision.checked,
           periods: state.scheduleData.schedule.periods,
-          assignments: collectScheduleAssignments()
+          assignments: assignments
         });
-        state.data = normalizeBootstrap(await server('getAppBootstrap'));
-        state.scheduleData.scheduleTypes = state.data.caseManager.scheduleTypes;
+        if (decision.checked) {
+          state.scheduleData.scheduleTypes.forEach(item => { item.isDefault = false; });
+        }
+        state.scheduleData.scheduleTypes = state.scheduleData.scheduleTypes
+          .filter(item => String(item.id) !== String(result.id))
+          .concat([{
+            id: result.id,
+            name: decision.value.trim(),
+            isDefault: decision.checked,
+            periods: state.scheduleData.schedule.periods.map(item => ({ ...item })),
+            assignments: assignments.map(item => ({ ...item }))
+          }]);
+        state.data.caseManager.scheduleTypes = state.scheduleData.scheduleTypes.map(item => ({
+          id: item.id,
+          name: item.name,
+          isDefault: item.isDefault
+        }));
+        const templateSelect = document.getElementById('scheduleTemplate');
+        if (templateSelect) {
+          templateSelect.innerHTML = `<option value="">Current day</option>${options(state.data.caseManager.scheduleTypes, 'id', 'name')}`;
+        }
         toast('Schedule type saved.');
       } catch (error) { toast(error.message, true); }
     }
@@ -1474,12 +2066,26 @@
     }
 
     function renderBenchmarkManager(root) {
+      if (!state.goalCatalogLoaded) {
+        root.innerHTML = '<article class="card empty">Loading goal management data…</article>';
+        if (!state.goalCatalogLoading) {
+          state.goalCatalogLoading = true;
+          refreshGoalManagerData()
+            .catch(error => {
+              root.innerHTML = `<article class="card empty">${escapeHtml(error.message)}</article>`;
+            })
+            .finally(() => {
+              state.goalCatalogLoading = false;
+            });
+        }
+        return;
+      }
       const cm = state.data.caseManager;
       const students = safeArray(cm.students);
       const goals = safeArray(cm.goals);
       const benchmarks = safeArray(cm.benchmarks);
       if (!students.some(item => String(item.id) === String(state.benchmarkStudentId))) {
-        state.benchmarkStudentId = students[0] ? students[0].id : '';
+        state.benchmarkStudentId = '';
       }
       const selectedStudent = students.find(item => String(item.id) === String(state.benchmarkStudentId));
       const selectedGoals = goals.filter(item =>
@@ -1493,11 +2099,13 @@
         </article>
         <div class="master-detail">
           <article class="card desktop-cm-only">
-            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste the three benchmarks together. V.O.I.C.E.S detects each “Short-Term Objective” and its ratio.</p></div><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div>
+            <div class="card-header"><div><div class="eyebrow">Create</div><h2>Annual goal</h2><p class="muted">Paste IEP Short-Term Objectives; V.O.I.C.E.S will review them as benchmarks before saving.</p></div><div class="toolbar"><button id="openBulkGoals" class="btn ghost small-btn" type="button">Bulk paste</button><button class="btn ghost small-btn" type="button" data-refresh="benchmarks">Refresh</button></div></div>
             <form id="goalForm" class="form-grid">
               <div class="field full"><label>Student</label><select name="studentId" required><option value="">Choose student</option>${options(students, 'id', 'name', state.benchmarkStudentId)}</select></div>
+              <div class="field"><label>Domain</label><select name="domain"><option value="">Not specified</option><option>Academic</option><option>Adaptive</option><option>Behavioral</option><option>Communication</option><option>Social/Emotional</option><option>Transition</option></select></div>
+              <div class="field"><label>Status</label><select name="status"><option value="ACTIVE">Active</option><option value="DRAFT">Draft</option></select></div>
               <div class="field full"><label>Annual IEP goal</label><textarea name="goal" placeholder="Describe the overall challenge the student should meet during the IEP year." required></textarea></div>
-              <div class="field full"><label>Three short-term benchmarks</label><textarea name="objectivesText" style="min-height:220px" placeholder="Short-Term Objective 1: Given ..., the student will ... in 4 out of 5 opportunities.&#10;&#10;Short-Term Objective 2: Given ..., the student will ... with 4/5 accuracy.&#10;&#10;Short-Term Objective 3: Given ..., the student will ... in 5 out of 5 trials." required></textarea></div>
+              <div class="field full"><label>IEP Short-Term Objectives</label><textarea name="objectivesText" style="min-height:220px" placeholder="Short-Term Objective 1: State home address with no more than 2 verbal prompts at 60% accuracy for 3 sessions.&#10;&#10;Short-Term Objective 2: State address and phone number with 1 verbal prompt at 80% accuracy."></textarea><span class="muted small">May be blank for a draft goal with no benchmarks.</span></div>
               <div class="field full">
                 <label>Relevant classes / subjects</label>
                 <div class="checks" style="margin-top:7px">${safeArray(state.data.subjects).map(subject => `
@@ -1508,7 +2116,7 @@
               </div>
               <div class="field"><label>Start date</label><input name="startDate" type="date" value="${escapeAttr(state.data.today)}"></div>
               <div class="field"><label>Due date</label><input name="dueDate" type="date"><span class="muted small">Blank uses one calendar year.</span></div>
-              <div class="field full"><div class="eyebrow">Parsed benchmark preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste three objectives to preview the benchmarks.</div></div></div>
+              <div class="field full"><div class="eyebrow">Editable benchmark preview</div><div id="objectivePreview" class="list" style="margin-top:8px"><div class="empty">Paste IEP objectives to preview benchmarks, or save a draft goal without benchmarks.</div></div></div>
               <div class="field full"><button class="btn primary" type="submit">Create goal</button></div>
             </form>
           </article>
@@ -1516,20 +2124,38 @@
             <div class="card-header"><div><div class="eyebrow">Student goal workspace</div><h2>${escapeHtml(selectedStudent ? selectedStudent.name : 'Annual goals')}</h2><p class="muted">Active benchmarks are selected from the Overview workspace.</p></div><span class="chip">${selectedGoals.length} goals</span></div>
             <div class="field"><label>Student filter</label><select id="benchmarkStudentFilter"><option value="">Choose student</option>${options(students, 'id', 'name', state.benchmarkStudentId)}</select></div>
             <div class="list scroll-list" style="margin-top:14px">${selectedGoals.length ? selectedGoals.map(goal => {
-              const items = benchmarks.filter(item => String(item.goalId) === String(goal.id));
+              const items = benchmarks.filter(item =>
+                String(item.goalId) === String(goal.id) && item.active
+              );
               return `
                 <div class="goal-card">
                   <div class="row" style="justify-content:space-between"><strong>${escapeHtml(goal.goal)}</strong>${goal.critical ? '<span class="chip critical">Critical</span>' : ''}</div>
+                  <div class="checks"><span class="chip ${goal.status === 'ACTIVE' ? 'status-approved' : ''}">${escapeHtml(goal.status)}</span></div>
                   <div class="muted small">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</div>
                   <div class="checks">${safeArray(goal.subjectNames).map(name => `<span class="chip">${escapeHtml(name)}</span>`).join('')}</div>
-                  <div class="checks">${items.map(item => `<span class="chip ${item.active ? 'status-approved' : ''}">${escapeHtml(item.category)}${item.active ? ' · Active' : ''}</span>`).join('')}</div>
+                  <div class="checks">${items.length
+                    ? items.map(item => `<span class="chip status-approved">${escapeHtml(item.category)} · Active</span>`).join('')
+                    : '<span class="muted small">No active benchmark</span>'}</div>
+                  ${benchmarks.some(item => String(item.goalId) === String(goal.id)) ? `
+                    <details style="margin-top:10px">
+                      <summary class="muted small">Edit relevant classes / subjects</summary>
+                      <form data-goal-subject-form data-goal-id="${escapeAttr(goal.id)}" style="margin-top:10px">
+                        <div class="checks">${safeArray(state.data.subjects).map(subject => `
+                          <label class="check">
+                            <input type="checkbox" value="${escapeAttr(subject.Id)}" data-existing-goal-subject ${safeArray(goal.subjectIds).map(String).includes(String(subject.Id)) ? 'checked' : ''}>
+                            ${escapeHtml(subject.Name)}
+                          </label>`).join('')}</div>
+                        <button class="btn primary small-btn" type="submit" style="margin-top:10px">Save relevance tags</button>
+                      </form>
+                    </details>` : '<div class="muted small">Relevance tags can be edited after this draft has a benchmark.</div>'}
                   <button class="btn danger small-btn" data-deactivate-goal="${escapeAttr(goal.id)}">Deactivate goal</button>
                 </div>`;
-            }).join('') : '<div class="empty">This student has no active goals.</div>'}</div>
+            }).join('') : '<div class="empty">This student has no active, draft, or completed goals.</div>'}</div>
           </article>
         </div>`;
       const form = document.getElementById('goalForm');
       if (!form) return;
+      document.getElementById('openBulkGoals').addEventListener('click', () => openDialog('bulkGoalDialog'));
       form.addEventListener('submit', saveGoalForm);
       form.elements.objectivesText.addEventListener('input', () => renderGoalObjectivePreview(form));
       form.elements.studentId.addEventListener('change', event => {
@@ -1537,11 +2163,39 @@
       });
       document.getElementById('benchmarkStudentFilter').addEventListener('change', event => {
         state.benchmarkStudentId = event.currentTarget.value;
-        renderBenchmarkManager(root);
+        root.innerHTML = '<article class="card empty">Loading this student’s goal catalog…</article>';
+        refreshGoalManagerData(state.benchmarkStudentId).catch(error => {
+          root.innerHTML = `<article class="card empty">${escapeHtml(error.message)}</article>`;
+        });
       });
       bindRefreshButtons(root);
+      root.querySelectorAll('[data-goal-subject-form]').forEach(subjectForm =>
+        subjectForm.addEventListener('submit', async event => {
+          event.preventDefault();
+          const subjectFormElement = event.currentTarget;
+          try {
+            const result = await server('updateGoalSubjects', {
+              goalId: subjectFormElement.dataset.goalId,
+              subjectIds: Array.from(
+                subjectFormElement.querySelectorAll('[data-existing-goal-subject]:checked')
+              ).map(input => input.value)
+            });
+            if (!result || !result.ok) {
+              return toast(result && result.message ? result.message : 'Goal relevance tags were not saved.', true);
+            }
+            await refreshGoalManagerData(state.benchmarkStudentId, true);
+            toast(result.message || 'Goal relevance tags saved.');
+          } catch (error) {
+            toast(error.message, true);
+          }
+        })
+      );
       root.querySelectorAll('[data-deactivate-goal]').forEach(button => button.addEventListener('click', async () => {
-        if (!confirm('Deactivate this goal and all three benchmarks? Existing entries will remain.')) return;
+        if (!await confirmDialog({
+          title: 'Deactivate goal',
+          message: 'Deactivate this goal and all benchmarks? Existing entries will remain.',
+          confirmLabel: 'Deactivate'
+        })) return;
         try {
           await server('deactivateGoal', button.dataset.deactivateGoal);
           await refreshGoalManagerData();
@@ -1552,28 +2206,51 @@
 
     async function saveGoalForm(event) {
       event.preventDefault();
-      const payload = formObject(event.currentTarget);
+      const form = event.currentTarget;
+      const payload = formObject(form);
       try {
         state.parsedObjectives = parseGoalObjectivesClient(payload.objectivesText);
       } catch (error) {
         return toast(error.message, true);
       }
       payload.subjectIds = Array.from(
-        event.currentTarget.querySelectorAll('[data-goal-subject]:checked')
+        form.querySelectorAll('[data-goal-subject]:checked')
       ).map(input => input.value);
-      payload.objectiveOverrides = state.parsedObjectives.map(item => ({
-        index: item.index,
-        text: event.currentTarget.querySelector(
-          `[data-objective-text="${item.index}"]`
-        ).value
+      payload.phases = Array.from(
+        form.querySelectorAll('[data-goal-phase]')
+      ).map((row, index) => ({
+        orderIndex: index + 1,
+        taskDemandDescription: row.querySelector('[data-phase-task]').value,
+        text: row.querySelector('[data-phase-source]').value,
+        goalArchetype: row.querySelector('[data-phase-archetype]').value,
+        targetAccuracyPct: row.querySelector('[data-phase-accuracy]').value,
+        targetPromptLevel: row.querySelector('[data-phase-prompt-level]').value,
+        targetPromptCeiling: row.querySelector('[data-phase-prompt-ceiling]').value,
+        consistencyTrialsPassed: row.querySelector('[data-phase-consistency-passed]').value,
+        consistencyTrialsWindow: row.querySelector('[data-phase-consistency-window]').value,
+        targetConsecutiveSessions: row.querySelector('[data-phase-consecutive]').value,
+        evaluationWindowUnit: row.querySelector('[data-phase-window-unit]').value,
+        startDate: row.querySelector('[data-phase-start]').value,
+        dueDate: row.querySelector('[data-phase-due]').value,
+        targetCorrect: row.dataset.targetCorrect || '',
+        targetAttempts: row.dataset.targetAttempts || '',
+        requiredTrials: row.dataset.requiredTrials || '',
+        totalTrials: row.dataset.totalTrials || '',
+        active: false
       }));
       if (!payload.subjectIds.length) {
         return toast('Choose at least one relevant class or subject for the goal.', true);
       }
       try {
         const result = await server('createGoal', payload);
+        if (!result || !result.ok) {
+          if (result && result.code === 'WRITE_BUSY') {
+            return toast('Goal saving is busy. Your form is still intact; retry shortly.', true);
+          }
+          return toast(result && result.message ? result.message : 'Goal was not saved.', true);
+        }
         state.goalWorkspaceCache = {};
-        event.currentTarget.reset();
+        form.reset();
         state.parsedObjectives = [];
         await refreshGoalManagerData();
         toast(result.message || 'Goal created.');
@@ -1582,39 +2259,89 @@
 
     function parseGoalObjectivesClient(value) {
       const text = String(value || '').trim();
-      const marker = /short\s*[-–—]?\s*term\s+objective\b\s*[:\-–—]?\s*/gi;
+      if (!text) return [];
+      const marker = /(?:^|\n)\s*(?:short\s*[-–—]?\s*term\s+objective|benchmark|phase|objective)\b\s*(?:#?\s*\d+)?\s*[:\-–—]?\s*/gim;
       const matches = [];
       let match;
       while ((match = marker.exec(text)) !== null) {
         matches.push({ index: match.index, end: marker.lastIndex });
       }
-      if (!matches.length) throw new Error('Add three “Short-Term Objective” headings.');
-      if (matches.length !== 3) {
-        throw new Error('Each goal must contain exactly three short-term objectives.');
-      }
-      return matches.map((item, index) => {
-        const end = matches[index + 1] ? matches[index + 1].index : text.length;
-        const objective = text.slice(item.end, end).replace(/^[\s:;#\d.)\]-]+/, '').trim();
-        if (!objective) throw new Error(`Short-Term Objective ${index + 1} has no text.`);
-        const ratios = [];
-        const ratioPattern = /(\d+)\s*(?:\/|out\s+of)\s*(\d+)/gi;
-        let ratio;
-        while ((ratio = ratioPattern.exec(objective)) !== null) {
-          const numerator = Number(ratio[1]);
-          const denominator = Number(ratio[2]);
-          if (denominator <= 0 || numerator < 0 || numerator > denominator) {
-            throw new Error(`Short-Term Objective ${index + 1} has an invalid ratio.`);
-          }
-          ratios.push({ numerator, denominator });
+      const sections = matches.length
+        ? matches.map((item, index) => text.slice(
+          item.end,
+          matches[index + 1] ? matches[index + 1].index : text.length
+        ))
+        : [text];
+      return sections.map((section, index) => {
+        const objective = section.replace(/^[\s:;#\d.)\]-]+/, '').trim();
+        if (!objective) throw new Error(`Benchmark ${index + 1} has no task description.`);
+        const goalArchetype = /\b(?:school days?|grading periods?|per quarter|quarterly|yearly attendance|daily checklist)\b/i.test(objective)
+          ? 'FREQUENCY_QUOTA'
+          : /\b(?:prompts?|redirection|personal space|hands to self|initiat(?:e|ion)|timer)\b/i.test(objective)
+            ? 'PROMPT_FADE'
+            : /\([^)]*(?:,| and )[^)]*\)|\b(?:containing|including|adds?|expands?|street address|phone number|zip code|date of birth|DOB)\b/i.test(objective)
+              ? 'TASK_EXPANSION'
+              : 'DISCRETE_TRIAL';
+        const percent = objective.match(
+          /\b(\d+(?:\.\d+)?)\s*%\s*(?:accuracy|accurate|correct(?:ly)?)\b/i
+        );
+        const consistency = objective.match(
+          /\b(\d+)\s*(?:\/|out\s+of|of)\s*(\d+)\s*(opportunities|trials|trial days|data days|school days|tasks)\b/i
+        );
+        if (consistency &&
+            (Number(consistency[2]) <= 0 || Number(consistency[1]) < 0 ||
+             Number(consistency[1]) > Number(consistency[2]))) {
+          throw new Error(`Benchmark ${index + 1} has an invalid consistency window.`);
         }
-        if (!ratios.length) {
-          throw new Error(`Short-Term Objective ${index + 1} needs a ratio such as 4/5 or 4 out of 5.`);
-        }
+        const promptLevel = /\bindependent(?:ly)?\b/i.test(objective) ? 'Independent'
+          : /\bverbal\b/i.test(objective) ? 'Verbal'
+          : /\b(?:gestural|visual)\b/i.test(objective) ? 'Gestural/Visual'
+          : /\bmodel(?:ing|led)?\b/i.test(objective) ? 'Model'
+          : /\bphysical\b/i.test(objective) ? 'Physical'
+          : '';
+        const promptMatches = Array.from(objective.matchAll(
+          /(?:no\s+more\s+than|at\s+most|maximum\s+of|up\s+to|given|with|using)\s+(\d+)(?:\s*-\s*(\d+))?\s*(?:(?:verbal|visual|gestural|model|physical)(?:\s*\/\s*(?:verbal|visual|gestural|model|physical))?)?\s*prompts?\b/gi
+        ));
+        const consecutive = objective.match(/(\d+)\s+consecutive\s+(sessions?|trials?|data days?)\b/i) ||
+          objective.match(/(?:for|across|over|in)\s+(\d+)\s+(sessions?|observations?|data days?)\b/i);
+        const parenthetical = objective.match(/\(([^)]+)\)/);
+        const targetAccuracyPct = percent ? Number(percent[1]) : '';
+        const consistencyTrialsPassed = consistency ? Number(consistency[1]) : '';
+        const consistencyTrialsWindow = consistency ? Number(consistency[2]) : '';
+        const evaluationWindowUnit = /\b(?:two|2)[ -]?weeks?\b|\bbiweekly\b/i.test(objective)
+          ? 'TWO_WEEK'
+          : /\b(?:grading period|quarter|quarterly)\b/i.test(objective)
+            ? 'GRADING_PERIOD'
+            : /\b(?:data days?|school days?|daily)\b/i.test(objective) ||
+                goalArchetype === 'FREQUENCY_QUOTA'
+              ? 'DATA_DAY'
+              : 'SESSION';
+        const promptMatch = promptMatches[promptMatches.length - 1];
+        const targetPromptCeiling = promptLevel === 'Independent'
+          ? 0
+          : (promptMatch ? Number(promptMatch[2] || promptMatch[1]) : '');
         return {
           index,
           text: objective,
-          metric: `${ratios[0].numerator}/${ratios[0].denominator}` +
-            (ratios[1] ? ` in ${ratios[1].numerator}/${ratios[1].denominator} trials` : '')
+          rawText: objective,
+          goalArchetype,
+          taskDemandDescription: parenthetical
+            ? parenthetical[1].trim()
+            : objective.slice(0, 120).trim(),
+          targetAccuracyPct,
+          targetPromptLevel: promptLevel,
+          targetPromptCeiling,
+          consistencyTrialsPassed,
+          consistencyTrialsWindow,
+          targetConsecutiveSessions: consecutive ? Number(consecutive[1]) : 1,
+          evaluationWindowUnit,
+          targetCorrect: '',
+          targetAttempts: '',
+          requiredTrials: consistencyTrialsPassed,
+          totalTrials: consistencyTrialsWindow,
+          metric: targetAccuracyPct !== ''
+            ? `${targetAccuracyPct}%`
+            : (consistency ? `${consistency[1]} of ${consistency[2]} ${consistency[3]}` : 'Targets incomplete')
         };
       });
     }
@@ -1624,15 +2351,47 @@
       if (!root) return;
       try {
         state.parsedObjectives = parseGoalObjectivesClient(form.elements.objectivesText.value);
+        if (!state.parsedObjectives.length) {
+          root.innerHTML = '<div class="empty">No benchmarks parsed. This goal will be saved as a draft unless objectives are added.</div>';
+          return;
+        }
         root.innerHTML = state.parsedObjectives.map(item => `
-          <div class="objective-preview">
+          <div class="objective-preview" data-goal-phase
+            data-target-correct="${escapeAttr(item.targetCorrect)}"
+            data-target-attempts="${escapeAttr(item.targetAttempts)}"
+            data-required-trials="${escapeAttr(item.requiredTrials)}"
+            data-total-trials="${escapeAttr(item.totalTrials)}">
+            <textarea data-phase-source hidden>${escapeHtml(item.rawText || item.text)}</textarea>
             <div class="row" style="justify-content:space-between">
-              <strong>Short-Term Objective ${item.index + 1}</strong>
+              <strong>Benchmark ${item.index + 1}</strong>
               <span class="chip">${escapeHtml(item.metric)}</span>
             </div>
             <div class="field">
-              <label>Benchmark text</label>
-              <textarea data-objective-text="${item.index}" style="min-height:120px">${escapeHtml(item.text)}</textarea>
+              <label>Task demand</label>
+              <textarea data-phase-task style="min-height:100px">${escapeHtml(item.taskDemandDescription)}</textarea>
+            </div>
+            <div class="form-grid">
+              <div class="field"><label>Goal archetype</label><select data-phase-archetype>${[
+                ['DISCRETE_TRIAL', 'Academic / discrete trial'],
+                ['PROMPT_FADE', 'Behavioral / prompt fade'],
+                ['TASK_EXPANSION', 'Cumulative task expansion'],
+                ['FREQUENCY_QUOTA', 'Frequency quota / checklist']
+              ].map(([value, label]) => `<option value="${value}" ${value === item.goalArchetype ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+              <div class="field"><label>Target accuracy %</label><input data-phase-accuracy type="number" min="0" max="100" step="0.1" value="${escapeAttr(item.targetAccuracyPct)}"></div>
+              <div class="field"><label>Target prompt level</label><select data-phase-prompt-level><option value="">Not specified</option>${['Independent','Verbal','Gestural/Visual','Model','Physical'].map(level => `<option ${level === item.targetPromptLevel ? 'selected' : ''}>${escapeHtml(level)}</option>`).join('')}</select></div>
+              <div class="field"><label>Maximum prompt count</label><input data-phase-prompt-ceiling type="number" min="0" step="1" value="${escapeAttr(item.targetPromptCeiling)}"></div>
+              <div class="field"><label>Consistency successes</label><input data-phase-consistency-passed type="number" min="1" step="1" value="${escapeAttr(item.consistencyTrialsPassed)}"></div>
+              <div class="field"><label>Consistency window</label><input data-phase-consistency-window type="number" min="1" step="1" value="${escapeAttr(item.consistencyTrialsWindow)}"></div>
+              <div class="field"><label>Consecutive sessions</label><input data-phase-consecutive type="number" min="1" step="1" value="${escapeAttr(item.targetConsecutiveSessions)}"></div>
+              <div class="field"><label>Evaluation window</label><select data-phase-window-unit>${[
+                ['SESSION', 'Session'],
+                ['DATA_DAY', 'Data day'],
+                ['TWO_WEEK', 'Two-week window'],
+                ['GRADING_PERIOD', 'Grading period']
+              ].map(([value, label]) => `<option value="${value}" ${value === item.evaluationWindowUnit ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+              <div class="field"><label>Benchmark start date</label><input data-phase-start type="date" value="${escapeAttr(form.elements.startDate.value)}" required></div>
+              <div class="field"><label>Benchmark due date</label><input data-phase-due type="date" value="${escapeAttr(form.elements.dueDate.value)}" required></div>
+              <div class="message full">The active benchmark is selected automatically from these dates.</div>
             </div>
           </div>`).join('');
       } catch (error) {
@@ -1641,19 +2400,33 @@
       }
     }
 
-    async function refreshGoalManagerData() {
-      const data = await server('getGoalManagerData');
-      state.data.caseManager.students = safeArray(data.students);
+    async function refreshGoalManagerData(studentId, force) {
+      const selectedStudentId = studentId === undefined
+        ? state.benchmarkStudentId
+        : studentId;
+      const cacheKey = selectedStudentId || 'setup';
+      const data = !force && state.goalCatalogCache[cacheKey]
+        ? state.goalCatalogCache[cacheKey]
+        : await serverQuiet(
+        'getGoalManagerData',
+            selectedStudentId,
+            Boolean(force)
+          );
+      state.goalCatalogCache[cacheKey] = data;
+      if (Array.isArray(data.students)) {
+        state.data.caseManager.students = data.students;
+      }
       state.data.caseManager.goals = safeArray(data.goals);
       state.data.caseManager.benchmarks = safeArray(data.benchmarks);
-      state.goalWorkspaceCache = {};
+      state.data.subjects = safeArray(data.subjects);
+      state.goalCatalogLoaded = true;
       renderBenchmarkManager(document.getElementById('cmContent'));
     }
 
     async function renderIeps(root) {
       root.innerHTML = '<article class="card empty">Loading IEPs…</article>';
       try {
-        const ieps = safeArray(await server('getIepsForCurrentCaseManager'));
+        const ieps = safeArray(state.data.caseManager.ieps);
         root.innerHTML = `
           <div class="grid two">
             <article class="card">
@@ -1683,6 +2456,9 @@
             if (!result.fileUrl) throw new Error('The IEP was created without a document link.');
             toast('IEP generated.');
             window.open(result.fileUrl, '_blank', 'noopener');
+            state.data.caseManager.ieps = safeArray(
+              await serverQuiet('getIepsForCurrentCaseManager')
+            );
             renderIeps(root);
           } catch (error) { toast(error.message, true); }
         });
@@ -1698,6 +2474,15 @@
       const editingStaff = staff.find(item => normalizeEmail(item.email) === normalizeEmail(state.editingStaffEmail)) || {};
       const editingStudent = students.find(item => String(item.id) === String(state.editingStudentId)) || {};
       const managerOptions = safeArray(cm.caseManagers);
+      const roster = cm.roster || {};
+      const rosterClasses = safeArray(roster.classes);
+      if (!rosterClasses.some(item => String(item.id) === String(state.rosterClassId))) {
+        state.rosterClassId = rosterClasses.length ? rosterClasses[0].id : '';
+      }
+      const rosterClass = rosterClasses.find(item =>
+        String(item.id) === String(state.rosterClassId)
+      );
+      const rosterStudentIds = new Set(safeArray(rosterClass && rosterClass.studentIds).map(String));
       root.innerHTML = `
         <div class="grid two">
           <article class="card">
@@ -1740,6 +2525,24 @@
                 <div class="toolbar" style="margin-top:10px"><button class="btn small-btn" data-edit-student="${escapeAttr(item.id)}">Edit</button><button class="btn danger small-btn" data-delete-student="${escapeAttr(item.id)}">Delete</button></div>
               </div>`).join('') : '<div class="empty">No students assigned.</div>'}</div>
           </article>
+          <article class="card span-2">
+            <div class="card-header"><div><div class="eyebrow">Class enrollment</div><h2>Edit roster</h2><p class="muted">Student profiles and historical records are unchanged when enrollment changes.</p></div>${rosterClass ? `<span class="chip">${rosterStudentIds.size} students</span>` : ''}</div>
+            ${rosterClasses.length ? `
+              <form id="classRosterForm">
+                <div class="field">
+                  <label>Teacher / class / period</label>
+                  <select id="classRosterSelect" name="classId">${rosterClasses.map(item => `
+                    <option value="${escapeAttr(item.id)}" ${String(item.id) === String(state.rosterClassId) ? 'selected' : ''}>${escapeHtml([item.teacherEmail, item.name, item.periodId, item.subjectName].filter(Boolean).join(' · '))}</option>
+                  `).join('')}</select>
+                </div>
+                <div class="checks" style="margin-top:12px">${safeArray(roster.students).map(student => `
+                  <label class="check">
+                    <input type="checkbox" value="${escapeAttr(student.id)}" data-roster-student ${rosterStudentIds.has(String(student.id)) ? 'checked' : ''}>
+                    ${escapeHtml(student.name)}
+                  </label>`).join('')}</div>
+                <div class="toolbar" style="margin-top:14px"><button class="btn primary" type="submit">Save class roster</button></div>
+              </form>` : '<div class="empty">No classes are available for roster editing.</div>'}
+          </article>
         </div>`;
       bindRefreshButtons(root);
       document.getElementById('cancelStaffEdit')?.addEventListener('click', () => { state.editingStaffEmail = ''; renderPeople(root); });
@@ -1766,10 +2569,36 @@
           toast('Student saved.');
         } catch (error) { toast(error.message, true); }
       });
+      document.getElementById('classRosterSelect')?.addEventListener('change', event => {
+        state.rosterClassId = event.currentTarget.value;
+        renderPeople(root);
+      });
+      document.getElementById('classRosterForm')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        try {
+          const result = await server('saveClassRoster', {
+            classId: form.elements.classId.value,
+            studentIds: Array.from(form.querySelectorAll('[data-roster-student]:checked'))
+              .map(input => input.value)
+          });
+          if (!result || !result.ok) {
+            return toast(result && result.message ? result.message : 'The class roster was not saved.', true);
+          }
+          await refreshBootstrap('people');
+          toast(result.message || 'Class roster saved.');
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
       root.querySelectorAll('[data-edit-staff]').forEach(button => button.addEventListener('click', () => { state.editingStaffEmail = button.dataset.editStaff; renderPeople(root); }));
       root.querySelectorAll('[data-edit-student]').forEach(button => button.addEventListener('click', () => { state.editingStudentId = button.dataset.editStudent; renderPeople(root); }));
       root.querySelectorAll('[data-delete-staff]').forEach(button => button.addEventListener('click', async () => {
-        if (!confirm('Delete this staff member from the active whitelist?')) return;
+        if (!await confirmDialog({
+          title: 'Remove staff access',
+          message: 'Delete this staff member from the active whitelist?',
+          confirmLabel: 'Remove access'
+        })) return;
         try {
           await server('deleteStaff', button.dataset.deleteStaff);
           await refreshBootstrap('people');
@@ -1777,7 +2606,11 @@
         } catch (error) { toast(error.message, true); }
       }));
       root.querySelectorAll('[data-delete-student]').forEach(button => button.addEventListener('click', async () => {
-        if (!confirm('Deactivate this student? Benchmarks and history will remain.')) return;
+        if (!await confirmDialog({
+          title: 'Deactivate student',
+          message: 'Deactivate this student? Benchmarks and history will remain.',
+          confirmLabel: 'Deactivate'
+        })) return;
         try {
           await server('deleteStudent', button.dataset.deleteStudent);
           await refreshBootstrap('people');
@@ -1838,8 +2671,30 @@
       const management = state.data.caseManager.messages || { messages: [], activeToday: [] };
       const messages = safeArray(management.messages);
       const editing = messages.find(item => String(item.id) === String(state.editingMessageId)) || {};
+      const catalog = management.catalog || {};
       root.innerHTML = `
         <div class="grid two">
+          ${state.data.user.isAdmin ? `
+          <article class="card span-2">
+            <div class="card-header">
+              <div><div class="eyebrow">Administrator data</div><h2>Subjects and classes</h2><p class="muted">Create multiple subjects and teacher-period classes in one reviewed batch. IDs are generated automatically.</p></div>
+              <button id="openAdminCatalog" class="btn primary" type="button">Bulk create</button>
+            </div>
+            <div class="row">
+              <span class="chip">${safeArray(catalog.subjects).length} active subjects</span>
+              <span class="chip">${safeArray(catalog.classes).length} active classes</span>
+              <span class="chip">${safeArray(catalog.periods).length} configured periods</span>
+            </div>
+          </article>
+          <article class="card span-2">
+            <div class="card-header"><div><div class="eyebrow">Administrator settings</div><h2>School-year quarter boundaries</h2><p class="muted">Manual benchmark overrides expire at the next date below.</p></div></div>
+            <form id="quarterBoundaryForm" class="form-grid">
+              ${['Q1 start','Q2 start','Q3 start','Q4 start','Next school-year start'].map((label, index) => `
+                <div class="field"><label>${label}</label><input name="boundary${index}" type="date" value="${escapeAttr(safeArray(catalog.quarterBoundaries)[index] || '')}" required></div>
+              `).join('')}
+              <div class="field full"><button class="btn primary" type="submit">Save quarter dates</button></div>
+            </form>
+          </article>` : ''}
           <article class="card">
             <div class="card-header"><div><div class="eyebrow">Broadcast</div><h2>${editing.id ? 'Edit message' : 'Create message'}</h2></div><div class="toolbar"><button class="btn ghost small-btn" type="button" data-refresh="admin">Refresh</button>${editing.id ? '<button id="cancelMessageEdit" class="btn ghost small-btn" type="button">Cancel</button>' : ''}</div></div>
             <form id="messageForm" class="form-grid">
@@ -1881,6 +2736,13 @@
           </article>
         </div>`;
       bindRefreshButtons(root);
+      document.getElementById('openAdminCatalog')?.addEventListener('click', () => {
+        state.adminCatalogPreview = null;
+        document.getElementById('adminCatalogPreview').innerHTML = '';
+        document.getElementById('saveAdminCatalog').disabled = true;
+        openDialog('adminCatalogDialog');
+      });
+      document.getElementById('quarterBoundaryForm')?.addEventListener('submit', saveQuarterBoundaries_);
       document.getElementById('messageForm').addEventListener('submit', async event => {
         event.preventDefault();
         try {
@@ -1913,8 +2775,105 @@
       document.getElementById('logoForm').addEventListener('submit', uploadLogo);
     }
 
+    function parseOptionalTabularRows_(elementId, columns) {
+      const value = document.getElementById(elementId).value;
+      if (!String(value || '').trim()) return [];
+      return parseTabularRows_(value, columns);
+    }
+
+    async function previewAdminCatalog_() {
+      const root = document.getElementById('adminCatalogPreview');
+      const saveButton = document.getElementById('saveAdminCatalog');
+      saveButton.disabled = true;
+      try {
+        const subjects = parseOptionalTabularRows_('adminSubjectText', [
+          { header: 'Name', key: 'name', required: true }
+        ]);
+        const classes = parseOptionalTabularRows_('adminClassText', [
+          { header: 'ClassName', key: 'name', required: true },
+          { header: 'Subject', key: 'subjectName', required: true },
+          { header: 'TeacherEmail', key: 'teacherEmail', required: true },
+          { header: 'PeriodId', key: 'periodId', required: true }
+        ]);
+        const result = await server('previewAdminCatalogBatch', { subjects, classes });
+        if (!result.ok) {
+          root.innerHTML = safeArray(result.errors).map(issue =>
+            `<div class="list-item critical">${escapeHtml(issue.section)} row ${escapeHtml(issue.row)}: ${escapeHtml(issue.message)}</div>`
+          ).join('');
+          return;
+        }
+        state.adminCatalogPreview = {
+          subjectSource: document.getElementById('adminSubjectText').value,
+          classSource: document.getElementById('adminClassText').value,
+          subjects,
+          classes
+        };
+        root.innerHTML = `<div class="message"><strong>${result.subjectCount} subjects and ${result.classCount} classes are valid</strong><div class="muted small">Existing exact matches will be retained; nothing has been saved yet.</div></div>` +
+          safeArray(result.subjects).map(item => `<div class="list-item">Subject · ${escapeHtml(item.name)}${item.exists ? ' · Existing' : ' · New'}</div>`).join('') +
+          safeArray(result.classes).map(item => `<div class="list-item">Class · ${escapeHtml(item.teacherEmail)} · ${escapeHtml(item.periodId)} · ${escapeHtml(item.name)} · ${escapeHtml(item.subjectName)}${item.exists ? ' · Existing' : ' · New'}</div>`).join('');
+        saveButton.disabled = false;
+      } catch (error) {
+        root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function saveAdminCatalog_() {
+      const preview = state.adminCatalogPreview;
+      if (!preview ||
+          preview.subjectSource !== document.getElementById('adminSubjectText').value ||
+          preview.classSource !== document.getElementById('adminClassText').value) {
+        return toast('Preview the current subject and class tables before saving.', true);
+      }
+      closeDialog('adminCatalogDialog');
+      const approved = await confirmDialog({
+        title: 'Save subjects and classes',
+        message: `Save ${preview.subjects.length} subject records and ${preview.classes.length} class records?`,
+        confirmLabel: 'Save all'
+      });
+      if (!approved) {
+        openDialog('adminCatalogDialog');
+        return;
+      }
+      try {
+        const result = await server('saveAdminCatalogBatch', {
+          subjects: preview.subjects,
+          classes: preview.classes
+        });
+        if (!result.ok) {
+          openDialog('adminCatalogDialog');
+          return toast(result.message || 'The catalog batch could not be saved.', true);
+        }
+        state.adminCatalogPreview = null;
+        document.getElementById('adminSubjectText').value = '';
+        document.getElementById('adminClassText').value = '';
+        document.getElementById('adminCatalogPreview').innerHTML = '';
+        document.getElementById('saveAdminCatalog').disabled = true;
+        await refreshBootstrap('admin');
+        toast(`${result.subjectsCreated} subjects and ${result.classesCreated} classes created.`);
+      } catch (error) {
+        openDialog('adminCatalogDialog');
+        toast(error.message, true);
+      }
+    }
+
+    async function saveQuarterBoundaries_(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const boundaries = [0, 1, 2, 3, 4].map(index =>
+        form.elements[`boundary${index}`].value
+      );
+      try {
+        const result = await server('saveSchoolQuarterBoundaries', { boundaries });
+        if (!result.ok) return toast(result.message || 'Quarter dates were not saved.', true);
+        state.data.caseManager.messages.catalog.quarterBoundaries = result.boundaries;
+        toast('School-year quarter boundaries saved.');
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
     async function refreshMessageManagementData() {
-      const data = await server('getMessageManagementData');
+      const data = await serverQuiet('getMessageManagementData');
       state.data.caseManager.messages = data;
       state.data.dailyMessages = safeArray(data.activeToday);
       renderAdmin(document.getElementById('cmContent'));
@@ -1953,7 +2912,7 @@
       return `
         <div class="card-header">
           <div><div class="eyebrow">Primary workflow</div><h2>Benchmark lookup and input</h2><p class="muted">Your current assignment is selected when available. Choose another teacher and period to override it.</p></div>
-          <button class="btn ghost small-btn" type="button" data-refresh="${escapeAttr(state.selectedTab)}">Refresh</button>
+          <div class="toolbar"><button id="openBulkObservations" class="btn ghost small-btn" type="button">Bulk paste</button><button class="btn ghost small-btn" type="button" data-refresh="${escapeAttr(state.selectedTab)}">Refresh</button></div>
         </div>
         <div class="form-grid three">
           <div class="field"><label>Teacher</label><select id="lookupTeacher"><option value="">Select a teacher</option>${options(teachers, 'email', 'displayName', selectedTeacher)}</select></div>
@@ -1972,6 +2931,7 @@
       teacher.addEventListener('change', () => populateLookupPeriods(''));
       period.addEventListener('change', renderLookupStudents);
       button.addEventListener('click', lookupBenchmarks);
+      document.getElementById('openBulkObservations')?.addEventListener('click', () => openDialog('bulkObservationDialog'));
       bindRefreshButtons(document);
       populateLookupPeriods(state.lookupClassId);
     }
@@ -2029,43 +2989,578 @@
       const root = document.getElementById('benchmarkResults');
       if (!root) return;
       const results = safeArray(state.benchmarkResults);
-      root.innerHTML = results.length ? results.map(item => `
+      root.innerHTML = `
+        <div id="observationQueuePanel"></div>
+        ${results.length ? results.map(item => `
         <div class="benchmark-card" data-benchmark-card="${escapeAttr(item.id)}">
           <div>
             <div class="row">${item.critical ? '<span class="chip critical">Critical</span>' : ''}<span class="chip">${escapeHtml(item.subjectName)}</span></div>
             <h3 style="margin-top:12px">${escapeHtml(item.studentName)}</h3>
             <div>${escapeHtml(item.display)}</div>
             ${item.description ? `<p class="muted" style="margin-top:8px">${escapeHtml(item.description)}</p>` : ''}
-            <div class="small muted">${item.entryCount} inputs${item.lastEntry ? ' · Last ' + escapeHtml(String(item.lastEntry.percent)) + '%' : ''}</div>
+            <div class="row" style="margin-top:8px">
+              <span class="chip ${entryComparisonBadgeClass(
+                Number(item.activeGoalEntryCount || 0),
+                Number(item.activeGoalEntryAverage || 0),
+                Number(item.comparedActiveGoalCount || 0) > 0
+              )}" title="${escapeAttr(
+                'This active benchmark has ' + Number(item.activeGoalEntryCount || 0) +
+                ' entries; the student average across ' + Number(item.comparedActiveGoalCount || 0) +
+                ' current active goals is ' +
+                (Math.round(Number(item.activeGoalEntryAverage || 0) * 10) / 10) + '.'
+              )}">${escapeHtml(String(item.activeGoalEntryCount || 0))} entries</span>
+              ${item.lastEntry ? '<span class="small muted">Last ' + escapeHtml(String(item.lastEntry.percent)) + '%</span>' : ''}
+            </div>
           </div>
           <form class="benchmark-entry-form">
             <input type="hidden" name="benchmarkId" value="${escapeAttr(item.id)}">
             <input type="hidden" name="classId" value="${escapeAttr(state.lookupClassId)}">
             <div class="score-grid">
-              <div class="field"><label>Correct</label><input name="correct" type="number" min="0" required></div>
-              <div class="field"><label>Questions</label><input name="attempts" type="number" min="1" required></div>
+              <div class="field"><label>Raw successes</label><div class="row"><button class="btn ghost small-btn" type="button" data-counter="correct" data-delta="-1">−</button><input name="correct" type="number" min="0" step="1" value="0" required><button class="btn ghost small-btn" type="button" data-counter="correct" data-delta="1">+</button></div></div>
+              <div class="field"><label>Raw trials</label><div class="row"><button class="btn ghost small-btn" type="button" data-counter="attempts" data-delta="-1">−</button><input name="attempts" type="number" min="1" step="1" value="1" required><button class="btn ghost small-btn" type="button" data-counter="attempts" data-delta="1">+</button></div></div>
             </div>
+            <div class="score-grid" style="margin-top:8px">
+              <div class="field"><label>Observation date</label><input name="observationDate" type="date" max="${escapeAttr(state.data.today)}" value="${escapeAttr(state.data.today)}" required></div>
+              <div class="field"><label>Prompt level used</label><select name="actualPromptLevel" required><option value="">Choose prompt</option>${['Independent','Verbal','Gestural/Visual','Model','Physical'].map(level => `<option>${escapeHtml(level)}</option>`).join('')}</select></div>
+            </div>
+            <div class="field" style="margin-top:8px"><label>Prompt count</label><input name="actualPromptCount" type="number" min="0" step="1" required></div>
             <div class="field" style="margin-top:8px"><label>Notes</label><input name="notes"></div>
-            <button class="btn primary" style="margin-top:10px;width:100%">Save input</button>
+            <button class="btn primary" style="margin-top:10px;width:100%">Add to observation queue</button>
           </form>
-        </div>`).join('') : '<div class="empty">No active benchmarks match this class subject and student selection.</div>';
-      root.querySelectorAll('.benchmark-entry-form').forEach(form => form.addEventListener('submit', async event => {
+        </div>`).join('') : '<div class="empty">No active benchmarks match this class subject and student selection.</div>'}`;
+      renderObservationQueue();
+      root.querySelectorAll('[data-counter]').forEach(button => button.addEventListener('click', () => {
+        adjustObservationCounter(button.closest('form'), button.dataset.counter, Number(button.dataset.delta));
+      }));
+      root.querySelectorAll('[name="actualPromptLevel"]').forEach(select => select.addEventListener('change', () => {
+        const count = select.closest('form').elements.actualPromptCount;
+        if (select.value === 'Independent') count.value = 0;
+      }));
+      root.querySelectorAll('.benchmark-entry-form').forEach(form => form.addEventListener('submit', event => {
         event.preventDefault();
         const payload = formObject(event.currentTarget);
         payload.correct = Number(payload.correct);
         payload.attempts = Number(payload.attempts);
-        try {
-          const result = await server('saveBenchmarkEntry', payload);
-          event.currentTarget.reset();
-          toast('Saved: ' + result.percent + '%');
-          const selectedClass = document.getElementById('lookupPeriod')?.value || '';
-          const selectedStudents = Array.from(document.querySelectorAll('#lookupStudents input:checked')).map(input => input.value);
-          if (selectedClass && selectedStudents.length) {
-            state.benchmarkResults = await server('lookupBenchmarks', { classId: selectedClass, studentIds: selectedStudents });
-            renderBenchmarkResults();
-          }
-        } catch (error) { toast(error.message, true); }
+        payload.actualPromptCount = Number(payload.actualPromptCount);
+        if (!Number.isInteger(payload.correct) || !Number.isInteger(payload.attempts) ||
+            payload.correct < 0 || payload.attempts <= 0 || payload.correct > payload.attempts) {
+          return toast('Successes must be between 0 and the total raw trials.', true);
+        }
+        if (!payload.actualPromptLevel || !Number.isInteger(payload.actualPromptCount) ||
+            payload.actualPromptCount < 0) {
+          return toast('Choose a prompt level and enter its prompt count.', true);
+        }
+        if (payload.actualPromptLevel === 'Independent' && payload.actualPromptCount !== 0) {
+          return toast('Independent observations must use a prompt count of 0.', true);
+        }
+        const benchmark = results.find(item => String(item.id) === String(payload.benchmarkId));
+        payload.localId = clientUuid();
+        payload.label = benchmark
+          ? `${benchmark.studentName} · ${benchmark.category}`
+          : payload.benchmarkId;
+        state.observationQueue.push(payload);
+        if (!state.observationBatchId) state.observationBatchId = clientUuid();
+        persistObservationQueue_();
+        event.currentTarget.reset();
+        event.currentTarget.elements.correct.value = 0;
+        event.currentTarget.elements.attempts.value = 1;
+        event.currentTarget.elements.observationDate.value = state.data.today;
+        renderObservationQueue();
+        toast('Observation added to the queue.');
       }));
+    }
+
+    function adjustObservationCounter(form, field, delta) {
+      if (!form) return;
+      const correct = form.elements.correct;
+      const attempts = form.elements.attempts;
+      if (field === 'attempts') {
+        attempts.value = Math.max(1, Number(attempts.value || 1) + delta);
+        if (Number(correct.value || 0) > Number(attempts.value)) correct.value = attempts.value;
+      } else {
+        correct.value = Math.max(
+          0,
+          Math.min(Number(attempts.value || 1), Number(correct.value || 0) + delta)
+        );
+      }
+    }
+
+    function renderObservationQueue() {
+      const root = document.getElementById('observationQueuePanel');
+      if (!root) return;
+      const queue = state.observationQueue;
+      root.innerHTML = queue.length ? `
+        <div class="message">
+          <div class="card-header">
+            <div><strong>${queue.length} queued observation${queue.length === 1 ? '' : 's'}</strong><div class="muted small">The queue clears only after the server confirms the whole batch. ${escapeHtml(state.observationDraftStatus || 'Saved in this browser for reload recovery.')}</div></div>
+            <div class="row">
+              <button class="btn ghost small-btn" id="downloadObservationQueue" type="button">Download backup</button>
+              <button class="btn primary small-btn" id="saveObservationQueue" type="button">Save queue</button>
+            </div>
+          </div>
+          <div class="list">${queue.map((item, index) => `
+            <div class="row" style="justify-content:space-between">
+              <span>${escapeHtml(item.label)} · ${escapeHtml(String(item.correct))}/${escapeHtml(String(item.attempts))} · ${escapeHtml(item.actualPromptLevel)} ${escapeHtml(String(item.actualPromptCount))}</span>
+              <button class="btn ghost small-btn" type="button" data-remove-observation="${escapeAttr(item.localId)}">Remove</button>
+            </div>`).join('')}</div>
+        </div>` : '';
+      root.querySelectorAll('[data-remove-observation]').forEach(button => button.addEventListener('click', () => {
+        const previousBatchId = state.observationBatchId;
+        state.observationQueue = state.observationQueue.filter(item =>
+          item.localId !== button.dataset.removeObservation
+        );
+        if (!state.observationQueue.length) {
+          state.observationBatchId = '';
+          clearObservationQueuePersistence_(previousBatchId);
+        } else {
+          persistObservationQueue_();
+        }
+        renderObservationQueue();
+      }));
+      document.getElementById('downloadObservationQueue')?.addEventListener(
+        'click',
+        downloadObservationQueue_
+      );
+      document.getElementById('saveObservationQueue')?.addEventListener('click', submitObservationQueue);
+    }
+
+    function downloadObservationQueue_() {
+      if (!state.observationQueue.length) return;
+      const fields = [
+        ['BenchmarkId', 'benchmarkId'],
+        ['ClassId', 'classId'],
+        ['ObservationDate', 'observationDate'],
+        ['Successes', 'correct'],
+        ['Trials', 'attempts'],
+        ['PromptLevel', 'actualPromptLevel'],
+        ['PromptCount', 'actualPromptCount'],
+        ['Notes', 'notes']
+      ];
+      const encode = value => String(value == null ? '' : value)
+        .replace(/[\t\r\n]+/g, ' ');
+      const rows = [
+        fields.map(field => field[0]).join('\t'),
+        ...state.observationQueue.map(item =>
+          fields.map(field => encode(item[field[1]])).join('\t')
+        )
+      ];
+      const blob = new Blob([rows.join('\n')], { type: 'text/tab-separated-values' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'voices-unsaved-observations-' + state.data.today + '.tsv';
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+
+    async function submitObservationQueue() {
+      if (!state.observationQueue.length) return;
+      const entries = state.observationQueue.map(item => {
+        const copy = { ...item };
+        delete copy.localId;
+        delete copy.label;
+        return copy;
+      });
+      try {
+        let result = await server('saveBenchmarkEntriesBatch', {
+          submissionBatchId: state.observationBatchId,
+          entries
+        });
+        if (result.code === 'PHASE_DATE_CONFLICT') {
+          const useHistorical = await confirmDialog({
+            title: 'Observation date conflicts with active benchmark',
+            message: 'One or more observations belong to the benchmark active on their observation date. Use those historical benchmarks?',
+            confirmLabel: 'Use historical objectives',
+            cancelLabel: 'Change dates'
+          });
+          if (!useHistorical) return;
+          safeArray(result.conflicts).forEach(conflict => {
+            const index = Number(conflict.row) - 1;
+            const item = entries[index];
+            const queuedItem = state.observationQueue[index];
+            if (item) item.phaseDateResolution = 'USE_HISTORICAL_PHASE';
+            if (queuedItem) queuedItem.phaseDateResolution = 'USE_HISTORICAL_PHASE';
+          });
+          persistObservationQueue_();
+          result = await server('saveBenchmarkEntriesBatch', {
+            submissionBatchId: state.observationBatchId,
+            entries
+          });
+        }
+        if (!result.ok) {
+          return toast(result.message || 'The observation queue could not be saved.', true);
+        }
+        const savedCount = state.observationQueue.length;
+        const savedBatchId = state.observationBatchId;
+        state.observationQueue = [];
+        state.observationBatchId = '';
+        clearObservationQueuePersistence_(savedBatchId);
+        toast(`${savedCount} observation${savedCount === 1 ? '' : 's'} saved.`);
+        const selectedClass = document.getElementById('lookupPeriod')?.value || '';
+        const selectedStudents = Array.from(
+          document.querySelectorAll('#lookupStudents input:checked')
+        ).map(input => input.value);
+        if (selectedClass && selectedStudents.length) {
+          state.benchmarkResults = await server('lookupBenchmarks', {
+            classId: selectedClass,
+            studentIds: selectedStudents
+          });
+          renderBenchmarkResults();
+        }
+      } catch (error) {
+        toast(`${error.message} Your observation queue is still intact.`, true);
+      }
+    }
+
+    function clientUuid() {
+      return globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : 'batch-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    }
+
+    function observationQueueStorageKey_() {
+      const email = state.data && state.data.user ? String(state.data.user.email || '') : '';
+      return email ? 'voices-observation-draft:' + email.toLowerCase() : '';
+    }
+
+    function normalizeObservationDraftEntries_(entries) {
+      return safeArray(entries).slice(0, 200).filter(item =>
+        item && typeof item === 'object' && !Array.isArray(item) &&
+        item.benchmarkId && item.classId && item.observationDate &&
+        Number.isFinite(Number(item.correct)) &&
+        Number.isFinite(Number(item.attempts)) &&
+        Number.isInteger(Number(item.correct)) &&
+        Number.isInteger(Number(item.attempts)) &&
+        Number.isInteger(Number(item.actualPromptCount)) &&
+        Number(item.correct) >= 0 &&
+        Number(item.attempts) > 0 &&
+        Number(item.correct) <= Number(item.attempts) &&
+        Number(item.actualPromptCount) >= 0 &&
+        item.actualPromptLevel
+      ).map(item => ({
+        ...item,
+        correct: Number(item.correct),
+        attempts: Number(item.attempts),
+        actualPromptCount: Number(item.actualPromptCount || 0),
+        localId: item.localId || clientUuid(),
+        label: item.label || item.benchmarkId
+      }));
+    }
+
+    function restoreObservationQueue_() {
+      const storageKey = observationQueueStorageKey_();
+      let localDraft = null;
+      if (storageKey) {
+        try {
+          const parsed = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+          if (parsed && parsed.version === OBSERVATION_DRAFT_STORAGE_VERSION &&
+              parsed.submissionBatchId) {
+            const entries = normalizeObservationDraftEntries_(parsed.entries);
+            if (entries.length) {
+              localDraft = {
+                submissionBatchId: String(parsed.submissionBatchId),
+                entries: entries,
+                updatedAt: Number(parsed.updatedAt || 0)
+              };
+              state.observationQueue = entries;
+              state.observationBatchId = localDraft.submissionBatchId;
+              state.observationDraftStatus = 'Recovered from this browser.';
+            } else {
+              sessionStorage.removeItem(storageKey);
+            }
+          }
+        } catch (error) {
+          try {
+            sessionStorage.removeItem(storageKey);
+          } catch (storageError) {}
+        }
+      }
+      const restoreRevision = state.observationDraftRevision;
+      serverQuiet('getObservationDraft').then(serverDraft => {
+        if (state.observationDraftRevision !== restoreRevision) return;
+        const entries = normalizeObservationDraftEntries_(serverDraft && serverDraft.entries);
+        const serverUpdatedAt = new Date(serverDraft && serverDraft.updatedAt).getTime() || 0;
+        if (entries.length && (!localDraft || serverUpdatedAt > localDraft.updatedAt)) {
+          state.observationQueue = entries;
+          state.observationBatchId = String(serverDraft.submissionBatchId || clientUuid());
+          state.observationDraftStatus = 'Recovered from the server.';
+          state.observationDraftRevision += 1;
+          writeObservationQueueToSession_();
+          renderObservationQueue();
+          toast(`${entries.length} unsaved observation${entries.length === 1 ? '' : 's'} recovered.`);
+        } else if (localDraft) {
+          persistObservationQueue_();
+          renderObservationQueue();
+        }
+      }).catch(() => {
+        if (localDraft) renderObservationQueue();
+      });
+    }
+
+    function writeObservationQueueToSession_() {
+      const storageKey = observationQueueStorageKey_();
+      if (!storageKey || !state.observationQueue.length || !state.observationBatchId) return;
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify({
+          version: OBSERVATION_DRAFT_STORAGE_VERSION,
+          submissionBatchId: state.observationBatchId,
+          entries: state.observationQueue,
+          updatedAt: Date.now()
+        }));
+      } catch (error) {
+        state.observationDraftStatus = 'Browser storage is unavailable; server recovery is pending.';
+      }
+    }
+
+    function persistObservationQueue_() {
+      if (!state.observationQueue.length || !state.observationBatchId) return;
+      state.observationDraftRevision += 1;
+      state.observationDraftStatus = 'Saving a server recovery copy…';
+      observationDraftRetryCount = 0;
+      writeObservationQueueToSession_();
+      scheduleObservationDraftSync_(1200);
+    }
+
+    function scheduleObservationDraftSync_(delay) {
+      window.clearTimeout(observationDraftTimer);
+      observationDraftTimer = window.setTimeout(syncObservationDraft_, delay);
+    }
+
+    async function syncObservationDraft_() {
+      if (!state.observationQueue.length || !state.observationBatchId) return;
+      const revision = state.observationDraftRevision;
+      const batchId = state.observationBatchId;
+      const entries = state.observationQueue.map(item => ({ ...item }));
+      try {
+        const result = await serverQuiet('saveObservationDraft', {
+          submissionBatchId: batchId,
+          entries: entries
+        });
+        if (!result || !result.ok) throw new Error(result && result.message);
+        if (batchId === state.observationBatchId && revision === state.observationDraftRevision) {
+          state.observationDraftSavedRevision = revision;
+          state.observationDraftStatus = 'Server recovery copy saved.';
+          observationDraftRetryCount = 0;
+          renderObservationQueue();
+        } else if (!state.observationQueue.length || batchId !== state.observationBatchId) {
+          clearObservationDraftWithRetry_(batchId, 0);
+        } else {
+          scheduleObservationDraftSync_(500);
+        }
+      } catch (error) {
+        observationDraftRetryCount += 1;
+        state.observationDraftStatus = 'Browser copy saved; server recovery will retry.';
+        renderObservationQueue();
+        if (observationDraftRetryCount <= 5) {
+          scheduleObservationDraftSync_(Math.min(60000, 5000 * observationDraftRetryCount));
+        }
+      }
+    }
+
+    function clearObservationQueuePersistence_(batchId) {
+      window.clearTimeout(observationDraftTimer);
+      observationDraftTimer = null;
+      observationDraftRetryCount = 0;
+      state.observationDraftStatus = '';
+      const storageKey = observationQueueStorageKey_();
+      if (storageKey) {
+        try {
+          sessionStorage.removeItem(storageKey);
+        } catch (error) {}
+      }
+      if (batchId) clearObservationDraftWithRetry_(batchId, 0);
+    }
+
+    function clearObservationDraftWithRetry_(batchId, attempt) {
+      serverQuiet('clearObservationDraft', batchId).then(result => {
+        if (!result || !result.ok) throw new Error('Draft cleanup was busy.');
+      }).catch(() => {
+        if (attempt < 4) {
+          window.setTimeout(
+            () => clearObservationDraftWithRetry_(batchId, attempt + 1),
+            Math.min(60000, 5000 * (attempt + 1))
+          );
+        }
+      });
+    }
+
+    function parseTabularRows_(text, columns) {
+      const lines = String(text || '').split(/\r?\n/).filter(line => line.trim());
+      if (lines.length < 2) throw new Error('Include a header row and at least one data row.');
+      const normalize = value => String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+      const headers = lines[0].split('\t').map(normalize);
+      const indexes = {};
+      columns.forEach(column => {
+        const index = headers.indexOf(normalize(column.header));
+        if (index < 0 && column.required) throw new Error('Missing required column: ' + column.header);
+        indexes[column.key] = index;
+      });
+      return lines.slice(1).map(line => {
+        const values = line.split('\t');
+        const row = {};
+        columns.forEach(column => {
+          row[column.key] = indexes[column.key] < 0 ? '' : String(values[indexes[column.key]] || '').trim();
+        });
+        return row;
+      });
+    }
+
+    function parseBulkObservationRows_() {
+      return parseTabularRows_(document.getElementById('bulkObservationText').value, [
+        { header: 'BenchmarkId', key: 'benchmarkId', required: true },
+        { header: 'ClassId', key: 'classId', required: true },
+        { header: 'ObservationDate', key: 'observationDate', required: true },
+        { header: 'Successes', key: 'correct', required: true },
+        { header: 'Trials', key: 'attempts', required: true },
+        { header: 'PromptLevel', key: 'actualPromptLevel', required: true },
+        { header: 'PromptCount', key: 'actualPromptCount', required: true },
+        { header: 'Notes', key: 'notes', required: false }
+      ]).map(row => ({
+        ...row,
+        correct: Number(row.correct),
+        attempts: Number(row.attempts),
+        actualPromptCount: Number(row.actualPromptCount)
+      }));
+    }
+
+    async function previewBulkObservations_() {
+      const root = document.getElementById('bulkObservationPreview');
+      const queueButton = document.getElementById('queueBulkObservations');
+      queueButton.disabled = true;
+      try {
+        const rows = parseBulkObservationRows_();
+        const result = await server('previewBenchmarkEntriesBatch', {
+          submissionBatchId: clientUuid(),
+          entries: rows
+        });
+        if (!result.ok) {
+          const issues = safeArray(result.errors).concat(safeArray(result.conflicts));
+          root.innerHTML = issues.map(issue => `<div class="list-item critical">Row ${escapeHtml(issue.row)}: ${escapeHtml(issue.message)}</div>`).join('') ||
+            `<div class="empty">${escapeHtml(result.message || 'Preview failed.')}</div>`;
+          return;
+        }
+        state.bulkObservationPreview = {
+          source: document.getElementById('bulkObservationText').value,
+          rows: rows
+        };
+        root.innerHTML = `<div class="message"><strong>${result.count} valid observation rows</strong><div class="muted small">Review the count before adding these rows to the unsaved queue.</div></div>` +
+          safeArray(result.rows).slice(0, 20).map(item => `<div class="list-item">Row ${item.row}: ${escapeHtml(item.studentId)} · ${escapeHtml(item.observationDate)} · ${escapeHtml(item.score)} · ${escapeHtml(item.prompt)}</div>`).join('') +
+          (result.count > 20 ? `<div class="muted small">Plus ${result.count - 20} more valid rows.</div>` : '');
+        queueButton.disabled = false;
+      } catch (error) {
+        root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    function queueBulkObservations_() {
+      const preview = state.bulkObservationPreview;
+      if (!preview || preview.source !== document.getElementById('bulkObservationText').value) {
+        return toast('Preview the current pasted rows before adding them.', true);
+      }
+      preview.rows.forEach(item => state.observationQueue.push({
+        ...item,
+        localId: clientUuid(),
+        label: item.benchmarkId
+      }));
+      if (!state.observationBatchId) state.observationBatchId = clientUuid();
+      persistObservationQueue_();
+      closeDialog('bulkObservationDialog');
+      state.bulkObservationPreview = null;
+      document.getElementById('bulkObservationText').value = '';
+      document.getElementById('bulkObservationPreview').innerHTML = '';
+      document.getElementById('queueBulkObservations').disabled = true;
+      renderObservationQueue();
+      toast(`${preview.rows.length} observations added to the queue.`);
+    }
+
+    function parseBulkGoalRows_() {
+      return parseTabularRows_(document.getElementById('bulkGoalText').value, [
+        { header: 'GoalKey', key: 'goalKey', required: true },
+        { header: 'StudentId', key: 'studentId', required: true },
+        { header: 'Goal', key: 'goal', required: true },
+        { header: 'Domain', key: 'domain', required: false },
+        { header: 'Status', key: 'status', required: false },
+        { header: 'StartDate', key: 'startDate', required: false },
+        { header: 'DueDate', key: 'dueDate', required: false },
+        { header: 'SubjectIds', key: 'subjectIds', required: true },
+        { header: 'BenchmarkOrder', key: 'phaseOrder', required: false },
+        { header: 'TaskDemand', key: 'taskDemandDescription', required: false },
+        { header: 'GoalArchetype', key: 'goalArchetype', required: false },
+        { header: 'TargetAccuracyPct', key: 'targetAccuracyPct', required: false },
+        { header: 'TargetPromptLevel', key: 'targetPromptLevel', required: false },
+        { header: 'TargetPromptCeiling', key: 'targetPromptCeiling', required: false },
+        { header: 'TargetPromptCount', key: 'legacyTargetPromptCount', required: false },
+        { header: 'ConsistencyTrialsPassed', key: 'consistencyTrialsPassed', required: false },
+        { header: 'ConsistencyTrialsWindow', key: 'consistencyTrialsWindow', required: false },
+        { header: 'TargetConsecutiveSessions', key: 'targetConsecutiveSessions', required: false },
+        { header: 'EvaluationWindowUnit', key: 'evaluationWindowUnit', required: false },
+        { header: 'BenchmarkStartDate', key: 'benchmarkStartDate', required: true },
+        { header: 'BenchmarkDueDate', key: 'benchmarkDueDate', required: true }
+      ]).map(row => ({
+        ...row,
+        targetPromptCeiling: row.targetPromptCeiling || row.legacyTargetPromptCount
+      }));
+    }
+
+    async function previewBulkGoals_() {
+      const root = document.getElementById('bulkGoalPreview');
+      const saveButton = document.getElementById('saveBulkGoals');
+      saveButton.disabled = true;
+      try {
+        const rows = parseBulkGoalRows_();
+        const result = await server('previewBulkGoals', { rows });
+        if (!result.ok) {
+          root.innerHTML = safeArray(result.errors).map(issue =>
+            `<div class="list-item critical">${issue.row ? 'Row ' + escapeHtml(issue.row) + ': ' : ''}${escapeHtml(issue.message)}</div>`
+          ).join('');
+          return;
+        }
+        state.bulkGoalPreview = {
+          source: document.getElementById('bulkGoalText').value,
+          rows: rows,
+          importBatchId: clientUuid()
+        };
+        root.innerHTML = `<div class="message"><strong>${result.goalCount} goals and ${result.phaseCount} benchmarks are valid</strong><div class="muted small">Nothing has been saved yet.</div></div>` +
+          safeArray(result.goals).map(goal => `<div class="list-item"><strong>${escapeHtml(goal.goalKey)}</strong> · ${escapeHtml(goal.studentId)} · ${goal.phases.length} benchmark${goal.phases.length === 1 ? '' : 's'}<div class="muted small">${escapeHtml(goal.goal)}</div></div>`).join('');
+        saveButton.disabled = false;
+      } catch (error) {
+        root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function saveBulkGoals_() {
+      const preview = state.bulkGoalPreview;
+      if (!preview || preview.source !== document.getElementById('bulkGoalText').value) {
+        return toast('Preview the current pasted rows before saving them.', true);
+      }
+      closeDialog('bulkGoalDialog');
+      const approved = await confirmDialog({
+        title: 'Save bulk goals',
+        message: 'Save every goal and benchmark in the validated preview?',
+        confirmLabel: 'Save all'
+      });
+      if (!approved) {
+        openDialog('bulkGoalDialog');
+        return;
+      }
+      try {
+        const result = await server('saveBulkGoals', {
+          rows: preview.rows,
+          importBatchId: preview.importBatchId
+        });
+        if (!result.ok) {
+          openDialog('bulkGoalDialog');
+          return toast(result.message || 'Bulk goal import failed.', true);
+        }
+        state.bulkGoalPreview = null;
+        document.getElementById('bulkGoalText').value = '';
+        document.getElementById('bulkGoalPreview').innerHTML = '';
+        document.getElementById('saveBulkGoals').disabled = true;
+        await refreshGoalManagerData();
+        toast(`${result.goalCount} goals and ${result.phaseCount} benchmarks saved.`);
+      } catch (error) {
+        openDialog('bulkGoalDialog');
+        toast(error.message, true);
+      }
     }
 
     async function toggleClock() {
@@ -2156,26 +3651,34 @@
 
     function bindStaticForms() {
       document.getElementById('refreshFullSchedule').addEventListener('click', showWeeklySchedule);
+      document.getElementById('previewBulkObservations').addEventListener('click', previewBulkObservations_);
+      document.getElementById('queueBulkObservations').addEventListener('click', queueBulkObservations_);
+      document.getElementById('previewBulkGoals').addEventListener('click', previewBulkGoals_);
+      document.getElementById('saveBulkGoals').addEventListener('click', saveBulkGoals_);
+      document.getElementById('previewAdminCatalog').addEventListener('click', previewAdminCatalog_);
+      document.getElementById('saveAdminCatalog').addEventListener('click', saveAdminCatalog_);
       document.getElementById('callOffForm').addEventListener('submit', async event => {
         event.preventDefault();
-        const payload = formObject(event.currentTarget);
+        const form = event.currentTarget;
+        const payload = formObject(form);
         payload.hasHours = payload.hasHours === 'true';
         try {
           const result = await server('callOff', payload);
           closeDialog('callOffDialog');
-          event.currentTarget.reset();
+          form.reset();
           await refreshBootstrap();
           toast(safeArray(result.reconciliation).map(item => item.message).filter(Boolean).join(' ') || 'Call-off submitted.');
         } catch (error) { toast(error.message, true); }
       });
       document.getElementById('timeOffForm').addEventListener('submit', async event => {
         event.preventDefault();
-        const payload = formObject(event.currentTarget);
-        payload.hasHours = event.currentTarget.elements.hasHours.checked;
+        const form = event.currentTarget;
+        const payload = formObject(form);
+        payload.hasHours = form.elements.hasHours.checked;
         try {
           await server('submitTimeOffRequest', payload);
           closeDialog('timeOffDialog');
-          event.currentTarget.reset();
+          form.reset();
           toast('Time-off request sent.');
         } catch (error) { toast(error.message, true); }
       });
@@ -2238,16 +3741,58 @@
       }
       const width = 760, height = 310, left = 46, right = 20, top = 20, bottom = 62;
       const plotBottom = height - bottom;
+      const benchmark = progress.benchmark || {};
+      const archetype = benchmark.goalArchetype || 'DISCRETE_TRIAL';
+      const metric = archetype === 'PROMPT_FADE'
+        ? 'PROMPT'
+        : archetype === 'FREQUENCY_QUOTA' ? 'FREQUENCY' : 'ACCURACY';
+      const values = points.map(point => metric === 'PROMPT'
+        ? point.actualPromptCount
+        : metric === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent
+      ).filter(value => value !== null && value !== '' && Number.isFinite(Number(value)));
+      if (!values.length) {
+        root.innerHTML = '<div class="empty">Entries exist, but this benchmark’s graph metric was not recorded.</div>';
+        return;
+      }
+      const target = metric === 'PROMPT'
+        ? benchmark.targetPromptCeiling
+        : metric === 'FREQUENCY'
+          ? benchmark.consistencyTrialsPassed
+          : benchmark.targetAccuracyPct;
+      const maxValue = metric === 'ACCURACY'
+        ? 100
+        : Math.max(1, ...values.map(Number), Number(target || 0));
       const x = index => points.length === 1 ? (left + width - right) / 2 : left + index * ((width - left - right) / (points.length - 1));
-      const y = value => plotBottom - (Number(value || 0) / 100) * (plotBottom - top);
-      const line = points.map((point, index) => `${x(index)},${y(point.percent)}`).join(' ');
+      const y = value => plotBottom - (Number(value || 0) / maxValue) * (plotBottom - top);
+      const line = points.map((point, index) => {
+        const value = metric === 'PROMPT'
+          ? point.actualPromptCount
+          : metric === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent;
+        return value === null || value === '' ? '' : `${x(index)},${y(value)}`;
+      }).filter(Boolean).join(' ');
       const labelEvery = Math.max(1, Math.ceil(points.length / 7));
-      const grid = [0, 25, 50, 75, 100].map(value => `
+      const ticks = metric === 'ACCURACY'
+        ? [0, 25, 50, 75, 100]
+        : Array.from(new Set([0, Math.ceil(maxValue / 2), Math.ceil(maxValue)]));
+      const suffix = metric === 'ACCURACY' ? '%' : '';
+      const metricLabel = metric === 'PROMPT'
+        ? 'Prompt count (lower is better)'
+        : metric === 'FREQUENCY' ? 'Recorded occurrences' : 'Accuracy';
+      const grid = ticks.map(value => `
         <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
-        <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}%</text>`).join('');
+        <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}${suffix}</text>`).join('');
       root.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Benchmark progress line chart">
-        ${grid}<polyline points="${line}" fill="none" stroke="#e10600" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-        ${points.map((point, index) => `<circle cx="${x(index)}" cy="${y(point.percent)}" r="5" fill="#fff" stroke="#e10600" stroke-width="3"><title>${escapeHtml(formatChartDate(point.timestamp))}: ${escapeHtml(String(point.percent))}% (${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))})</title></circle>`).join('')}
+        <text x="${left}" y="14" fill="#b8bbc2" font-size="11">${metricLabel}</text>
+        ${grid}
+        ${target === null || target === '' || target === undefined ? '' : `<line x1="${left}" y1="${y(target)}" x2="${width-right}" y2="${y(target)}" stroke="#ffd60a" stroke-width="2" stroke-dasharray="8 6"/><text x="${width-right}" y="${y(target)-5}" fill="#b8bbc2" font-size="10" text-anchor="end">Target ${escapeHtml(String(target))}${suffix}</text>`}
+        <polyline points="${line}" fill="none" stroke="#e10600" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        ${points.map((point, index) => {
+          const value = metric === 'PROMPT'
+            ? point.actualPromptCount
+            : metric === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent;
+          if (value === null || value === '') return '';
+          return `<circle cx="${x(index)}" cy="${y(value)}" r="5" fill="#fff" stroke="#e10600" stroke-width="3"><title>${escapeHtml(formatChartDate(point.timestamp))}: ${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))} · ${escapeHtml(String(point.percent))}%${point.actualPromptCount == null ? '' : ' · ' + escapeHtml(String(point.actualPromptCount)) + ' prompts'} · ${escapeHtml(point.actualPromptLevel || 'Prompt not recorded')}</title></circle>`;
+        }).join('')}
         ${points.map((point, index) => (index % labelEvery === 0 || index === points.length - 1)
           ? `<text x="${x(index)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="middle">${escapeHtml(formatChartDate(point.timestamp))}</text>`
           : '').join('')}
@@ -2261,7 +3806,7 @@
         workspace.innerHTML = '<div class="empty">Loading student goals…</div>';
         const data = !force && state.goalWorkspaceCache[studentId]
           ? state.goalWorkspaceCache[studentId]
-          : await server('getStudentGoalWorkspace', studentId);
+          : await serverQuiet('getStudentGoalWorkspace', studentId, force ? { force: true } : {});
         state.goalWorkspaceCache[studentId] = data;
         renderGoalWorkspaceData(data);
       } catch (error) {
@@ -2270,20 +3815,45 @@
     }
 
     function renderGoalWorkspaceData(data) {
-      const goals = safeArray(data && data.goals);
+      const currentGoals = safeArray(data && data.goals);
+      const otherGoals = safeArray(data && data.otherGoals);
       const workspace = document.getElementById('goalWorkspace');
       const chart = document.getElementById('goalProgressChart');
       const legend = document.getElementById('goalLegend');
       if (!workspace || !chart || !legend) return;
-      renderGoalProgressChart(goals, chart, legend);
-      workspace.innerHTML = goals.length ? goals.map((goal, goalIndex) => {
+      state.currentGoalWorkspace = data;
+      renderGoalProgressChart(currentGoals, chart, legend);
+      document.getElementById('openGoalReport')?.addEventListener('click', () =>
+        openGoalProgressReport({ ...data, goals: currentGoals })
+      );
+      const activeEntryCounts = currentGoals.map(goal => {
+        const active = safeArray(goal.benchmarks).find(benchmark => benchmark.active);
+        return active ? Number(active.entryCount || 0) : null;
+      }).filter(count => count !== null);
+      const activeEntryAverage = activeEntryCounts.length
+        ? activeEntryCounts.reduce((total, count) => total + count, 0) / activeEntryCounts.length
+        : 0;
+      const masteryChip = benchmark => {
+        const mastery = benchmark && benchmark.mastery;
+        if (!mastery || !mastery.available) {
+          return '<span class="chip">Mastery unavailable</span>';
+        }
+        const label = mastery.mastered
+          ? 'Mastered'
+          : `${mastery.consecutiveSessionsMet}/${mastery.requiredConsecutiveSessions} qualifying ${String(mastery.evaluationWindowUnit || 'SESSION').toLowerCase().replace(/_/g, ' ')} windows`;
+        return `<span class="chip ${mastery.mastered ? 'status-approved' : 'status-pending'}">${escapeHtml(label)}</span>`;
+      };
+      workspace.innerHTML = currentGoals.length ? currentGoals.map((goal, goalIndex) => {
         const metrics = goal.metrics || {};
         const benchmarks = safeArray(goal.benchmarks);
+        const activeForBadge = benchmarks.find(benchmark => benchmark.active);
+        const activeCount = activeForBadge ? Number(activeForBadge.entryCount || 0) : 0;
         return `
           <div class="goal-card">
             <div class="row" style="justify-content:space-between;align-items:flex-start">
               <div><div class="eyebrow">Goal ${goalIndex + 1}</div><h3>${escapeHtml(goal.goal)}</h3></div>
               <div class="row">
+                <span class="chip ${entryComparisonBadgeClass(activeCount, activeEntryAverage, Boolean(activeForBadge))}" title="Goal total; color compares its active benchmark with this student’s active-goal average">${escapeHtml(String(goal.totalEntryCount || 0))} entries</span>
                 ${goal.critical ? '<span class="chip critical">Critical</span>' : ''}
                 <span class="chip">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</span>
               </div>
@@ -2294,28 +3864,67 @@
               <span class="chip">Average ${metrics.averagePercent == null ? '—' : escapeHtml(String(metrics.averagePercent)) + '%'}</span>
               <span class="chip">${escapeHtml(String(metrics.entryCount || 0))} entries</span>
               <span class="chip">Trend ${metrics.trend == null ? '—' : (metrics.trend > 0 ? '+' : '') + escapeHtml(String(metrics.trend)) + '%'}</span>
+              <span class="chip">Current benchmark last 3 ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
+              <span class="chip">Highest independence ${metrics.highestIndependence ? escapeHtml(metrics.highestIndependence.promptLevel + ' · ' + metrics.highestIndependence.promptCount + ' prompts') : '—'}</span>
             </div>
             <div class="toolbar">
               <button class="btn ${goal.critical ? 'ghost' : 'danger'} small-btn" data-goal-critical="${escapeAttr(goal.id)}" data-critical="${goal.critical ? 'false' : 'true'}">${goal.critical ? 'Remove critical status' : 'Mark goal critical'}</button>
             </div>
-            <div class="list">${benchmarks.length ? benchmarks.map(benchmark => `
-              <div class="benchmark-row ${benchmark.active ? 'active' : ''}">
-                <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(benchmark.id)}">
-                  <strong>${escapeHtml(benchmark.category)}</strong>
-                  <div class="muted small">${escapeHtml(benchmark.skill)}</div>
+            ${(() => {
+              const activeBenchmark = benchmarks.find(benchmark => benchmark.active);
+              const inactiveBenchmarks = benchmarks.filter(benchmark => !benchmark.active);
+              const currentActivation = safeArray(goal.phaseHistory).slice().reverse()
+                .find(item => activeBenchmark && item.benchmarkId === activeBenchmark.id);
+              const activeLabel = currentActivation && currentActivation.source === 'MANUAL_OVERRIDE'
+                ? `Override through ${currentActivation.endedAt}`
+                : 'Date-selected active';
+              return `<div class="list">${activeBenchmark ? `
+              <div class="benchmark-row active">
+                <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(activeBenchmark.id)}">
+                  <strong>${escapeHtml(activeBenchmark.category)}</strong>
+                  <div class="muted small">${escapeHtml(activeBenchmark.skill)}</div>
+                  <div class="muted small">${escapeHtml(activeBenchmark.startDate || '—')}–${escapeHtml(activeBenchmark.dueDate || '—')}</div>
                 </button>
-                ${benchmark.active
-                  ? '<span class="chip status-approved">Active</span>'
-                  : `<button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Make active</button>`}
-              </div>`).join('') : '<div class="empty">No benchmarks are assigned to this goal.</div>'}</div>
+                <div class="row"><span class="chip ${entryComparisonBadgeClass(Number(activeBenchmark.entryCount || 0), activeEntryAverage, true)}">${escapeHtml(String(activeBenchmark.entryCount || 0))} entries</span>${masteryChip(activeBenchmark)}<span class="chip status-approved">${escapeHtml(activeLabel)}</span></div>
+              </div>` : '<div class="empty">No benchmark is active because all configured date ranges have ended.</div>'}</div>
+              ${inactiveBenchmarks.length ? `<details style="margin-top:10px">
+                <summary class="muted small">Manage other benchmarks (${inactiveBenchmarks.length})</summary>
+                <div class="list" style="margin-top:10px">${inactiveBenchmarks.map(benchmark => `
+                  <div class="benchmark-row">
+                    <button class="btn ghost" style="text-align:left" data-benchmark-history="${escapeAttr(benchmark.id)}">
+                      <strong>${escapeHtml(benchmark.category)}</strong>
+                      <div class="muted small">${escapeHtml(benchmark.skill)}</div>
+                      <div class="muted small">${escapeHtml(benchmark.startDate || '—')}–${escapeHtml(benchmark.dueDate || '—')}</div>
+                    </button>
+                    <div class="row"><span class="chip">${escapeHtml(String(benchmark.entryCount || 0))} entries</span>${masteryChip(benchmark)}<button class="btn small-btn" data-set-active="${escapeAttr(benchmark.id)}" data-goal-id="${escapeAttr(goal.id)}">Override until next quarter</button></div>
+                  </div>`).join('')}</div>
+              </details>` : ''}`;
+            })()}
           </div>`;
-      }).join('') : '<div class="empty">This student has no active annual goals.</div>';
+      }).join('') : '<div class="empty">This student has no current annual goals.</div>';
+      if (otherGoals.length) {
+        workspace.insertAdjacentHTML('beforeend', `
+          <details style="margin-top:14px">
+            <summary class="muted small">Other goal records (${otherGoals.length})</summary>
+            <div class="list" style="margin-top:10px">${otherGoals.map(goal => `
+              <div class="goal-card">
+                <div class="row" style="justify-content:space-between;align-items:flex-start">
+                  <div><strong>${escapeHtml(goal.goal)}</strong><div class="muted small">${escapeHtml(goal.startDate)}–${escapeHtml(goal.dueDate)}</div></div>
+                  <span class="chip">${goal.workspaceSection === 'FUTURE' ? 'Future' : goal.status === 'ACTIVE' ? 'Past' : escapeHtml(titleCase(goal.status || 'History'))}</span>
+                </div>
+                <div class="row"><span class="chip">${escapeHtml(String(goal.totalEntryCount || 0))} entries</span><button class="btn ghost small-btn" type="button" data-view-goal-history="${escapeAttr(goal.id)}">View goal history</button></div>
+              </div>`).join('')}</div>
+          </details>`);
+      }
       workspace.querySelectorAll('[data-set-active]').forEach(button => button.addEventListener('click', async () => {
         try {
-          await server('setActiveGoalBenchmark', {
+          const result = await server('setActiveGoalBenchmark', {
             goalId: button.dataset.goalId,
             benchmarkId: button.dataset.setActive
           });
+          if (!result || !result.ok) {
+            return toast(result && result.message ? result.message : 'The active benchmark was not changed.', true);
+          }
           state.goalWorkspaceCache[state.goalStudentId] = null;
           await loadGoalWorkspace(state.goalStudentId, true);
           const benchmark = state.data.caseManager.benchmarks.find(item =>
@@ -2324,7 +3933,9 @@
           state.data.caseManager.benchmarks
             .filter(item => String(item.goalId) === String(button.dataset.goalId))
             .forEach(item => { item.active = benchmark ? item.id === benchmark.id : false; });
-          toast('Active objective updated.');
+          toast(result.overrideExpiresAt
+            ? `Benchmark override saved through ${result.overrideExpiresAt}.`
+            : 'Active benchmark updated.');
         } catch (error) { toast(error.message, true); }
       }));
       workspace.querySelectorAll('[data-benchmark-history]').forEach(button =>
@@ -2349,58 +3960,252 @@
           toast(critical ? 'Goal marked critical.' : 'Critical status removed.');
         } catch (error) { toast(error.message, true); }
       }));
+      workspace.querySelectorAll('[data-view-goal-history]').forEach(button =>
+        button.addEventListener('click', async () => {
+          try {
+            const history = await server('getStudentGoalWorkspace', data.student.id, {
+              goalId: button.dataset.viewGoalHistory
+            });
+            openGoalProgressReport(history, { showHistory: true });
+          } catch (error) {
+            toast(error.message, true);
+          }
+        })
+      );
     }
 
-    function renderGoalProgressChart(goals, chart, legend) {
+    function openGoalProgressReport(data, options) {
+      options = options || {};
+      const content = document.getElementById('goalReportContent');
+      if (!content) return;
+      const goals = safeArray(data && data.goals);
+      content.innerHTML = `
+        <article class="card">
+          <div class="eyebrow">V.O.I.C.E.S 2.0 progress summary</div>
+          <h1>${escapeHtml(data.student ? data.student.name : 'Student')}</h1>
+          <p class="muted">Generated ${escapeHtml(new Date().toLocaleDateString())}</p>
+        </article>
+        ${goals.map((goal, index) => {
+          const metrics = goal.metrics || {};
+          return `<article class="card">
+            <div class="eyebrow">Goal ${index + 1}${goal.domain ? ' · ' + escapeHtml(goal.domain) : ''}</div>
+            <h2>${escapeHtml(goal.goal)}</h2>
+            <div class="checks">
+              <span class="chip">Current benchmark: ${escapeHtml(metrics.currentPhase || 'Not selected')}</span>
+              <span class="chip">Latest 3 combined: ${metrics.currentPhaseLastThreeAccuracy == null ? '—' : escapeHtml(String(metrics.currentPhaseLastThreeAccuracy)) + '%'}</span>
+              <span class="chip">Current-objective trials: ${escapeHtml(String(metrics.currentPhaseTrialCount || 0))}</span>
+              <span class="chip">Highest independence: ${metrics.highestIndependence ? escapeHtml(metrics.highestIndependence.promptLevel + ' · ' + metrics.highestIndependence.promptCount + ' prompts') : '—'}</span>
+            </div>
+            <div class="list" style="margin-top:14px">${safeArray(goal.progressStatements).length
+              ? goal.progressStatements.map(item => `<div class="message">${escapeHtml(item.statement)}</div>`).join('')
+              : '<div class="empty">No observations in this report range.</div>'}</div>
+          </article>`;
+        }).join('')}
+        <article class="card">
+          <div class="eyebrow">Benchmark progress graph</div>
+          <div id="goalReportLegend" class="legend"></div>
+          <div id="goalReportChart" class="chart"></div>
+        </article>`;
+      renderGoalProgressChart(
+        goals,
+        document.getElementById('goalReportChart'),
+        document.getElementById('goalReportLegend'),
+        { showHistory: Boolean(options.showHistory) }
+      );
+      document.getElementById('printGoalReport').onclick = () => window.print();
+      openDialog('goalReportDialog');
+    }
+
+    function renderGoalProgressChart(goals, chart, legend, options) {
+      options = options || {};
+      const showHistory = Boolean(options.showHistory);
       const colors = ['#ff453a', '#64d2ff', '#ffd60a', '#bf5af2', '#30d158', '#ff9f0a', '#5e5ce6', '#ff375f'];
+      const promptColors = {
+        Independent: '#30d158',
+        Verbal: '#64d2ff',
+        'Gestural/Visual': '#ffd60a',
+        Model: '#bf5af2',
+        Physical: '#ff453a'
+      };
+      goals.forEach((goal, index) => {
+        if (state.goalVisibility[goal.id] === undefined) {
+          state.goalVisibility[goal.id] = index === 0;
+        }
+      });
       const series = goals.map((goal, index) => ({
         goal,
         color: colors[index % colors.length],
-        points: safeArray(goal.points).map(point => ({
+        points: safeArray(goal.points).filter(point =>
+          showHistory || safeArray(goal.benchmarks).some(benchmark =>
+            benchmark.active && String(benchmark.id) === String(point.benchmarkId)
+          )
+        ).map(point => ({
           ...point,
-          time: new Date(point.timestamp).getTime()
+          time: new Date((point.observationDate || point.timestamp) + (
+            point.observationDate ? 'T12:00:00' : ''
+          )).getTime()
         })).filter(point => Number.isFinite(point.time))
-      }));
+      })).filter(item => state.goalVisibility[item.goal.id]);
       const allPoints = series.flatMap(item => item.points);
-      legend.innerHTML = series.map((item, index) => `
+      legend.innerHTML = `
+        <div class="toolbar"><button class="btn ghost small-btn" type="button" data-show-all-goals>Show all</button><button class="btn ghost small-btn" type="button" data-toggle-goal-history>${showHistory ? 'Show active benchmarks only' : 'View full goal history'}</button></div>
+        ${goals.map((goal, index) => `
         <span class="goal-legend-item">
-          <span class="goal-legend-dot" style="background:${item.color}"></span>
-          Goal ${index + 1}: ${escapeHtml(item.goal.goal)}
-        </span>`).join('');
+          <input type="checkbox" data-goal-visibility="${escapeAttr(goal.id)}" ${state.goalVisibility[goal.id] ? 'checked' : ''} aria-label="Show Goal ${index + 1}">
+          <span class="goal-legend-dot" style="background:${colors[index % colors.length]}"></span>
+          Goal ${index + 1}: ${escapeHtml(goal.goal)}
+          <button class="btn ghost small-btn" type="button" data-show-only-goal="${escapeAttr(goal.id)}">Only</button>
+        </span>`).join('')}`;
+      legend.querySelectorAll('[data-goal-visibility]').forEach(input => input.addEventListener('change', () => {
+        state.goalVisibility[input.dataset.goalVisibility] = input.checked;
+        renderGoalProgressChart(goals, chart, legend, options);
+      }));
+      legend.querySelectorAll('[data-show-only-goal]').forEach(button => button.addEventListener('click', () => {
+        goals.forEach(goal => { state.goalVisibility[goal.id] = goal.id === button.dataset.showOnlyGoal; });
+        renderGoalProgressChart(goals, chart, legend, options);
+      }));
+      legend.querySelector('[data-show-all-goals]')?.addEventListener('click', () => {
+        goals.forEach(goal => { state.goalVisibility[goal.id] = true; });
+        renderGoalProgressChart(goals, chart, legend, options);
+      });
+      legend.querySelector('[data-toggle-goal-history]')?.addEventListener('click', () =>
+        renderGoalProgressChart(goals, chart, legend, {
+          ...options,
+          showHistory: !showHistory
+        })
+      );
       if (!allPoints.length) {
-        chart.innerHTML = '<div class="empty">No entries have been recorded for this student’s goals.</div>';
+        chart.innerHTML = '<div class="empty">No visible goal has recorded entries.</div>';
         return;
       }
-      const width = 980, height = 340, left = 48, right = 24, top = 24, bottom = 62;
-      const plotBottom = height - bottom;
       const minTime = Math.min(...allPoints.map(point => point.time));
       const maxTime = Math.max(...allPoints.map(point => point.time));
+      const width = 980, height = 390, left = 48, right = 24, top = 72, bottom = 62;
+      const plotBottom = height - bottom;
       const x = time => minTime === maxTime
         ? (left + width - right) / 2
         : left + ((time - minTime) / (maxTime - minTime)) * (width - left - right);
-      const y = value => plotBottom - (Number(value || 0) / 100) * (plotBottom - top);
-      const grid = [0, 25, 50, 75, 100].map(value => `
-        <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
-        <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}%</text>`).join('');
       const dateTicks = Array.from({ length: 5 }, (_, index) =>
         minTime + (maxTime - minTime) * (index / 4)
       );
-      chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Annual goal progress line chart">
-        ${grid}
-        ${series.map(item => {
-          const line = item.points.map(point => `${x(point.time)},${y(point.percent)}`).join(' ');
-          return `<polyline points="${line}" fill="none" stroke="${item.color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            ${item.points.map(point => `<circle cx="${x(point.time)}" cy="${y(point.percent)}" r="4" fill="#111318" stroke="${item.color}" stroke-width="3"><title>${escapeHtml(formatChartDate(point.timestamp))}: ${escapeHtml(String(point.percent))}%</title></circle>`).join('')}`;
-        }).join('')}
-        ${dateTicks.map((time, index) => `<text x="${x(time)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="${index === 0 ? 'start' : index === 4 ? 'end' : 'middle'}">${escapeHtml(formatChartDate(new Date(time).toISOString()))}</text>`).join('')}
-      </svg>`;
+      const metricKey = archetype => archetype === 'PROMPT_FADE'
+        ? 'PROMPT'
+        : archetype === 'FREQUENCY_QUOTA' ? 'FREQUENCY' : 'ACCURACY';
+      const panels = [
+        { key: 'ACCURACY', label: 'Accuracy', suffix: '%' },
+        { key: 'PROMPT', label: 'Prompt count (lower is better)', suffix: '' },
+        { key: 'FREQUENCY', label: 'Recorded occurrences / quota progress', suffix: '' }
+      ].filter(panel => allPoints.some(point =>
+        metricKey(point.goalArchetype || 'DISCRETE_TRIAL') === panel.key
+      ));
+      chart.innerHTML = panels.map(panel => {
+        const panelSeries = series.map(item => ({
+          ...item,
+          points: item.points.filter(point =>
+            metricKey(point.goalArchetype || 'DISCRETE_TRIAL') === panel.key
+          )
+        })).filter(item => item.points.length);
+        const valueFor = point => panel.key === 'PROMPT'
+          ? point.actualPromptCount
+          : panel.key === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent;
+        const values = panelSeries.flatMap(item => item.points)
+          .map(valueFor)
+          .filter(value => value !== null && value !== '' && Number.isFinite(Number(value)))
+          .map(Number);
+        if (!values.length) {
+          return `<div class="empty">${escapeHtml(panel.label)} data was not recorded.</div>`;
+        }
+        const targetValues = panelSeries.flatMap(item => safeArray(item.goal.benchmarks))
+          .filter(benchmark => showHistory || benchmark.active)
+          .filter(benchmark => metricKey(benchmark.goalArchetype || 'DISCRETE_TRIAL') === panel.key)
+          .map(benchmark => panel.key === 'PROMPT'
+            ? benchmark.targetPromptCeiling
+            : panel.key === 'FREQUENCY'
+              ? benchmark.consistencyTrialsPassed
+              : benchmark.targetAccuracyPct
+          )
+          .filter(value => value !== null && value !== '' && Number.isFinite(Number(value)))
+          .map(Number);
+        const maxValue = panel.key === 'ACCURACY'
+          ? 100
+          : Math.max(1, ...values, ...targetValues);
+        const y = value => plotBottom -
+          (Number(value || 0) / maxValue) * (plotBottom - top);
+        const ticks = panel.key === 'ACCURACY'
+          ? [0, 25, 50, 75, 100]
+          : Array.from(new Set([0, Math.ceil(maxValue / 2), Math.ceil(maxValue)]));
+        const grid = ticks.map(value => `
+          <line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="rgba(255,255,255,.08)"/>
+          <text x="8" y="${y(value)+4}" fill="#8f9299" font-size="11">${value}${panel.suffix}</text>`).join('');
+        const phaseAnnotations = panelSeries.map(item => {
+          const benchmarks = safeArray(item.goal.benchmarks)
+            .filter(benchmark => showHistory || benchmark.active);
+          const benchmarkIds = new Set(benchmarks.map(benchmark => String(benchmark.id)));
+          return safeArray(item.goal.phaseHistory)
+            .filter(history => benchmarkIds.has(String(history.benchmarkId)))
+            .slice()
+            .sort((a, b) =>
+              String(a.activatedAt).localeCompare(String(b.activatedAt)) ||
+              Number(a.orderIndex || 0) - Number(b.orderIndex || 0)
+            )
+            .map(history => {
+              const benchmark = benchmarks.find(row =>
+                String(row.id) === String(history.benchmarkId)
+              );
+              if (!benchmark || !history.activatedAt) return '';
+              const startTime = new Date(history.activatedAt + 'T12:00:00').getTime();
+              if (!Number.isFinite(startTime) || startTime > maxTime) return '';
+              const endTime = history.endedAt
+                ? Math.min(maxTime, new Date(history.endedAt + 'T12:00:00').getTime())
+                : maxTime;
+              const lineX = x(Math.max(minTime, startTime));
+              const benchmarkMetric = metricKey(
+                benchmark.goalArchetype || 'DISCRETE_TRIAL'
+              );
+              const target = benchmarkMetric !== panel.key
+                ? null
+                : panel.key === 'PROMPT'
+                  ? benchmark.targetPromptCeiling
+                  : panel.key === 'FREQUENCY'
+                    ? benchmark.consistencyTrialsPassed
+                    : benchmark.targetAccuracyPct;
+              const targetLine = target !== null && target !== '' &&
+                  target !== undefined && Number.isFinite(Number(target))
+                ? `<line x1="${lineX}" y1="${y(target)}" x2="${x(Math.max(startTime, endTime))}" y2="${y(target)}" stroke="${item.color}" stroke-width="2" stroke-dasharray="9 6" opacity=".75"/>
+                  <text x="${Math.min(width - right - 4, x(Math.max(startTime, endTime)))}" y="${y(target) - 5}" fill="#b8bbc2" font-size="10" text-anchor="end">Benchmark ${escapeHtml(String(history.orderIndex || ''))} target ${escapeHtml(String(target))}${panel.suffix}</text>`
+                : '';
+              return `<line x1="${lineX}" y1="${top}" x2="${lineX}" y2="${plotBottom}" stroke="#8f9299" stroke-width="2" stroke-dasharray="5 5" opacity=".8"/>
+                <text x="${lineX + 4}" y="${36 + (Number(history.orderIndex || 1) % 3) * 11}" fill="#b8bbc2" font-size="10">Benchmark ${escapeHtml(String(history.orderIndex || ''))}</text>
+                ${targetLine}`;
+            }).join('');
+        }).join('');
+        return `<div class="eyebrow" style="margin-top:14px">${escapeHtml(panel.label)}</div>
+          <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttr(panel.label)} annual goal progress chart">
+          ${grid}
+          ${phaseAnnotations}
+          ${panelSeries.map(item => {
+            const ordered = item.points.slice().sort((a, b) =>
+              a.time - b.time || Number(a.phaseOrder || 0) - Number(b.phaseOrder || 0)
+            ).filter(point => {
+              const value = valueFor(point);
+              return value !== null && value !== '' && Number.isFinite(Number(value));
+            });
+            const line = ordered.map(point =>
+              `${x(point.time)},${y(valueFor(point))}`
+            ).join(' ');
+            return `<polyline points="${line}" fill="none" stroke="${item.color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              ${ordered.map(point => `<circle cx="${x(point.time)}" cy="${y(valueFor(point))}" r="5" fill="${promptColors[point.actualPromptLevel] || '#111318'}" stroke="${item.color}" stroke-width="3"><title>${escapeHtml(formatChartDate(point.observationDate || point.timestamp))}: ${escapeHtml(String(point.correct))}/${escapeHtml(String(point.attempts))} · ${escapeHtml(String(point.percent))}% · ${escapeHtml(point.actualPromptLevel || 'Prompt not recorded')}${point.actualPromptCount == null ? '' : ' · ' + escapeHtml(String(point.actualPromptCount)) + ' prompts'} · ${escapeHtml(point.benchmark || '')} · ${escapeHtml(point.staffEmail || '')}</title></circle>`).join('')}`;
+          }).join('')}
+          ${dateTicks.map((time, index) => `<text x="${x(time)}" y="${height - 28}" fill="#aeb0b5" font-size="11" text-anchor="${index === 0 ? 'start' : index === 4 ? 'end' : 'middle'}">${escapeHtml(formatChartDate(new Date(time).toISOString()))}</text>`).join('')}
+        </svg>`;
+      }).join('');
     }
 
     async function showBenchmarkHistory(benchmarkId) {
       const dialog = document.getElementById('benchmarkHistoryDialog');
       const content = document.getElementById('benchmarkHistoryContent');
       content.innerHTML = '<div class="empty">Loading entries…</div>';
-      dialog.showModal();
+      openDialog('benchmarkHistoryDialog');
       try {
         const data = state.benchmarkEntryCache[benchmarkId] ||
           await server('getBenchmarkEntryDetails', benchmarkId);
@@ -2423,15 +4228,36 @@
     }
 
     async function refreshBootstrap(tab) {
-      const nextData = normalizeBootstrap(await server('getAppBootstrap'));
+      if (tab && state.data && state.data.view === 'CASE_MANAGER') {
+        state.caseManagerDataLoaded = {};
+        state.caseManagerWorkspacePromise = null;
+        state.goalWorkspaceCache = {};
+        state.goalCatalogCache = {};
+        state.benchmarkEntryCache = {};
+        state.scheduleDataCache = {};
+        state.scheduleDataPromises = {};
+        state.readModelVersion += 1;
+        await loadCaseManagerWorkspace(true);
+        state.selectedTab = tab;
+        renderCaseManager();
+        return;
+      }
+      const nextData = normalizeBootstrap(await server('getAppBootstrap', true));
       state.data = nextData;
+      state.caseManagerDataLoaded = {};
+      state.caseManagerWorkspacePromise = null;
       state.goalWorkspaceCache = {};
+      state.goalCatalogCache = {};
       state.benchmarkEntryCache = {};
-      document.getElementById('brandLogo').src = state.data.logo || '';
+      state.scheduleDataCache = {};
+      state.scheduleDataPromises = {};
+      state.readModelVersion += 1;
+      if (state.data.logo) document.getElementById('brandLogo').src = state.data.logo;
       document.getElementById('welcomeName').textContent = 'Welcome ' + (state.data.user.firstName || '');
       document.getElementById('roleChip').textContent = roleLabel(state.data.user.role);
       if (state.data.view === 'CASE_MANAGER') {
         if (tab) state.selectedTab = tab;
+        await loadCaseManagerWorkspace(true);
         document.getElementById('aideView').classList.add('hidden');
         renderCaseManager();
       } else {
@@ -2446,19 +4272,34 @@
         if (button.dataset.refreshBound) return;
         button.dataset.refreshBound = 'true';
         button.addEventListener('click', async () => {
+          const label = button.textContent;
+          button.disabled = true;
+          button.textContent = 'Refreshing…';
           try {
             const section = button.dataset.refresh || state.selectedTab;
             if (section === 'benchmarks') {
-              await refreshGoalManagerData();
+              await refreshGoalManagerData(undefined, true);
+            } else if (section === 'schedule') {
+              await loadScheduleTypeSummaries(true);
+              if (state.scheduleData) await loadScheduleBuilder(true);
+            } else if (section === 'ieps') {
+              state.data.caseManager.ieps = safeArray(
+                await serverQuiet('getIepsForCurrentCaseManager')
+              );
+              await renderIeps(document.getElementById('cmContent'));
             } else if (section === 'admin') {
               await refreshMessageManagementData();
-            } else if (section === 'overview') {
-              await refreshBootstrap('overview');
             } else {
-              await refreshBootstrap(section);
+              state.caseManagerDataLoaded[section] = false;
+              await renderCaseManagerTab();
             }
             toast('Data refreshed.');
-          } catch (error) { toast(safeErrorMessage(error), true); }
+          } catch (error) {
+            toast(safeErrorMessage(error), true);
+          } finally {
+            button.disabled = false;
+            button.textContent = label;
+          }
         });
       });
     }
@@ -2478,6 +4319,8 @@
                 reject(new Error('No response was returned. Refresh this view and try again.'));
                 return;
               }
+              recordUserActivity_();
+              invalidateClientReadModels(functionName);
               resolve(result);
             })
             .withFailureHandler(error => {
@@ -2487,6 +4330,74 @@
             [functionName](...args);
         } catch (error) {
           endBusy();
+          reject(new Error(safeErrorMessage(error)));
+        }
+      });
+    }
+
+    function invalidateClientReadModels(functionName) {
+      const scheduleMutations = new Set([
+        'callOff',
+        'deleteStaff',
+        'deleteStudent',
+        'reviewStaffRequest',
+        'saveAdminCatalogBatch',
+        'saveSchedule',
+        'saveScheduleType',
+        'submitAvailability',
+        'submitTimeOffRequest',
+        'upsertStaff',
+        'upsertStudent'
+      ]);
+      const studentMutations = new Set([
+        'createGoal',
+        'deactivateGoal',
+        'deleteBenchmark',
+        'deleteStudent',
+        'generateIep',
+        'saveAdminCatalogBatch',
+        'saveBenchmark',
+        'saveBenchmarkEntriesBatch',
+        'saveBulkGoals',
+        'saveClassRoster',
+        'saveSchoolQuarterBoundaries',
+        'setActiveGoalBenchmark',
+        'setGoalCritical',
+        'updateGoalSubjects',
+        'upsertStudent'
+      ]);
+      const generalMutations = new Set([
+        'clockIn',
+        'clockOut',
+        'saveBrandingLogo',
+        'saveDailyMessage',
+        'setDailyMessageActive'
+      ]);
+      const affectsSchedule = scheduleMutations.has(functionName);
+      const affectsStudents = studentMutations.has(functionName);
+      if (!affectsSchedule && !affectsStudents && !generalMutations.has(functionName)) return;
+      state.caseManagerDataLoaded = {};
+      state.caseManagerWorkspacePromise = null;
+      if (affectsStudents) {
+        state.goalWorkspaceCache = {};
+        state.goalCatalogCache = {};
+        state.benchmarkEntryCache = {};
+      }
+      if (affectsSchedule) {
+        state.scheduleDataCache = {};
+        state.scheduleDataPromises = {};
+        state.readModelVersion += 1;
+      }
+    }
+
+    function serverQuiet(functionName, ...args) {
+      return new Promise((resolve, reject) => {
+        try {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(error => reject(new Error(safeErrorMessage(error))))
+            [functionName](...args);
+        } catch (error) {
           reject(new Error(safeErrorMessage(error)));
         }
       });
@@ -2541,7 +4452,12 @@
         deleteStudent: 'Deactivating student…',
         reviewStaffRequest: 'Updating request…',
         generateIep: 'Generating IEP document…',
-        saveBrandingLogo: 'Uploading logo…'
+        saveBrandingLogo: 'Uploading logo…',
+        previewAdminCatalogBatch: 'Validating subjects and classes…',
+        saveAdminCatalogBatch: 'Saving subjects and classes…',
+        saveClassRoster: 'Saving class roster…',
+        saveSchoolQuarterBoundaries: 'Saving quarter dates…',
+        updateGoalSubjects: 'Saving goal relevance…'
       };
       return labels[functionName] || 'Working with the database…';
     }
@@ -2561,7 +4477,12 @@
     function showFatal(error) {
       const root = document.getElementById('fatalError');
       root.classList.remove('hidden');
-      root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p><p class="muted">Ask a case manager or the Apps Script owner to confirm database setup, deployment access, and the Staff whitelist.</p>`;
+      const chooser = 'https:' + '/' + '/accounts.google.com/AccountChooser?continue=' +
+        encodeURIComponent(window.location.href);
+      root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p>
+        <p class="muted">Google Apps Script cannot reliably select among multiple signed-in accounts. Choose your hbuhsd.edu account below, or open this page in a private window signed into only that account.</p>
+        <div class="toolbar"><a class="btn primary" href="${escapeAttr(chooser)}">Choose school Google account</a></div>
+        <p class="muted small">If the school account is already active, ask a case manager or the Apps Script owner to confirm deployment access and the Staff whitelist.</p>`;
     }
 
     function safeArray(value) { return Array.isArray(value) ? value : []; }
@@ -2597,7 +4518,7 @@
         };
       }
       if (value.caseManager) {
-        ['students', 'goals', 'benchmarks', 'iepReminders', 'toDos', 'staff', 'caseManagers', 'aides', 'scheduleTypes']
+        ['students', 'goals', 'benchmarks', 'ieps', 'iepReminders', 'toDos', 'staff', 'caseManagers', 'aides', 'scheduleTypes']
           .forEach(key => { value.caseManager[key] = safeArray(value.caseManager[key]); });
         value.caseManager.messages = value.caseManager.messages || {};
         value.caseManager.messages.messages = safeArray(value.caseManager.messages.messages);
@@ -2629,13 +4550,157 @@
       });
     }
 
+    function requestDialog(options) {
+      options = options || {};
+      const dialog = document.getElementById('appDecisionDialog');
+      const title = document.getElementById('appDecisionTitle');
+      const description = document.getElementById('appDecisionDescription');
+      const inputWrap = document.getElementById('appDecisionInputWrap');
+      const inputLabel = document.getElementById('appDecisionInputLabel');
+      const input = document.getElementById('appDecisionInput');
+      const checkboxWrap = document.getElementById('appDecisionCheckboxWrap');
+      const checkboxLabel = document.getElementById('appDecisionCheckboxLabel');
+      const checkbox = document.getElementById('appDecisionCheckbox');
+      const cancel = document.getElementById('appDecisionCancel');
+      const confirm = document.getElementById('appDecisionConfirm');
+      title.textContent = options.title || 'Confirm';
+      description.textContent = options.message || '';
+      description.style.whiteSpace = 'pre-line';
+      inputWrap.hidden = !options.inputLabel;
+      inputLabel.textContent = options.inputLabel || 'Value';
+      input.value = options.value || '';
+      checkboxWrap.hidden = !options.checkboxLabel;
+      checkboxLabel.textContent = options.checkboxLabel || '';
+      checkbox.checked = Boolean(options.checked);
+      cancel.textContent = options.cancelLabel || 'Cancel';
+      confirm.textContent = options.confirmLabel || 'Confirm';
+      cancel.hidden = options.cancellable === false;
+      return new Promise(resolve => {
+        let settled = false;
+        const settle = confirmed => {
+          if (settled) return;
+          settled = true;
+          closeAccessibleDialog_(dialog);
+          resolve({ confirmed, value: input.value, checked: checkbox.checked });
+        };
+        cancel.onclick = () => settle(false);
+        confirm.onclick = () => settle(true);
+        input.onkeydown = event => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            settle(true);
+          }
+        };
+        dialog._onAccessibleCancel = () => settle(false);
+        showAccessibleDialog_(dialog, { cancellable: options.cancellable !== false });
+        requestAnimationFrame(() => (options.inputLabel ? input : confirm).focus());
+      });
+    }
+
+    async function confirmDialog(options) {
+      const result = await requestDialog(options);
+      return result.confirmed;
+    }
+
+    function showAccessibleDialog_(dialog, options) {
+      if (!dialog) return;
+      options = options || {};
+      const title = dialog.querySelector('h1, h2, [data-dialog-title]');
+      if (title) {
+        if (!title.id) title.id = dialog.id + 'Title';
+        dialog.setAttribute('aria-labelledby', title.id);
+      }
+      const description = dialog.querySelector('p, [data-dialog-description]');
+      if (description) {
+        if (!description.id) description.id = dialog.id + 'Description';
+        dialog.setAttribute('aria-describedby', description.id);
+      }
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog._returnFocus = document.activeElement;
+      document.body.classList.add('dialog-open');
+      Array.from(document.body.children).forEach(element => {
+        if (element === dialog || element.id === 'dialogFallbackBackdrop' || element.tagName === 'SCRIPT') return;
+        element.dataset.dialogAriaHidden = element.getAttribute('aria-hidden') || '';
+        element.setAttribute('aria-hidden', 'true');
+        if ('inert' in element) element.inert = true;
+      });
+      const trap = event => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (options.cancellable !== false && dialog._onAccessibleCancel) dialog._onAccessibleCancel();
+          else if (options.cancellable !== false) closeAccessibleDialog_(dialog);
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = Array.from(dialog.querySelectorAll(
+          'button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )).filter(element => element.offsetParent !== null);
+        if (!focusable.length) {
+          event.preventDefault();
+          dialog.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      };
+      dialog._dialogTrap = trap;
+      dialog.addEventListener('keydown', trap);
+      const cancelHandler = event => {
+        event.preventDefault();
+        if (options.cancellable !== false && dialog._onAccessibleCancel) dialog._onAccessibleCancel();
+        else if (options.cancellable !== false) closeAccessibleDialog_(dialog);
+      };
+      dialog._dialogCancelHandler = cancelHandler;
+      dialog.addEventListener('cancel', cancelHandler);
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else {
+        dialog.setAttribute('open', '');
+        dialog.classList.add('dialog-fallback-open');
+      }
+    }
+
+    function closeAccessibleDialog_(dialog) {
+      if (!dialog) return;
+      if (dialog._dialogTrap) dialog.removeEventListener('keydown', dialog._dialogTrap);
+      if (dialog._dialogCancelHandler) {
+        dialog.removeEventListener('cancel', dialog._dialogCancelHandler);
+      }
+      dialog._dialogTrap = null;
+      dialog._dialogCancelHandler = null;
+      if (typeof dialog.close === 'function' && dialog.open) dialog.close();
+      else {
+        dialog.removeAttribute('open');
+        dialog.classList.remove('dialog-fallback-open');
+      }
+      document.body.classList.remove('dialog-open');
+      Array.from(document.body.children).forEach(element => {
+        if (!Object.prototype.hasOwnProperty.call(element.dataset, 'dialogAriaHidden')) return;
+        const prior = element.dataset.dialogAriaHidden;
+        if (prior) element.setAttribute('aria-hidden', prior);
+        else element.removeAttribute('aria-hidden');
+        delete element.dataset.dialogAriaHidden;
+        if ('inert' in element) element.inert = false;
+      });
+      const returnFocus = dialog._returnFocus;
+      dialog._onAccessibleCancel = null;
+      if (returnFocus && typeof returnFocus.focus === 'function') returnFocus.focus();
+    }
+
     function openDialog(id) {
       const dialog = document.getElementById(id);
       const today = state.data ? state.data.today : '';
       dialog.querySelectorAll('input[type="date"]').forEach(input => { if (!input.value) input.value = today; });
-      dialog.showModal();
+      showAccessibleDialog_(dialog, { cancellable: true });
     }
-    function closeDialog(id) { document.getElementById(id).close(); }
+    function closeDialog(id) { closeAccessibleDialog_(document.getElementById(id)); }
     function fileAsDataUrl(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -2643,6 +4708,12 @@
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
+    }
+    function entryComparisonBadgeClass(count, average, active) {
+      if (!active) return '';
+      if (count >= average) return 'status-approved';
+      if (count >= average * 0.5) return 'status-pending';
+      return 'critical';
     }
     function roleLabel(role) { return titleCase(String(role).replace('_', ' ')); }
     function titleCase(value) { return String(value).toLowerCase().replace(/\b\w/g, char => char.toUpperCase()); }

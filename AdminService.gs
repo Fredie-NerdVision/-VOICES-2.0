@@ -15,12 +15,14 @@ function saveDailyMessage(payload) {
     const existing = findOne_('Messages', row => String(row.Id) === String(payload.id));
     if (!existing) throw new Error('Message was not found.');
     updateRow_('Messages', existing._row, record);
+    invalidateAppDataCache_('general');
     return { ok: true, id: existing.Id };
   }
   record.Id = uuid_();
   record.CreatedBy = staff.Email;
   record.CreatedAt = new Date();
   appendRow_('Messages', record);
+  invalidateAppDataCache_('general');
   return { ok: true, id: record.Id };
 }
 
@@ -39,18 +41,306 @@ function getMessageManagementData() {
   });
 }
 
-function getMessageManagementData_() {
+function getMessageManagementData_(staff) {
   const today = formatDate_(new Date());
   const staffIndex = staffByEmail_();
   const messages = rows_('Messages')
     .sort((a, b) => String(b.CreatedAt).localeCompare(String(a.CreatedAt)))
     .map(row => publicMessage_(row, staffIndex));
-  return {
+  const result = {
     messages: messages,
     activeToday: messages.filter(row =>
       row.active && dateInRange_(today, row.startDate, row.endDate)
     )
   };
+  if (staff && toBoolean_(staff.IsAdmin)) {
+    result.catalog = getAdminCatalogData_();
+  }
+  return result;
+}
+
+function getAdminCatalogData_() {
+  const staff = activeRows_('Staff')
+    .filter(row =>
+      row.Role === VOICES.ROLES.TEACHER ||
+      row.Role === VOICES.ROLES.CASE_MANAGER ||
+      toBoolean_(row.IsAdmin)
+    )
+    .map(publicStaff_)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  const subjects = activeRows_('Subjects')
+    .map(row => ({ id: row.Id, name: row.Name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const subjectIndex = indexBy_(activeRows_('Subjects'), 'Id');
+  const classes = activeRows_('Classes')
+    .map(row => ({
+      id: row.Id,
+      name: row.Name,
+      subjectId: row.SubjectId,
+      subjectName: subjectIndex[row.SubjectId] ? subjectIndex[row.SubjectId].Name : '',
+      teacherEmail: normalizeEmail_(row.TeacherEmail),
+      periodId: row.PeriodId
+    }))
+    .sort((a, b) =>
+      a.teacherEmail.localeCompare(b.teacherEmail) ||
+      String(a.periodId).localeCompare(String(b.periodId), undefined, { numeric: true })
+    );
+  const periods = Array.from(new Set(
+    rows_('SchedulePeriods').map(row => String(row.PeriodId || '').trim()).filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return {
+    staff: staff,
+    subjects: subjects,
+    classes: classes,
+    periods: periods,
+    quarterBoundaries: getSchoolQuarterBoundaries_()
+  };
+}
+
+function saveSchoolQuarterBoundaries(payload) {
+  requireAdmin_();
+  const boundaries = Array.isArray(payload && payload.boundaries)
+    ? payload.boundaries.map(formatDate_).filter(Boolean)
+    : [];
+  if (boundaries.length !== 5) {
+    throw new Error('Configure Q1, Q2, Q3, Q4, and the next school-year start date.');
+  }
+  if (new Set(boundaries).size !== boundaries.length ||
+      boundaries.some((date, index) => index && date <= boundaries[index - 1])) {
+    throw new Error('Quarter boundaries must be five unique dates in chronological order.');
+  }
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Quarter settings are busy. Retry shortly.'
+    };
+  }
+  try {
+    invalidateRowsCache_('Settings');
+    upsertSetting_('SchoolQuarterBoundaries', JSON.stringify(boundaries));
+    invalidateRowsCache_('Settings');
+    invalidateAppDataCache_('student');
+    return { ok: true, boundaries: boundaries };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function installMissingBenchmarkObservationTrigger() {
+  requireAdmin_();
+  ScriptApp.getProjectTriggers()
+    .filter(trigger =>
+      trigger.getHandlerFunction() === 'checkMissingBenchmarkObservations'
+    )
+    .forEach(trigger => ScriptApp.deleteTrigger(trigger));
+  ScriptApp.newTrigger('checkMissingBenchmarkObservations')
+    .timeBased()
+    .everyDays(1)
+    .atHour(6)
+    .create();
+  return { ok: true, handler: 'checkMissingBenchmarkObservations' };
+}
+
+function previewAdminCatalogBatch(payload) {
+  requireAdmin_();
+  return validateAdminCatalogBatch_(payload);
+}
+
+function saveAdminCatalogBatch(payload) {
+  requireAdmin_();
+  const validation = validateAdminCatalogBatch_(payload);
+  if (!validation.ok) return validation;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Catalog saving is busy. The validated batch is still available; retry shortly.'
+    };
+  }
+  try {
+    ['Subjects', 'Classes'].forEach(invalidateRowsCache_);
+    const subjects = activeRows_('Subjects');
+    const subjectByName = subjects.reduce((map, row) => {
+      map[normalizeCatalogName_(row.Name)] = row;
+      return map;
+    }, {});
+    let subjectsCreated = 0;
+    validation.subjects.forEach(item => {
+      const key = normalizeCatalogName_(item.name);
+      if (subjectByName[key]) return;
+      const record = { Id: uuid_(), Name: item.name, Active: true };
+      appendRow_('Subjects', record);
+      subjectByName[key] = record;
+      subjectsCreated += 1;
+    });
+
+    invalidateRowsCache_('Subjects');
+    invalidateRowsCache_('Classes');
+    const existingByTeacherPeriod = activeRows_('Classes').reduce((map, row) => {
+      map[normalizeEmail_(row.TeacherEmail) + '|' + String(row.PeriodId)] = row;
+      return map;
+    }, {});
+    let classesCreated = 0;
+    validation.classes.forEach(item => {
+      const key = item.teacherEmail + '|' + item.periodId;
+      const existing = existingByTeacherPeriod[key];
+      const subject = subjectByName[normalizeCatalogName_(item.subjectName)];
+      if (existing) return;
+      const record = {
+        Id: uuid_(),
+        Name: item.name,
+        SubjectId: subject.Id,
+        TeacherEmail: item.teacherEmail,
+        PeriodId: item.periodId,
+        Active: true
+      };
+      appendRow_('Classes', record);
+      existingByTeacherPeriod[key] = record;
+      classesCreated += 1;
+    });
+    invalidateRowsCache_('Subjects');
+    invalidateRowsCache_('Classes');
+    invalidateScheduleCache_('all');
+    return {
+      ok: true,
+      subjectsCreated: subjectsCreated,
+      classesCreated: classesCreated,
+      subjectsTotal: validation.subjects.length,
+      classesTotal: validation.classes.length
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function validateAdminCatalogBatch_(payload) {
+  payload = payload || {};
+  const sourceSubjects = Array.isArray(payload.subjects) ? payload.subjects : [];
+  const sourceClasses = Array.isArray(payload.classes) ? payload.classes : [];
+  if (!sourceSubjects.length && !sourceClasses.length) {
+    throw new Error('Add at least one subject or class.');
+  }
+  if (sourceSubjects.length > 100 || sourceClasses.length > 200) {
+    throw new Error('Submit no more than 100 subjects and 200 classes at a time.');
+  }
+  const activeSubjects = activeRows_('Subjects');
+  const subjectByName = activeSubjects.reduce((map, row) => {
+    map[normalizeCatalogName_(row.Name)] = row;
+    return map;
+  }, {});
+  const staffByEmail = activeRows_('Staff').reduce((map, row) => {
+    map[normalizeEmail_(row.Email)] = row;
+    return map;
+  }, {});
+  const periodIds = new Set(
+    rows_('SchedulePeriods').map(row => String(row.PeriodId || '').trim()).filter(Boolean)
+  );
+  const existingByTeacherPeriod = activeRows_('Classes').reduce((map, row) => {
+    map[normalizeEmail_(row.TeacherEmail) + '|' + String(row.PeriodId)] = row;
+    return map;
+  }, {});
+  const errors = [];
+  const subjects = [];
+  const batchSubjects = {};
+  sourceSubjects.forEach((item, index) => {
+    const name = sanitizeText_(
+      typeof item === 'string' ? item : item && item.name,
+      200
+    );
+    if (!name) {
+      errors.push({ section: 'Subject', row: index + 1, message: 'Name is required.' });
+      return;
+    }
+    const key = normalizeCatalogName_(name);
+    if (batchSubjects[key]) {
+      errors.push({ section: 'Subject', row: index + 1, message: 'Duplicate subject name in this batch.' });
+      return;
+    }
+    batchSubjects[key] = true;
+    subjects.push({ name: name, exists: Boolean(subjectByName[key]) });
+  });
+  const availableSubjectNames = Object.assign({}, subjectByName);
+  subjects.forEach(item => {
+    availableSubjectNames[normalizeCatalogName_(item.name)] =
+      availableSubjectNames[normalizeCatalogName_(item.name)] || item;
+  });
+  const classes = [];
+  const batchTeacherPeriods = {};
+  sourceClasses.forEach((item, index) => {
+    item = item || {};
+    const name = sanitizeText_(item.name, 200);
+    const subjectName = sanitizeText_(item.subjectName, 200);
+    const teacherEmail = normalizeEmail_(item.teacherEmail);
+    const periodId = sanitizeText_(item.periodId, 100);
+    if (!name || !subjectName || !teacherEmail || !periodId) {
+      errors.push({
+        section: 'Class',
+        row: index + 1,
+        message: 'ClassName, Subject, TeacherEmail, and PeriodId are required.'
+      });
+      return;
+    }
+    const teacher = staffByEmail[teacherEmail];
+    if (!teacher ||
+        ![VOICES.ROLES.TEACHER, VOICES.ROLES.CASE_MANAGER].includes(teacher.Role) &&
+        !toBoolean_(teacher.IsAdmin)) {
+      errors.push({ section: 'Class', row: index + 1, message: 'TeacherEmail must match active instructional staff.' });
+      return;
+    }
+    if (!periodIds.has(periodId)) {
+      errors.push({ section: 'Class', row: index + 1, message: 'PeriodId must match a configured schedule period.' });
+      return;
+    }
+    const subject = availableSubjectNames[normalizeCatalogName_(subjectName)];
+    if (!subject) {
+      errors.push({ section: 'Class', row: index + 1, message: 'Subject must match an existing or batched subject name.' });
+      return;
+    }
+    const key = teacherEmail + '|' + periodId;
+    if (batchTeacherPeriods[key]) {
+      errors.push({ section: 'Class', row: index + 1, message: 'A teacher can only have one class per period in a batch.' });
+      return;
+    }
+    batchTeacherPeriods[key] = true;
+    const existing = existingByTeacherPeriod[key];
+    if (existing) {
+      const existingSubject = subjectByName[normalizeCatalogName_(subjectName)];
+      if (String(existing.Name) !== name ||
+          !existingSubject ||
+          String(existing.SubjectId) !== String(existingSubject.Id)) {
+        errors.push({
+          section: 'Class',
+          row: index + 1,
+          message: 'This teacher and period already belong to a different active class.'
+        });
+        return;
+      }
+    }
+    classes.push({
+      name: name,
+      subjectName: subjectName,
+      teacherEmail: teacherEmail,
+      periodId: periodId,
+      exists: Boolean(existing)
+    });
+  });
+  return {
+    ok: !errors.length,
+    errors: errors,
+    subjects: subjects,
+    classes: classes,
+    subjectCount: subjects.length,
+    classCount: classes.length
+  };
+}
+
+function normalizeCatalogName_(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function setDailyMessageActive(payload) {
@@ -60,6 +350,7 @@ function setDailyMessageActive(payload) {
   const existing = findOne_('Messages', row => String(row.Id) === String(payload.id));
   if (!existing) throw new Error('Message was not found.');
   updateRow_('Messages', existing._row, { Active: toBoolean_(payload.active) });
+  invalidateAppDataCache_('general');
   return { ok: true };
 }
 
@@ -117,16 +408,17 @@ function saveBrandingLogo(payload) {
       console.warn('Previous logo could not be removed: ' + error.message);
     }
   }
+  invalidateAppDataCache_('general');
   return { ok: true, logo: dataUriFromFile_(file) };
 }
 
-function getBrandingLogo_() {
+function getBrandingLogo_(useDefault) {
   const fileId = PropertiesService.getScriptProperties().getProperty(VOICES.LOGO_FILE_PROPERTY);
-  if (!fileId) return getDefaultLogoDataUri();
+  if (!fileId) return useDefault === false ? '' : getDefaultLogoDataUri();
   try {
     return dataUriFromFile_(DriveApp.getFileById(fileId));
   } catch (error) {
-    return getDefaultLogoDataUri();
+    return useDefault === false ? '' : getDefaultLogoDataUri();
   }
 }
 
@@ -198,6 +490,13 @@ function getStaffRequestData_() {
     timeOffHistory: timeOff,
     currentAvailability: availability.filter(row => row.status === 'APPROVED')
   };
+}
+
+function getStaffRequestData() {
+  return withRowsCache_(() => {
+    requireCaseManager_();
+    return getStaffRequestData_();
+  });
 }
 
 function availabilityDayOrder_(day) {
@@ -281,12 +580,12 @@ function upsertStaff(payload) {
   };
   if (existing) {
     updateRow_('Staff', existing._row, record);
-    invalidateScheduleCache_();
+    invalidateAppDataCache_('all');
     return { ok: true, id: existing.Id };
   }
   record.Id = uuid_();
   appendRow_('Staff', record);
-  invalidateScheduleCache_();
+  invalidateAppDataCache_('all');
   return { ok: true, id: record.Id };
 }
 
@@ -302,7 +601,7 @@ function deleteStaff(email) {
     throw new Error('Only an administrator can remove another administrator.');
   }
   updateRow_('Staff', existing._row, { Active: false });
-  invalidateScheduleCache_();
+  invalidateAppDataCache_('all');
   return { ok: true };
 }
 
@@ -334,10 +633,12 @@ function upsertStudent(payload) {
       throw new Error('You can only update your own assigned students.');
     }
     updateRow_('Students', existing._row, record);
+    invalidateAppDataCache_('all');
     return { ok: true, id: existing.Id };
   }
   record.Id = uuid_();
   appendRow_('Students', record);
+  invalidateAppDataCache_('all');
   return { ok: true, id: record.Id };
 }
 
@@ -350,7 +651,101 @@ function deleteStudent(studentId) {
     throw new Error('You can only remove your own assigned students.');
   }
   updateRow_('Students', student._row, { Active: false });
+  invalidateAppDataCache_('all');
   return { ok: true };
+}
+
+function getClassRosterData_(staff) {
+  const email = normalizeEmail_(staff.Email);
+  const isAdmin = toBoolean_(staff.IsAdmin);
+  const subjects = indexBy_(activeRows_('Subjects'), 'Id');
+  const enrollments = rows_('ClassStudents').reduce((index, row) => {
+    const classId = String(row.ClassId);
+    if (!index[classId]) index[classId] = [];
+    index[classId].push(String(row.StudentId));
+    return index;
+  }, {});
+  const classes = activeRows_('Classes')
+    .filter(row => isAdmin || normalizeEmail_(row.TeacherEmail) === email)
+    .map(row => ({
+      id: row.Id,
+      name: row.Name,
+      teacherEmail: normalizeEmail_(row.TeacherEmail),
+      periodId: row.PeriodId,
+      subjectName: subjects[row.SubjectId] ? subjects[row.SubjectId].Name : '',
+      studentIds: enrollments[String(row.Id)] || []
+    }))
+    .sort((a, b) =>
+      a.teacherEmail.localeCompare(b.teacherEmail) ||
+      String(a.periodId).localeCompare(String(b.periodId), undefined, { numeric: true }) ||
+      a.name.localeCompare(b.name)
+    );
+  return {
+    classes: classes,
+    students: activeRows_('Students')
+      .map(publicStudent_)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  };
+}
+
+function saveClassRoster(payload) {
+  const staff = requireCaseManager_();
+  payload = payload || {};
+  assertRequired_(payload, ['classId']);
+  const classId = String(payload.classId);
+  let classRow = findOne_('Classes', row =>
+    String(row.Id) === classId && toBoolean_(row.Active)
+  );
+  if (!classRow) throw new Error('Class was not found.');
+  if (!toBoolean_(staff.IsAdmin) &&
+      normalizeEmail_(classRow.TeacherEmail) !== normalizeEmail_(staff.Email)) {
+    throw new Error('You can only edit rosters for classes assigned to you.');
+  }
+  const studentIds = Array.from(new Set(
+    (Array.isArray(payload.studentIds) ? payload.studentIds : [])
+      .map(String)
+      .filter(Boolean)
+  ));
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    return {
+      ok: false,
+      code: 'WRITE_BUSY',
+      retryable: true,
+      message: 'Roster saving is busy. Retry shortly.'
+    };
+  }
+  try {
+    ['Classes', 'ClassStudents', 'Students'].forEach(invalidateRowsCache_);
+    classRow = findOne_('Classes', row =>
+      String(row.Id) === classId && toBoolean_(row.Active)
+    );
+    if (!classRow) throw new Error('Class was not found.');
+    if (!toBoolean_(staff.IsAdmin) &&
+        normalizeEmail_(classRow.TeacherEmail) !== normalizeEmail_(staff.Email)) {
+      throw new Error('You can only edit rosters for classes assigned to you.');
+    }
+    const activeStudentIds = new Set(activeRows_('Students').map(row => String(row.Id)));
+    const invalidStudentId = studentIds.find(id => !activeStudentIds.has(id));
+    if (invalidStudentId) throw new Error('The roster contains an inactive or unknown student.');
+    replaceRowsUnlocked_(
+      'ClassStudents',
+      row => String(row.ClassId) === classId,
+      studentIds.map(studentId => ({
+        ClassId: classId,
+        StudentId: studentId
+      }))
+    );
+    invalidateAppDataCache_('all');
+    return {
+      ok: true,
+      classId: classId,
+      studentCount: studentIds.length,
+      message: 'Class roster saved.'
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function sendEmail_(to, subject, body) {
