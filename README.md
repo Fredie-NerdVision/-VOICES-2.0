@@ -6,6 +6,9 @@ Release 2.3 adds flexible goal phases, raw-trial and prompt-condition observatio
 
 Read [PROJECT_GUIDE.md](PROJECT_GUIDE.md) for the complete architecture, data model, workflows, resource map, setup, testing, and deployment procedures.
 
+For a dedicated shared tablet, follow [SHARED_DEVICE_LOGIN.md](SHARED_DEVICE_LOGIN.md)
+to configure the server-verified Google sign-in without changing normal phone access.
+
 ## Local validation
 
 ```bash

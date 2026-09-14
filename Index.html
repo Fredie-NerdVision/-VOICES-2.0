@@ -468,7 +468,7 @@
     }
   </style>
 </head>
-<body data-app-url="<?= appUrl ?>" data-account-selection-token="<?= accountSelectionToken ?>">
+<body data-app-url="<?= appUrl ?>" data-account-selection-token="<?= accountSelectionToken ?>" data-kiosk-login-url="<?= kioskLoginUrl ?>" data-kiosk-enrollment="<?= kioskEnrollment ?>" data-kiosk-session-token="<?= kioskSessionToken ?>" data-kiosk-session-error="<?= kioskSessionError ?>">
   <div id="loading" class="loading">
     <div class="loading-inner">
       <img id="loadingLogo" class="loading-logo" src="<?!= defaultLogo ?>" alt="V.O.I.C.E.S logo">
@@ -705,6 +705,10 @@
     const OBSERVATION_DRAFT_STORAGE_VERSION = 1;
     const IDLE_LOCK_MS = 30 * 60 * 1000;
     const IDLE_WARNING_MS = 28 * 60 * 1000;
+    const KIOSK_DEVICE_KEY = 'voices-kiosk-device';
+    const KIOSK_SESSION_KEY = 'voices-kiosk-session';
+    const KIOSK_SESSION_REFRESH_MS = 10 * 60 * 1000;
+    let kioskSessionRefreshedAt = 0;
     let observationDraftTimer = null;
     let observationDraftRetryCount = 0;
     let idleWarningTimer = null;
@@ -721,8 +725,20 @@
     async function init() {
       bindStaticForms();
       renderAvailabilityDays();
-      document.getElementById('switchGoogleAccount').href = accountChooserUrl_();
-      document.getElementById('continueWithGoogle').addEventListener('click', chooseGoogleAccount_);
+      enrollKioskDevice_();
+      const kioskHandoff = consumeKioskSessionHandoff_();
+      renderAccessActions_();
+      document.getElementById('continueWithGoogle').addEventListener('click', () => {
+        if (isKioskDevice_() && !kioskSession_()) {
+          startKioskLogin_();
+          return;
+        }
+        if (isKioskDevice_()) {
+          enterWorkspace_();
+          return;
+        }
+        chooseGoogleAccount_();
+      });
       document.getElementById('lockApp').addEventListener('click', () => lockWorkspace_(false));
       document.getElementById('globalRefresh').addEventListener('click', async () => {
         try {
@@ -749,12 +765,112 @@
       });
       const accountSelectionToken = String(document.body.dataset.accountSelectionToken || '');
       const consumedTokenKey = 'voices-account-selection:' + accountSelectionToken;
-      if (accountSelectionToken && !sessionStorage.getItem(consumedTokenKey)) {
+      if (kioskHandoff.error) {
+        document.getElementById('accessStatus').textContent = kioskHandoff.error;
+      } else if (isKioskDevice_()) {
+        if (kioskHandoff.completed && kioskSession_()) {
+          document.getElementById('accessStatus').innerHTML =
+            'Verifying your school Google account<span class="loading-dots"></span>';
+          enterWorkspace_();
+        } else {
+          clearKioskSession_();
+          renderAccessActions_();
+        }
+      } else if (accountSelectionToken && !sessionStorage.getItem(consumedTokenKey)) {
         sessionStorage.setItem(consumedTokenKey, '1');
         document.getElementById('accessStatus').innerHTML =
           'Verifying the selected Workspace account<span class="loading-dots"></span>';
         enterWorkspace_();
       }
+    }
+
+    function isKioskDevice_() {
+      try {
+        return localStorage.getItem(KIOSK_DEVICE_KEY) === '1' && Boolean(kioskLoginUrl_());
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function kioskLoginUrl_() {
+      return String(document.body.dataset.kioskLoginUrl || '');
+    }
+
+    function enrollKioskDevice_() {
+      const requested = String(document.body.dataset.kioskEnrollment || '').toLowerCase();
+      try {
+        if (requested === '1' || requested === 'true' || requested === 'on') {
+          localStorage.setItem(KIOSK_DEVICE_KEY, '1');
+        } else if (requested === '0' || requested === 'false' || requested === 'off') {
+          localStorage.removeItem(KIOSK_DEVICE_KEY);
+          clearKioskSession_();
+        }
+      } catch (error) { /* private browsing */ }
+    }
+
+    function kioskSession_() {
+      try {
+        return sessionStorage.getItem(KIOSK_SESSION_KEY) || '';
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function setKioskSession_(token) {
+      try {
+        sessionStorage.setItem(KIOSK_SESSION_KEY, token);
+        kioskSessionRefreshedAt = Date.now();
+      } catch (error) { /* private browsing */ }
+    }
+
+    function clearKioskSession_() {
+      try { sessionStorage.removeItem(KIOSK_SESSION_KEY); } catch (error) { /* ignore */ }
+      kioskSessionRefreshedAt = 0;
+    }
+
+    function startKioskLogin_() {
+      const url = kioskLoginUrl_();
+      if (!url) {
+        toast('Shared-device sign-in is not configured for this deployment.', true);
+        return;
+      }
+      clearKioskSession_();
+      window.top.location.href = url;
+    }
+
+    function consumeKioskSessionHandoff_() {
+      const token = String(document.body.dataset.kioskSessionToken || '');
+      const failure = String(document.body.dataset.kioskSessionError || '');
+      if (!token && !failure) return { completed: false, error: '' };
+      try {
+        localStorage.setItem(KIOSK_DEVICE_KEY, '1');
+      } catch (error) { /* private browsing */ }
+      if (token) setKioskSession_(token);
+      if (window.google && google.script && google.script.history) {
+        google.script.history.replace({}, {}, '');
+      }
+      return { completed: Boolean(token), error: failure || '' };
+    }
+
+    function renderAccessActions_() {
+      const switcher = document.getElementById('switchGoogleAccount');
+      const primary = document.getElementById('continueWithGoogle');
+      if (isKioskDevice_()) {
+        primary.textContent = kioskSession_()
+          ? 'Resume V.O.I.C.E.S'
+          : 'Sign in with your school Google account';
+        document.getElementById('accessDescription').textContent =
+          'This is a shared device. Sign in with your own school Google account; only V.O.I.C.E.S access is granted.';
+        switcher.textContent = 'Use a different school account';
+        switcher.href = '#';
+        switcher.removeAttribute('target');
+        switcher.onclick = event => {
+          event.preventDefault();
+          startKioskLogin_();
+        };
+        return;
+      }
+      switcher.href = accountChooserUrl_();
     }
 
     function accountChooserUrl_() {
@@ -809,6 +925,7 @@
     function recordUserActivity_() {
       if (!state.data || state.isLocked) return;
       state.lastActivityAt = Date.now();
+      maybeRefreshKioskSession_();
       window.clearTimeout(idleWarningTimer);
       window.clearTimeout(idleLockTimer);
       idleWarningTimer = window.setTimeout(() => {
@@ -821,6 +938,7 @@
       if (!state.data || state.isLocked) return;
       if (state.observationQueue.length) persistObservationQueue_();
       state.isLocked = true;
+      if (isKioskDevice_()) clearKioskSession_();
       window.clearTimeout(idleWarningTimer);
       window.clearTimeout(idleLockTimer);
       document.querySelectorAll('dialog[open]').forEach(dialog => closeDialog(dialog.id));
@@ -833,6 +951,11 @@
       document.getElementById('continueWithGoogle').textContent = 'Resume V.O.I.C.E.S';
       document.getElementById('accessStatus').textContent =
         'Choose the next user’s Google account. Google asks for a password only when needed.';
+      renderAccessActions_();
+      if (isKioskDevice_()) {
+        document.getElementById('accessStatus').textContent =
+          'Sign in with your own school Google account to resume.';
+      }
       document.getElementById('loading').classList.remove('done');
     }
 
@@ -4411,8 +4534,10 @@
       beginBusy(operationLabel(functionName));
       return new Promise((resolve, reject) => {
         try {
-          google.script.run
-            .withSuccessHandler(result => {
+          callServer_(
+            functionName,
+            args,
+            result => {
               endBusy();
               if (result === null || result === undefined) {
                 reject(new Error('No response was returned. Refresh this view and try again.'));
@@ -4421,17 +4546,50 @@
               recordUserActivity_();
               invalidateClientReadModels(functionName);
               resolve(result);
-            })
-            .withFailureHandler(error => {
+            },
+            error => {
               endBusy();
+              handleSessionFailure_(error);
               reject(new Error(safeErrorMessage(error)));
-            })
-            [functionName](...args);
+            }
+          );
         } catch (error) {
           endBusy();
           reject(new Error(safeErrorMessage(error)));
         }
       });
+    }
+
+    function callServer_(functionName, args, onSuccess, onFailure) {
+      const runner = google.script.run
+        .withSuccessHandler(onSuccess)
+        .withFailureHandler(onFailure);
+      const session = isKioskDevice_() ? kioskSession_() : '';
+      if (session) {
+        runner.voicesAuthedCall(session, functionName, args);
+        return;
+      }
+      runner[functionName](...args);
+    }
+
+    function handleSessionFailure_(error) {
+      if (!isKioskDevice_()) return;
+      if (!/session/i.test(safeErrorMessage(error))) return;
+      clearKioskSession_();
+      renderAccessActions_();
+    }
+
+    function maybeRefreshKioskSession_() {
+      const session = isKioskDevice_() ? kioskSession_() : '';
+      if (!session) return;
+      if (Date.now() - kioskSessionRefreshedAt < KIOSK_SESSION_REFRESH_MS) return;
+      kioskSessionRefreshedAt = Date.now();
+      google.script.run
+        .withSuccessHandler(result => {
+          if (result && result.token) setKioskSession_(result.token);
+        })
+        .withFailureHandler(() => { /* the next protected call reports the failure */ })
+        .refreshVoicesSession(session);
     }
 
     function invalidateClientReadModels(functionName) {
@@ -4492,10 +4650,15 @@
     function serverQuiet(functionName, ...args) {
       return new Promise((resolve, reject) => {
         try {
-          google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler(error => reject(new Error(safeErrorMessage(error))))
-            [functionName](...args);
+          callServer_(
+            functionName,
+            args,
+            resolve,
+            error => {
+              handleSessionFailure_(error);
+              reject(new Error(safeErrorMessage(error)));
+            }
+          );
         } catch (error) {
           reject(new Error(safeErrorMessage(error)));
         }
@@ -4576,9 +4739,13 @@
     function showFatal(error) {
       const root = document.getElementById('fatalError');
       root.classList.remove('hidden');
-      const chooser = accountChooserUrl_();
+      const kiosk = isKioskDevice_();
+      const chooser = kiosk ? kioskLoginUrl_() : accountChooserUrl_();
+      const guidance = kiosk
+        ? 'This shared device signs each user in to V.O.I.C.E.S directly. Sign in with your own school Google account.'
+        : 'Google Apps Script cannot reliably select among multiple signed-in accounts. Choose your hbuhsd.edu account below, or open this page in a private window signed into only that account.';
       root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p>
-        <p class="muted">Google Apps Script cannot reliably select among multiple signed-in accounts. Choose your hbuhsd.edu account below, or open this page in a private window signed into only that account.</p>
+        <p class="muted">${escapeHtml(guidance)}</p>
         <div class="toolbar"><a class="btn primary" href="${escapeAttr(chooser)}">Choose school Google account</a></div>
         <p class="muted small">If the school account is already active, ask a case manager or the Apps Script owner to confirm deployment access and the Staff whitelist.</p>`;
     }

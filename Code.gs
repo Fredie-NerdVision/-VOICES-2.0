@@ -31,6 +31,9 @@ const VOICES = Object.freeze({
 });
 
 function doGet(event) {
+  const kioskHandoff = consumeKioskAuthHandoff_(
+    event && event.parameter && event.parameter.voicesAuth
+  );
   const template = HtmlService.createTemplateFromFile('Index');
   template.defaultLogo = getDefaultLogoDataUri();
   template.appUrl = ScriptApp.getService().getUrl();
@@ -38,6 +41,13 @@ function doGet(event) {
     event && event.parameter && event.parameter.voicesAccountSelected,
     100
   );
+  template.kioskEnrollment = sanitizeText_(
+    event && event.parameter && event.parameter.voicesKiosk,
+    10
+  );
+  template.kioskLoginUrl = getKioskLoginUrl();
+  template.kioskSessionToken = kioskHandoff.token;
+  template.kioskSessionError = kioskHandoff.error;
   return template.evaluate()
     .setTitle(VOICES.APP_NAME)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)
@@ -230,7 +240,9 @@ function publicStaff_(staff) {
 }
 
 function getCurrentUserEmail_() {
-  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const email = voicesSessionEmail_
+    ? normalizeEmail_(voicesSessionEmail_)
+    : normalizeEmail_(Session.getActiveUser().getEmail());
   if (!email) {
     throw new Error('Google Workspace identity was not available. Deploy the web app for your Workspace domain and require sign-in.');
   }
