@@ -40,8 +40,13 @@ const migrationSource = database.match(
 );
 if (!migrationSource ||
     (migrationSource[1].match(/rows_\('GoalPhaseHistory'\)/g) || []).length !== 1 ||
-    !migrationSource[1].includes('migratedHistoriesByGoal')) {
-  throw new Error('The 2.3 migration rereads phase history for each goal.');
+    !migrationSource[1].includes('migratedHistoriesByGoal') ||
+    migrationSource[1].includes('updateRow_(') ||
+    migrationSource[1].includes("appendRow_('GoalPhaseHistory'") ||
+    !migrationSource[1].includes("updateRows_('Benchmarks'") ||
+    !migrationSource[1].includes("updateRows_('BenchmarkEntries'") ||
+    !migrationSource[1].includes("appendRows_('GoalPhaseHistory'")) {
+  throw new Error('The 2.3 migration does not batch spreadsheet writes.');
 }
 if (!benchmarkService.includes('tryLock(25000)') ||
     !benchmarkService.includes("code: 'WRITE_BUSY'") ||

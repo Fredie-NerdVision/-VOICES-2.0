@@ -352,33 +352,37 @@ function upgradeVoices21Database() {
 }
 
 function upgradeVoices23Database() {
-  const spreadsheet = getDatabase_();
-  Object.keys(SHEET_SCHEMAS).forEach(name => ensureSheet_(spreadsheet, name, SHEET_SCHEMAS[name]));
-  migrateVoices22Data_();
-  migrateVoices23Data_();
-  seedDefaults_();
-  formatDatabase_(spreadsheet);
-  const validation = validateVoices23Database_();
-  const ok = validation.invalidBenchmarks === 0 &&
-    validation.invalidGoalStudents === 0 &&
-    validation.invalidBenchmarkStudents === 0 &&
-    validation.invalidEntries === 0 &&
-    validation.invalidEntryStudents === 0 &&
-    validation.invalidBenchmarkSubjects === 0 &&
-    validation.invalidPhaseHistory === 0 &&
-    validation.duplicateGoalIds === 0 &&
-    validation.duplicateBenchmarkIds === 0 &&
-    validation.duplicateEntryIds === 0 &&
-    validation.invalidActivePhaseCounts === 0;
-  return {
-    ok: ok,
-    spreadsheetId: spreadsheet.getId(),
-    spreadsheetUrl: spreadsheet.getUrl(),
-    validation: validation,
-    message: ok
-      ? 'V.O.I.C.E.S 2.3 database schema is ready.'
-      : 'V.O.I.C.E.S 2.3 schema was applied, but validation issues require review.'
-  };
+  return withRowsCache_(() => {
+    const spreadsheet = getDatabase_();
+    Object.keys(SHEET_SCHEMAS).forEach(name =>
+      ensureSheet_(spreadsheet, name, SHEET_SCHEMAS[name])
+    );
+    migrateVoices22Data_();
+    migrateVoices23Data_();
+    seedDefaults_();
+    formatDatabase_(spreadsheet);
+    const validation = validateVoices23Database_();
+    const ok = validation.invalidBenchmarks === 0 &&
+      validation.invalidGoalStudents === 0 &&
+      validation.invalidBenchmarkStudents === 0 &&
+      validation.invalidEntries === 0 &&
+      validation.invalidEntryStudents === 0 &&
+      validation.invalidBenchmarkSubjects === 0 &&
+      validation.invalidPhaseHistory === 0 &&
+      validation.duplicateGoalIds === 0 &&
+      validation.duplicateBenchmarkIds === 0 &&
+      validation.duplicateEntryIds === 0 &&
+      validation.invalidActivePhaseCounts === 0;
+    return {
+      ok: ok,
+      spreadsheetId: spreadsheet.getId(),
+      spreadsheetUrl: spreadsheet.getUrl(),
+      validation: validation,
+      message: ok
+        ? 'V.O.I.C.E.S 2.3 database schema is ready.'
+        : 'V.O.I.C.E.S 2.3 schema was applied, but validation issues require review.'
+    };
+  });
 }
 
 function withDatabaseId_(spreadsheetId, callback) {
@@ -437,12 +441,20 @@ function ensureSheet_(spreadsheet, name, headers) {
 
 function migrateVoices22Data_() {
   const goals = rows_('Goals');
+  const benchmarks = rows_('Benchmarks');
+  const benchmarkSubjects = rows_('BenchmarkSubjects');
   const goalIds = new Set(goals.map(row => String(row.Id)));
-  rows_('Benchmarks').forEach(benchmark => {
+  const benchmarkSubjectKeys = new Set(benchmarkSubjects.map(row =>
+    String(row.BenchmarkId) + '|' + String(row.SubjectId)
+  ));
+  const goalsToAppend = [];
+  const benchmarkSubjectsToAppend = [];
+  const benchmarkPatches = {};
+  benchmarks.forEach(benchmark => {
     let goalId = String(benchmark.GoalId || '');
     if (!goalId) goalId = 'MIGRATED_GOAL_' + String(benchmark.Id);
     if (!goalIds.has(goalId)) {
-      appendRow_('Goals', {
+      goalsToAppend.push({
         Id: goalId,
         StudentId: benchmark.StudentId,
         Goal: benchmark.Description ||
@@ -457,18 +469,20 @@ function migrateVoices22Data_() {
       goalIds.add(goalId);
     }
     if (String(benchmark.GoalId || '') !== goalId) {
-      updateRow_('Benchmarks', benchmark._row, { GoalId: goalId });
+      mergeRowPatch_(benchmarkPatches, benchmark._row, { GoalId: goalId });
     }
-    if (benchmark.SubjectId && !findOne_('BenchmarkSubjects', row =>
-      String(row.BenchmarkId) === String(benchmark.Id) &&
-      String(row.SubjectId) === String(benchmark.SubjectId)
-    )) {
-      appendRow_('BenchmarkSubjects', {
+    const subjectKey = String(benchmark.Id) + '|' + String(benchmark.SubjectId);
+    if (benchmark.SubjectId && !benchmarkSubjectKeys.has(subjectKey)) {
+      benchmarkSubjectsToAppend.push({
         BenchmarkId: benchmark.Id,
         SubjectId: benchmark.SubjectId
       });
+      benchmarkSubjectKeys.add(subjectKey);
     }
   });
+  appendRows_('Goals', goalsToAppend);
+  updateRows_('Benchmarks', benchmarkPatches);
+  appendRows_('BenchmarkSubjects', benchmarkSubjectsToAppend);
 }
 
 function migrateVoices23Data_() {
@@ -484,14 +498,21 @@ function migrateVoices23Data_() {
     map[goalId].push(row);
     return map;
   }, {});
-  let nextHistoryRow = histories.reduce((max, row) => Math.max(max, row._row), 1);
+  const goalPatches = {};
+  const benchmarkPatches = {};
+  const historyPatches = {};
+  const historiesToAppend = [];
+  const entryPatches = {};
+  const daySchedulePatches = {};
 
   goals.forEach(goal => {
     const status = String(goal.Status || '').toUpperCase() ||
       (toBoolean_(goal.Active) ? 'ACTIVE' : 'INACTIVE');
     const active = status === 'ACTIVE';
     if (String(goal.Status || '') !== status || toBoolean_(goal.Active) !== active) {
-      updateRow_('Goals', goal._row, { Status: status, Active: active });
+      mergeRowPatch_(goalPatches, goal._row, { Status: status, Active: active });
+      goal.Status = status;
+      goal.Active = active;
     }
   });
 
@@ -524,7 +545,7 @@ function migrateVoices23Data_() {
       const completeDates = ordered.length && ordered.every(benchmark =>
         formatDate_(benchmark.StartDate) && formatDate_(benchmark.DueDate)
       );
-      updateRow_('Goals', goal._row, {
+      mergeRowPatch_(goalPatches, goal._row, {
         BenchmarkActivationMode: completeDates && (ordered.length === 1 || ranges.size > 1)
           ? 'DATE'
           : 'LEGACY'
@@ -612,7 +633,9 @@ function migrateVoices23Data_() {
           Math.abs(targetAccuracy - targetCorrect / targetAttempts * 100) < 0.01) {
         patch.TargetAccuracyPct = '';
       }
-      if (Object.keys(patch).length) updateRow_('Benchmarks', benchmark._row, patch);
+      if (Object.keys(patch).length) {
+        mergeRowPatch_(benchmarkPatches, benchmark._row, patch);
+      }
     });
     phaseHistoryCandidates.forEach((benchmark, index) => {
       if (!historyBenchmarkIds.has(String(benchmark.Id))) {
@@ -626,11 +649,9 @@ function migrateVoices23Data_() {
           ChangeReason: 'Migrated from V.O.I.C.E.S 2.2',
           Source: 'MIGRATION'
         };
-        appendRow_('GoalPhaseHistory', history);
+        historiesToAppend.push(history);
         if (!migratedHistoriesByGoal[goalId]) migratedHistoriesByGoal[goalId] = [];
-        migratedHistoriesByGoal[goalId].push(
-          Object.assign({ _row: ++nextHistoryRow }, history)
-        );
+        migratedHistoriesByGoal[goalId].push(history);
         historyBenchmarkIds.add(String(benchmark.Id));
       }
     });
@@ -649,8 +670,10 @@ function migrateVoices23Data_() {
       const endedAt = index < migratedHistory.length - 1
         ? migratedHistory[index + 1].ActivatedAt
         : '';
-      if (String(row.EndedAt || '') !== String(endedAt || '')) {
-        updateRow_('GoalPhaseHistory', row._row, { EndedAt: endedAt });
+      if (row._row && String(row.EndedAt || '') !== String(endedAt || '')) {
+        mergeRowPatch_(historyPatches, row._row, { EndedAt: endedAt });
+      } else if (!row._row) {
+        row.EndedAt = endedAt;
       }
     });
   });
@@ -659,7 +682,9 @@ function migrateVoices23Data_() {
     const patch = {};
     if (!entry.ObservationDate) patch.ObservationDate = formatDate_(entry.Timestamp);
     if (!entry.Status) patch.Status = 'ACTIVE';
-    if (Object.keys(patch).length) updateRow_('BenchmarkEntries', entry._row, patch);
+    if (Object.keys(patch).length) {
+      mergeRowPatch_(entryPatches, entry._row, patch);
+    }
   });
 
   rows_('DaySchedules').forEach(schedule => {
@@ -667,9 +692,17 @@ function migrateVoices23Data_() {
     if (optionalNumber_(schedule.Revision) === null) patch.Revision = 1;
     if (!schedule.UpdatedBy) patch.UpdatedBy = schedule.CreatedBy || '';
     if (!schedule.UpdatedAt) patch.UpdatedAt = new Date();
-    if (Object.keys(patch).length) updateRow_('DaySchedules', schedule._row, patch);
+    if (Object.keys(patch).length) {
+      mergeRowPatch_(daySchedulePatches, schedule._row, patch);
+    }
   });
 
+  updateRows_('Goals', goalPatches);
+  updateRows_('Benchmarks', benchmarkPatches);
+  updateRows_('GoalPhaseHistory', historyPatches);
+  appendRows_('GoalPhaseHistory', historiesToAppend);
+  updateRows_('BenchmarkEntries', entryPatches);
+  updateRows_('DaySchedules', daySchedulePatches);
   upsertSetting_('SchemaVersion', '2.3');
 }
 
@@ -924,6 +957,44 @@ function appendRows_(name, records) {
   target.getRange(target.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
   invalidateRowsCache_(name);
   return records;
+}
+
+function mergeRowPatch_(patches, rowNumber, patch) {
+  if (!patches[rowNumber]) patches[rowNumber] = {};
+  Object.assign(patches[rowNumber], patch);
+}
+
+function updateRows_(name, patches) {
+  const rowNumbers = Object.keys(patches || {})
+    .map(Number)
+    .filter(rowNumber => rowNumber >= 2)
+    .sort((a, b) => a - b);
+  if (!rowNumbers.length) return;
+  const headers = SHEET_SCHEMAS[name];
+  if (!headers) throw new Error('Unknown schema: ' + name);
+  const target = sheet_(name);
+  const firstRow = rowNumbers[0];
+  const lastRow = rowNumbers[rowNumbers.length - 1];
+  const values = target.getRange(
+    firstRow,
+    1,
+    lastRow - firstRow + 1,
+    headers.length
+  ).getValues();
+  rowNumbers.forEach(rowNumber => {
+    const row = values[rowNumber - firstRow];
+    const patch = patches[rowNumber];
+    headers.forEach((header, index) => {
+      if (patch[header] !== undefined) row[index] = patch[header];
+    });
+  });
+  target.getRange(
+    firstRow,
+    1,
+    values.length,
+    headers.length
+  ).setValues(values);
+  invalidateRowsCache_(name);
 }
 
 function updateRow_(name, rowNumber, patch) {
