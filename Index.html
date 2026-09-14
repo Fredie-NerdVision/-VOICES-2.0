@@ -468,7 +468,7 @@
     }
   </style>
 </head>
-<body>
+<body data-app-url="<?= appUrl ?>" data-account-selection-token="<?= accountSelectionToken ?>">
   <div id="loading" class="loading">
     <div class="loading-inner">
       <img id="loadingLogo" class="loading-logo" src="<?!= defaultLogo ?>" alt="V.O.I.C.E.S logo">
@@ -699,12 +699,8 @@
     async function init() {
       bindStaticForms();
       renderAvailabilityDays();
-      const chooser = 'https:' + '/' + '/accounts.google.com/AccountChooser?continue=' +
-        encodeURIComponent(window.location.href);
-      document.getElementById('switchGoogleAccount').href = chooser;
-      document.getElementById('continueWithGoogle').addEventListener('click', () =>
-        state.data ? resumeWorkspace_() : enterWorkspace_()
-      );
+      document.getElementById('switchGoogleAccount').href = accountChooserUrl_();
+      document.getElementById('continueWithGoogle').addEventListener('click', chooseGoogleAccount_);
       document.getElementById('lockApp').addEventListener('click', () => lockWorkspace_(false));
       document.getElementById('globalRefresh').addEventListener('click', async () => {
         try {
@@ -729,6 +725,30 @@
           recordUserActivity_();
         }
       });
+      const accountSelectionToken = String(document.body.dataset.accountSelectionToken || '');
+      const consumedTokenKey = 'voices-account-selection:' + accountSelectionToken;
+      if (accountSelectionToken && !sessionStorage.getItem(consumedTokenKey)) {
+        sessionStorage.setItem(consumedTokenKey, '1');
+        document.getElementById('accessStatus').innerHTML =
+          'Verifying the selected Workspace account<span class="loading-dots"></span>';
+        enterWorkspace_();
+      }
+    }
+
+    function accountChooserUrl_() {
+      const configuredUrl = String(document.body.dataset.appUrl || '');
+      const appUrl = configuredUrl && !configuredUrl.includes('<?')
+        ? configuredUrl
+        : window.location.href.split('#')[0].split('?')[0];
+      const separator = appUrl.includes('?') ? '&' : '?';
+      const returnUrl = appUrl + separator + 'voicesAccountSelected=' +
+        encodeURIComponent(Date.now() + '-' + Math.random().toString(36).slice(2));
+      return 'https:' + '/' + '/accounts.google.com/AccountChooser?continue=' +
+        encodeURIComponent(returnUrl);
+    }
+
+    function chooseGoogleAccount_() {
+      window.top.location.href = accountChooserUrl_();
     }
 
     async function enterWorkspace_() {
@@ -790,26 +810,8 @@
         'Resume by revalidating your authorized school Google Workspace account. Unsaved observations remain recoverable.';
       document.getElementById('continueWithGoogle').textContent = 'Resume V.O.I.C.E.S';
       document.getElementById('accessStatus').textContent =
-        'This lock protects the app screen; it does not sign your browser out of Google.';
+        'Choose the next user’s Google account. Google asks for a password only when needed.';
       document.getElementById('loading').classList.remove('done');
-    }
-
-    async function resumeWorkspace_() {
-      const button = document.getElementById('continueWithGoogle');
-      button.disabled = true;
-      document.getElementById('accessStatus').innerHTML =
-        'Revalidating Workspace access<span class="loading-dots"></span>';
-      try {
-        await refreshBootstrap(state.selectedTab);
-        state.isLocked = false;
-        document.body.classList.remove('app-locked');
-        document.getElementById('loading').classList.add('done');
-        recordUserActivity_();
-      } catch (error) {
-        document.getElementById('accessStatus').textContent = safeErrorMessage(error);
-      } finally {
-        button.disabled = false;
-      }
     }
 
     function renderAide() {
@@ -4479,8 +4481,7 @@
     function showFatal(error) {
       const root = document.getElementById('fatalError');
       root.classList.remove('hidden');
-      const chooser = 'https:' + '/' + '/accounts.google.com/AccountChooser?continue=' +
-        encodeURIComponent(window.location.href);
+      const chooser = accountChooserUrl_();
       root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p>
         <p class="muted">Google Apps Script cannot reliably select among multiple signed-in accounts. Choose your hbuhsd.edu account below, or open this page in a private window signed into only that account.</p>
         <div class="toolbar"><a class="btn primary" href="${escapeAttr(chooser)}">Choose school Google account</a></div>

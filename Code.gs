@@ -30,9 +30,14 @@ const VOICES = Object.freeze({
   })
 });
 
-function doGet() {
+function doGet(event) {
   const template = HtmlService.createTemplateFromFile('Index');
   template.defaultLogo = getDefaultLogoDataUri();
+  template.appUrl = ScriptApp.getService().getUrl();
+  template.accountSelectionToken = sanitizeText_(
+    event && event.parameter && event.parameter.voicesAccountSelected,
+    100
+  );
   return template.evaluate()
     .setTitle(VOICES.APP_NAME)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)

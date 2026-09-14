@@ -128,9 +128,13 @@ if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
   'clearObservationQueuePersistence_',
   'OBSERVATION_DRAFT_STORAGE_VERSION',
   'Continue with school Google account',
+  'voicesAccountSelected=',
+  'function accountChooserUrl_()',
+  'function chooseGoogleAccount_()',
+  'Verifying the selected Workspace account',
   'IDLE_LOCK_MS = 30 * 60 * 1000',
   'Locked after 30 minutes of inactivity',
-  'This lock protects the app screen; it does not sign your browser out of Google.',
+  'Choose the next user’s Google account. Google asks for a password only when needed.',
   'window.print()'
 ].forEach(value => {
   if (!html.includes(value)) throw new Error('Missing 2.3 client behavior: ' + value);
