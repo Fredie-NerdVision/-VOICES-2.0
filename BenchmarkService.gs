@@ -322,7 +322,7 @@ function getObservationDraft_(email) {
     ok: true,
     submissionBatchId: entries.length ? batchId : '',
     entries: entries,
-    updatedAt: draftRows[0].UpdatedAt
+    updatedAt: new Date(draftRows[0].UpdatedAt).toISOString()
   };
 }
 
@@ -373,7 +373,7 @@ function saveObservationDraft(payload) {
       ok: true,
       submissionBatchId: batchId,
       count: serialized.length,
-      updatedAt: now
+      updatedAt: now.toISOString()
     };
   } finally {
     lock.releaseLock();

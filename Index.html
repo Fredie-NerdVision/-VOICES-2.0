@@ -971,6 +971,7 @@
         cm.staff = safeArray(data && data.staff);
         cm.caseManagers = safeArray(data && data.caseManagers);
         cm.aides = safeArray(data && data.aides);
+        cm.roster = data && data.roster || { classes: [], students: [] };
       } else if (tab === 'requests') {
         cm.requests = await serverQuiet('getStaffRequestData');
       } else if (tab === 'admin') {
@@ -1008,6 +1009,7 @@
           cm.staff = safeArray(people.staff);
           cm.caseManagers = safeArray(people.caseManagers);
           cm.aides = safeArray(people.aides);
+          cm.roster = people.roster || { classes: [], students: [] };
           cm.requests = data && data.requests || {};
           cm.messages = data && data.messages || {};
           cm.ieps = safeArray(data && data.ieps);

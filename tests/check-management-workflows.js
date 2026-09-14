@@ -203,13 +203,21 @@ const draftEntry = {
   actualPromptLevel: 'Independent',
   actualPromptCount: 0
 };
-context.saveObservationDraft({
+const savedDraft = context.saveObservationDraft({
   submissionBatchId: 'DRAFT-1',
   entries: [draftEntry]
 });
+if (!savedDraft.ok || typeof savedDraft.updatedAt !== 'string' ||
+    !Number.isFinite(new Date(savedDraft.updatedAt).getTime())) {
+  throw new Error('Observation draft save did not return a client-safe timestamp.');
+}
 const recovered = context.getObservationDraft();
 if (recovered.submissionBatchId !== 'DRAFT-1' || recovered.entries.length !== 1) {
   throw new Error('A valid observation draft was not recovered.');
+}
+if (typeof recovered.updatedAt !== 'string' ||
+    !Number.isFinite(new Date(recovered.updatedAt).getTime())) {
+  throw new Error('Observation draft recovery did not return a client-safe timestamp.');
 }
 tables.ObservationDrafts[0].PayloadJson = '{bad json';
 const malformed = context.getObservationDraft();
@@ -226,6 +234,11 @@ if (context.getObservationDraft().entries.length) {
 }
 if (!invalidations.includes('all') || !invalidations.includes('student')) {
   throw new Error('Roster or relevance cache invalidation is missing.');
+}
+const client = read('Index.html');
+if (!client.includes("cm.roster = people.roster || { classes: [], students: [] };") ||
+    !client.includes("cm.roster = data && data.roster || { classes: [], students: [] };")) {
+  throw new Error('The case-manager workspace does not hydrate roster data.');
 }
 
 console.log('Management and draft workflows passed:', JSON.stringify({
