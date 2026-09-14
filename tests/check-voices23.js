@@ -126,6 +126,11 @@ if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
   'persistObservationQueue_',
   'syncObservationDraft_',
   'clearObservationQueuePersistence_',
+  'data-edit-observation',
+  'openObservationQueueEditor_',
+  'saveObservationQueueEdit_',
+  'validateObservationValues_',
+  'Queued observation updated.',
   'OBSERVATION_DRAFT_STORAGE_VERSION',
   'Continue with school Google account',
   'voicesAccountSelected=',
@@ -138,6 +143,12 @@ if (/\bconfirm\s*\(/.test(html) || /\bprompt\s*\(/.test(html)) {
   'window.print()'
 ].forEach(value => {
   if (!html.includes(value)) throw new Error('Missing 2.3 client behavior: ' + value);
+});
+[
+  'template.appUrl = ScriptApp.getService().getUrl();',
+  'template.accountSelectionToken = sanitizeText_('
+].forEach(value => {
+  if (!code.includes(value)) throw new Error('Missing account-selection server flow: ' + value);
 });
 if (!html.includes('Goal saving is busy. Your form is still intact') ||
     !html.includes('queuedItem.phaseDateResolution') ||
