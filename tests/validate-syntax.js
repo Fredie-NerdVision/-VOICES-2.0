@@ -20,6 +20,9 @@ scripts.forEach((match, index) => {
   if (/(['"`])https?:\/\//.test(match[1])) {
     throw new Error(`Index.html#script-${index + 1} contains a literal URL protocol that Apps Script may truncate.`);
   }
+  if (match[1].includes('<?')) {
+    throw new Error(`Index.html#script-${index + 1} contains an Apps Script template delimiter.`);
+  }
   new vm.Script(match[1], { filename: `Index.html#script-${index + 1}` });
 });
 

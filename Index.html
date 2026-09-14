@@ -759,7 +759,7 @@
 
     function accountChooserUrl_() {
       const configuredUrl = String(document.body.dataset.appUrl || '');
-      const appUrl = configuredUrl && !configuredUrl.includes('<?')
+      const appUrl = configuredUrl.startsWith('http')
         ? configuredUrl
         : window.location.href.split('#')[0].split('?')[0];
       const separator = appUrl.includes('?') ? '&' : '?';
