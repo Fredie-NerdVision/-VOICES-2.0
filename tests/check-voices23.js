@@ -35,6 +35,14 @@ const entryBadgeFunction = html.match(
 if (!database.includes('function upgradeVoices23Database()')) {
   throw new Error('The 2.3 migration entry point is missing.');
 }
+const migrationSource = database.match(
+  /function migrateVoices23Data_\(\) \{([\s\S]*?)\n\}\n\nfunction validateVoices23Database_/
+);
+if (!migrationSource ||
+    (migrationSource[1].match(/rows_\('GoalPhaseHistory'\)/g) || []).length !== 1 ||
+    !migrationSource[1].includes('migratedHistoriesByGoal')) {
+  throw new Error('The 2.3 migration rereads phase history for each goal.');
+}
 if (!benchmarkService.includes('tryLock(25000)') ||
     !benchmarkService.includes("code: 'WRITE_BUSY'") ||
     !benchmarkService.includes('getCompletedObservationBatch_') ||

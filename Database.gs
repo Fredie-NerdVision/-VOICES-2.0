@@ -477,6 +477,14 @@ function migrateVoices23Data_() {
   const entries = rows_('BenchmarkEntries');
   const histories = rows_('GoalPhaseHistory');
   const historyBenchmarkIds = new Set(histories.map(row => String(row.BenchmarkId)));
+  const migratedHistoriesByGoal = histories.reduce((map, row) => {
+    if (String(row.Source).toUpperCase() !== 'MIGRATION') return map;
+    const goalId = String(row.GoalId);
+    if (!map[goalId]) map[goalId] = [];
+    map[goalId].push(row);
+    return map;
+  }, {});
+  let nextHistoryRow = histories.reduce((max, row) => Math.max(max, row._row), 1);
 
   goals.forEach(goal => {
     const status = String(goal.Status || '').toUpperCase() ||
@@ -608,7 +616,7 @@ function migrateVoices23Data_() {
     });
     phaseHistoryCandidates.forEach((benchmark, index) => {
       if (!historyBenchmarkIds.has(String(benchmark.Id))) {
-        appendRow_('GoalPhaseHistory', {
+        const history = {
           Id: uuid_(),
           GoalId: goalId,
           BenchmarkId: benchmark.Id,
@@ -617,7 +625,12 @@ function migrateVoices23Data_() {
           ChangedBy: '',
           ChangeReason: 'Migrated from V.O.I.C.E.S 2.2',
           Source: 'MIGRATION'
-        });
+        };
+        appendRow_('GoalPhaseHistory', history);
+        if (!migratedHistoriesByGoal[goalId]) migratedHistoriesByGoal[goalId] = [];
+        migratedHistoriesByGoal[goalId].push(
+          Object.assign({ _row: ++nextHistoryRow }, history)
+        );
         historyBenchmarkIds.add(String(benchmark.Id));
       }
     });
@@ -625,10 +638,8 @@ function migrateVoices23Data_() {
       map[String(benchmark.Id)] = index;
       return map;
     }, {});
-    const migratedHistory = rows_('GoalPhaseHistory')
+    const migratedHistory = (migratedHistoriesByGoal[goalId] || [])
       .filter(row =>
-        String(row.GoalId) === String(goalId) &&
-        String(row.Source).toUpperCase() === 'MIGRATION' &&
         candidateOrder[String(row.BenchmarkId)] !== undefined
       )
       .sort((a, b) =>
