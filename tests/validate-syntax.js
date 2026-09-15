@@ -1,3 +1,4 @@
+// I compile every server file and browser script here before any Apps Script deployment.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -17,6 +18,12 @@ const scripts = Array.from(html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/scrip
 if (!scripts.length) throw new Error('Index.html does not contain an inline script.');
 
 scripts.forEach((match, index) => {
+  if (/(['"`])https?:\/\//.test(match[1])) {
+    throw new Error(`Index.html#script-${index + 1} contains a literal URL protocol that Apps Script may truncate.`);
+  }
+  if (match[1].includes('<?')) {
+    throw new Error(`Index.html#script-${index + 1} contains an Apps Script template delimiter.`);
+  }
   new vm.Script(match[1], { filename: `Index.html#script-${index + 1}` });
 });
 

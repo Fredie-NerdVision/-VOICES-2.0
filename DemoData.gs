@@ -1,3 +1,13 @@
+/**
+ * I use this file only to build realistic training data.
+ *
+ * The generator creates a complete but fictional school workbook with staff,
+ * students, goals, observations, schedules, messages, requests, and related
+ * links. A fixed random seed keeps the data repeatable for tests.
+ *
+ * These functions must never be run against a production database. Deploying
+ * application code does not require running this demo setup.
+ */
 const VOICES_DEMO = Object.freeze({
   DATABASE_PROPERTY: 'VOICES_DEMO_DATABASE_ID',
   DATABASE_NAME: 'V.O.I.C.E.S 2.2 Training Database',
@@ -195,6 +205,7 @@ const VOICES_DEMO_LAST_NAMES = Object.freeze([
   'Salazar', 'Santana', 'Serrano', 'Solis', 'Tapia', 'Trujillo', 'Ulloa', 'Vargas', 'Velasquez', 'Whitfield'
 ]);
 
+// I create a separate fictional training workbook and never use this for production data.
 function setupVoicesDemoDatabase(options) {
   const spreadsheet = demoDatabaseSpreadsheet_(options);
   Object.keys(SHEET_SCHEMAS).forEach(name => ensureSheet_(spreadsheet, name, SHEET_SCHEMAS[name]));
@@ -212,10 +223,12 @@ function setupVoicesDemoDatabase(options) {
   };
 }
 
+// I reload voices demo database.
 function refreshVoicesDemoDatabase() {
   return setupVoicesDemoDatabase();
 }
 
+// I reset voices demo database.
 function resetVoicesDemoDatabase(options) {
   options = options || {};
   if (options.confirm !== VOICES_DEMO.RESET_CONFIRMATION) {
@@ -232,6 +245,7 @@ function resetVoicesDemoDatabase(options) {
   return result;
 }
 
+// I collect and return voices demo database info.
 function getVoicesDemoDatabaseInfo() {
   const properties = PropertiesService.getScriptProperties();
   const id = properties.getProperty(VOICES_DEMO.DATABASE_PROPERTY);
@@ -243,31 +257,35 @@ function getVoicesDemoDatabaseInfo() {
   };
 }
 
+// I check the rules for voices demo database.
 function validateVoicesDemoDatabase() {
   const id = PropertiesService.getScriptProperties().getProperty(VOICES_DEMO.DATABASE_PROPERTY);
   if (!id) throw new Error('Run setupVoicesDemoDatabase() before validating.');
   return withDatabaseId_(id, () => validateDemoContent_());
 }
 
+// I keep the demo database spreadsheet rule in one place so it is used consistently.
 function demoDatabaseSpreadsheet_(options) {
   options = options || {};
   const properties = PropertiesService.getScriptProperties();
   const liveId = properties.getProperty(VOICES.DATABASE_PROPERTY);
-  const requestedId = options.spreadsheetId || properties.getProperty(VOICES_DEMO.DATABASE_PROPERTY);
-  if (requestedId && liveId && requestedId === liveId) {
-    throw new Error('The training database cannot be the live database. Clear the ' +
-      VOICES_DEMO.DATABASE_PROPERTY + ' script property and run setup again.');
-  }
+  const configuredDemoId = properties.getProperty(VOICES_DEMO.DATABASE_PROPERTY);
+  const requestedId = options.spreadsheetId || configuredDemoId;
   const spreadsheet = requestedId
     ? SpreadsheetApp.openById(requestedId)
     : SpreadsheetApp.create(VOICES_DEMO.DATABASE_NAME);
   if (liveId && spreadsheet.getId() === liveId) {
-    throw new Error('Refusing to write training data into the live database.');
+    const isConfiguredTrainingDatabase = requestedId === configuredDemoId &&
+      spreadsheet.getName() === VOICES_DEMO.DATABASE_NAME;
+    if (!isConfiguredTrainingDatabase) {
+      throw new Error('Refusing to write training data into the live database.');
+    }
   }
   properties.setProperty(VOICES_DEMO.DATABASE_PROPERTY, spreadsheet.getId());
   return spreadsheet;
 }
 
+// I clear sheet rows.
 function clearSheetRows_(spreadsheet, name) {
   const sheet = spreadsheet.getSheetByName(name);
   if (!sheet) return;
@@ -278,6 +296,7 @@ function clearSheetRows_(spreadsheet, name) {
   invalidateRowsCache_(name);
 }
 
+// I keep the replace sheet rows rule in one place so it is used consistently.
 function replaceSheetRows_(spreadsheet, name, records) {
   const headers = SHEET_SCHEMAS[name];
   if (!headers) throw new Error('Unknown schema: ' + name);
@@ -296,8 +315,10 @@ function replaceSheetRows_(spreadsheet, name, records) {
   return values.length;
 }
 
+// I add a new record or update the matching sheet rows.
 function upsertSheetRows_(spreadsheet, name, records, keyFields) {
   if (!records.length) return 0;
+  // I build a stable row key so the demo update can match an existing record.
   const keyFor = record => keyFields.map(field => String(record[field] || '')).join('\u001f');
   const generated = records.reduce((map, record) => {
     map[keyFor(record)] = record;
@@ -321,6 +342,7 @@ function upsertSheetRows_(spreadsheet, name, records, keyFields) {
   return records.length;
 }
 
+// I keep the demo random rule in one place so it is used consistently.
 function demoRandom_(seed) {
   let state = (seed || 1) >>> 0;
   return function () {
@@ -329,29 +351,36 @@ function demoRandom_(seed) {
   };
 }
 
+// I keep the demo pick rule in one place so it is used consistently.
 function demoPick_(random, list) {
   return list[Math.floor(random() * list.length)];
 }
 
+// I keep the demo int rule in one place so it is used consistently.
 function demoInt_(random, min, max) {
   return min + Math.floor(random() * (max - min + 1));
 }
 
+// I keep the demo ID rule in one place so it is used consistently.
 function demoId_(prefix, index) {
   return prefix + '-' + String(1000 + index).slice(1);
 }
 
+// I keep the demo long date rule in one place so it is used consistently.
 function demoLongDate_(date) {
   return Utilities.formatDate(date, VOICES.TIME_ZONE, 'MMMM d, yyyy');
 }
 
+// I build demo database.
 function buildDemoDatabase_(spreadsheet) {
   const random = demoRandom_(VOICES_DEMO.SEED);
   const ownerEmail = normalizeEmail_(Session.getEffectiveUser().getEmail());
   if (!ownerEmail) throw new Error('A Google account is required to build the training database.');
   const domain = ownerEmail.split('@')[1];
   const today = new Date();
+  // I move a date by a chosen number of days for the fictional training timeline.
   const shiftDays = days => new Date(today.getTime() + days * 86400000);
+  // I format a training date the same way the database stores it.
   const dateText = days => formatDate_(shiftDays(days));
 
   const staff = buildDemoStaff_(ownerEmail, domain);
@@ -498,6 +527,7 @@ function buildDemoDatabase_(spreadsheet) {
   };
 }
 
+// I build demo staff.
 function buildDemoStaff_(ownerEmail, domain) {
   const staff = [{
     Id: 'STAFF-OWNER',
@@ -510,6 +540,7 @@ function buildDemoStaff_(ownerEmail, domain) {
     WeeklyHours: ''
   }];
   const used = { [ownerEmail]: true };
+  // I create a unique fictional email without changing real Staff records.
   const uniqueEmail = (base, suffix) => {
     let email = base + '@' + domain;
     if (used[email]) email = base + '.' + suffix + '@' + domain;
@@ -539,6 +570,7 @@ function buildDemoStaff_(ownerEmail, domain) {
   return staff;
 }
 
+// I build demo classes.
 function buildDemoClasses_(caseManagers, subjectIds, instructionalPeriods) {
   const subjectNames = Object.keys(VOICES_DEMO_COURSES).filter(name => subjectIds[name]);
   const classes = [];
@@ -561,6 +593,7 @@ function buildDemoClasses_(caseManagers, subjectIds, instructionalPeriods) {
   return classes;
 }
 
+// I build demo students.
 function buildDemoStudents_(random, caseManagers) {
   const students = [];
   const used = {};
@@ -583,6 +616,7 @@ function buildDemoStudents_(random, caseManagers) {
   return students;
 }
 
+// I build demo goals.
 function buildDemoGoals_(random, students, studentClasses, classes, subjectIds, iepByStudent, today) {
   const classById = classes.reduce((map, row) => {
     map[row.Id] = row;
@@ -629,6 +663,7 @@ function buildDemoGoals_(random, students, studentClasses, classes, subjectIds, 
         StartDate: startDate,
         DueDate: iep.EndDate,
         Active: true,
+        BenchmarkActivationMode: 'DATE',
         CreatedBy: student.CaseManagerEmail,
         CreatedAt: formatDateTime_(new Date(today.getTime() + startOffset * 86400000)),
         UpdatedAt: formatDateTime_(new Date(today.getTime() + (startOffset + 5) * 86400000))
@@ -638,11 +673,12 @@ function buildDemoGoals_(random, students, studentClasses, classes, subjectIds, 
         tags.push(subjectIds[template.alsoRelevant]);
       }
       const span = Math.max(60, Math.round((parseDate_(iep.EndDate).getTime() - parseDate_(startDate).getTime()) / 86400000));
-      const elapsed = Math.max(0, Math.round((today.getTime() - parseDate_(startDate).getTime()) / 86400000));
-      const activePhase = Math.min(2, Math.floor(elapsed / (span / 3)));
       VOICES_DEMO_BENCHMARK_PHASES.forEach((phase, phaseIndex) => {
         const benchmarkId = demoId_('BM', benchmarks.length + 1);
-        const benchmarkStart = formatDate_(new Date(parseDate_(startDate).getTime() + Math.round(span * phaseIndex / 3) * 86400000));
+        const benchmarkStartOffset = phaseIndex
+          ? Math.round(span * phaseIndex / 3) + 1
+          : 0;
+        const benchmarkStart = formatDate_(new Date(parseDate_(startDate).getTime() + benchmarkStartOffset * 86400000));
         const benchmarkDue = formatDate_(new Date(parseDate_(startDate).getTime() + Math.round(span * (phaseIndex + 1) / 3) * 86400000));
         benchmarks.push({
           Id: benchmarkId,
@@ -657,10 +693,18 @@ function buildDemoGoals_(random, students, studentClasses, classes, subjectIds, 
           StartDate: benchmarkStart,
           DueDate: benchmarkDue,
           Critical: false,
-          Active: phaseIndex === activePhase,
+          Active: benchmarkStart <= formatDate_(today) && formatDate_(today) <= benchmarkDue,
           Description: 'Short-Term Objective ' + (phaseIndex + 1) + ': ' + firstName + ' will ' +
             template.skill + ' ' + phase + ' on 3 out of 4 recorded trials.',
-          GoalId: goalId
+          GoalId: goalId,
+          OrderIndex: phaseIndex + 1,
+          TaskDemandDescription: firstName + ' will ' + template.skill,
+          TargetPromptLevel: phaseIndex === 2 ? 'Independent' : 'Verbal',
+          TargetPromptCeiling: phaseIndex === 0 ? 2 : phaseIndex === 1 ? 1 : '',
+          ConsistencyTrialsPassed: 3,
+          ConsistencyTrialsWindow: 4,
+          EvaluationWindowUnit: 'SESSION',
+          GoalArchetype: phaseIndex < 2 ? 'PROMPT_FADE' : 'DISCRETE_TRIAL'
         });
         tags.forEach(subjectId => benchmarkSubjects.push({
           BenchmarkId: benchmarkId,
@@ -672,16 +716,32 @@ function buildDemoGoals_(random, students, studentClasses, classes, subjectIds, 
   return { goals: goals, benchmarks: benchmarks, benchmarkSubjects: benchmarkSubjects };
 }
 
+// I build demo entries.
 function buildDemoEntries_(random, benchmarks, studentClasses, aidesByClass, students, today) {
   const studentById = students.reduce((map, row) => {
     map[row.Id] = row;
     return map;
   }, {});
   const entries = [];
-  benchmarks.filter(row => toBoolean_(row.Active)).forEach(benchmark => {
+  const recentHistoryStart = new Date(today.getTime() - 90 * 86400000);
+  benchmarks.filter(row => {
+    const start = parseDate_(formatDate_(row.StartDate));
+    const due = parseDate_(formatDate_(row.DueDate));
+    return start.getTime() <= today.getTime() && (
+      toBoolean_(row.Active) || due.getTime() >= recentHistoryStart.getTime()
+    );
+  }).forEach(benchmark => {
     const student = studentById[benchmark.StudentId];
     const enrolled = studentClasses[benchmark.StudentId];
-    const sessions = demoInt_(random, 6, 10);
+    const start = parseDate_(formatDate_(benchmark.StartDate));
+    const due = parseDate_(formatDate_(benchmark.DueDate));
+    const end = new Date(Math.min(today.getTime(), due.getTime()));
+    const availableDays = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 86400000));
+    const sessions = Math.min(
+      toBoolean_(benchmark.Active) ? demoInt_(random, 6, 10) : demoInt_(random, 2, 3),
+      availableDays + 1
+    );
+    if (!sessions) return;
     let level = demoInt_(random, 0, 2);
     for (let index = 0; index < sessions; index += 1) {
       const drift = random();
@@ -690,17 +750,23 @@ function buildDemoEntries_(random, benchmarks, studentClasses, aidesByClass, stu
       else level = Math.min(4, level + 1);
       const correct = level;
       const attempts = 4;
-      const dayOffset = -7 * (sessions - index) - demoInt_(random, 0, 2);
-      const timestamp = new Date(today.getTime() + dayOffset * 86400000);
+      const dayOffset = sessions === 1
+        ? availableDays
+        : Math.round(availableDays * index / (sessions - 1));
+      const timestamp = new Date(start.getTime() + dayOffset * 86400000);
       timestamp.setHours(9 + (index % 5), (index * 7) % 60, 0, 0);
       const classRow = enrolled[index % enrolled.length];
       const classAides = aidesByClass[classRow.Id];
       const recorder = index % 3 === 0
         ? student.CaseManagerEmail
         : classAides[index % classAides.length].Email;
+      const promptCount = String(benchmark.GoalArchetype) === 'PROMPT_FADE'
+        ? Math.max(0, 3 - level)
+        : level >= 3 ? 0 : 1;
       entries.push({
         Id: demoId_('ENTRY', entries.length + 1),
         Timestamp: formatDateTime_(timestamp),
+        ObservationDate: formatDate_(timestamp),
         BenchmarkId: benchmark.Id,
         StudentId: benchmark.StudentId,
         StaffEmail: recorder,
@@ -708,13 +774,17 @@ function buildDemoEntries_(random, benchmarks, studentClasses, aidesByClass, stu
         Correct: correct,
         Attempts: attempts,
         Percent: Math.round((correct / attempts) * 1000) / 10,
-        Notes: demoPick_(random, VOICES_DEMO_ENTRY_NOTES)
+        ActualPromptLevel: promptCount === 0 ? 'Independent' : promptCount === 1 ? 'Verbal' : 'Model',
+        ActualPromptCount: promptCount,
+        Notes: demoPick_(random, VOICES_DEMO_ENTRY_NOTES),
+        Status: 'ACTIVE'
       });
     }
   });
   return entries;
 }
 
+// I build demo schedule.
 function buildDemoSchedule_(random, aides, classes, instructionalPeriods, lunchPeriod, scheduleType, students, studentClasses, trainedAides, today) {
   const periods = instructionalPeriods
     .concat(lunchPeriod ? [lunchPeriod] : [])
@@ -787,6 +857,7 @@ function buildDemoSchedule_(random, aides, classes, instructionalPeriods, lunchP
     EndTime: period.EndTime,
     SortOrder: period.SortOrder
   }));
+  // I add the prepared fictional schedule assignments to the training collection.
   const pushAssignments = (dayScheduleId, date) => {
     aides.forEach(aide => {
       Object.keys(plan[aide.Email]).forEach(periodId => {
@@ -842,6 +913,7 @@ function buildDemoSchedule_(random, aides, classes, instructionalPeriods, lunchP
   };
 }
 
+// I build demo availability.
 function buildDemoAvailability_(aides, today) {
   const submitted = formatDateTime_(new Date(today.getTime() - 30 * 86400000));
   const availability = [];
@@ -879,6 +951,7 @@ function buildDemoAvailability_(aides, today) {
   return availability;
 }
 
+// I build demo time off.
 function buildDemoTimeOff_(aides, caseManagers, dateText, today) {
   const reviewer = caseManagers.length ? caseManagers[0].Email : '';
   const plans = [
@@ -903,6 +976,7 @@ function buildDemoTimeOff_(aides, caseManagers, dateText, today) {
   }));
 }
 
+// I build demo time entries.
 function buildDemoTimeEntries_(random, aides, today) {
   const entries = [];
   aides.slice(0, 6).forEach(aide => {
@@ -929,6 +1003,7 @@ function buildDemoTimeEntries_(random, aides, today) {
   return entries;
 }
 
+// I build demo messages.
 function buildDemoMessages_(caseManagers, dateText, today) {
   const authors = caseManagers.length ? caseManagers : [{ Email: '' }];
   return [
@@ -962,6 +1037,7 @@ function buildDemoMessages_(caseManagers, dateText, today) {
   ];
 }
 
+// I check the rules for demo content.
 function validateDemoContent_() {
   const issues = [];
   const staff = rows_('Staff');
@@ -1155,6 +1231,7 @@ function validateDemoContent_() {
   });
 
   const prohibited = /\b(demo|sample|test\s+student|placeholder|lorem|ai[- ]generated|chatgpt|openai|as an ai)\b/i;
+  // I scan the prepared training records and add any validation problem to the report.
   const scan = (label, values) => values.forEach(value => {
     if (value && prohibited.test(String(value))) issues.push('Prohibited wording in ' + label + ': ' + value);
   });
