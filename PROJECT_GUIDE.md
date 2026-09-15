@@ -410,6 +410,11 @@ Do not use a parent-directory `.clasp.json`; clasp may scan unrelated files. Do 
 
 ## 18. Release workflow
 
+For a shorter owner-facing checklist, use
+[OWNER_WORKFLOW.md](OWNER_WORKFLOW.md). It includes the complete source-file
+copy list, database decision guide, school-test checks, production release
+steps, and rollback checklist.
+
 1. Gather a complete, coherent release batch.
 2. Create a Git feature branch.
 3. Implement focused source changes.
