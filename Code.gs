@@ -1,3 +1,15 @@
+/**
+ * I use this file as the front door for V.O.I.C.E.S.
+ *
+ * Google Apps Script starts here when someone opens the web app. I also use
+ * this file to identify the signed-in school account, check the Staff sheet,
+ * choose the correct aide or case-manager workspace, and share small helper
+ * functions that every other server file can use.
+ *
+ * The browser never decides who a user is. The server reads the Google
+ * Workspace account with Session.getActiveUser(), then requires a matching
+ * active Staff row before returning student or staff information.
+ */
 const VOICES = Object.freeze({
   APP_NAME: 'V.O.I.C.E.S 2.0',
   RELEASE: '2.3',
@@ -30,10 +42,8 @@ const VOICES = Object.freeze({
   })
 });
 
+// I build the first web page and pass it only the safe values needed to start.
 function doGet(event) {
-  const kioskHandoff = consumeKioskAuthHandoff_(
-    event && event.parameter && event.parameter.voicesAuth
-  );
   const template = HtmlService.createTemplateFromFile('Index');
   template.defaultLogo = getDefaultLogoDataUri();
   template.appUrl = ScriptApp.getService().getUrl();
@@ -41,19 +51,13 @@ function doGet(event) {
     event && event.parameter && event.parameter.voicesAccountSelected,
     100
   );
-  template.kioskEnrollment = sanitizeText_(
-    event && event.parameter && event.parameter.voicesKiosk,
-    10
-  );
-  template.kioskLoginUrl = getKioskLoginUrl();
-  template.kioskSessionToken = kioskHandoff.token;
-  template.kioskSessionError = kioskHandoff.error;
   return template.evaluate()
     .setTitle(VOICES.APP_NAME)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+// I verify the signed-in staff member and return the first role-specific workspace data.
 function getAppBootstrap(force) {
   return withRowsCache_(() => {
     const email = getCurrentUserEmail_();
@@ -62,6 +66,7 @@ function getAppBootstrap(force) {
     const now = new Date();
     const today = formatDate_(now);
     const timeBucket = Math.floor(now.getTime() / 300000);
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => {
     const response = {
       appName: VOICES.APP_NAME,
@@ -131,6 +136,7 @@ function getAppBootstrap(force) {
   });
 }
 
+// I collect and return case manager overview data.
 function getCaseManagerOverviewData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -138,12 +144,14 @@ function getCaseManagerOverviewData() {
   });
 }
 
+// I collect and return case manager overview data.
 function getCaseManagerOverviewData_(staff) {
   return {
     toDos: getCaseManagerTodos_(staff)
   };
 }
 
+// I collect and return case manager entry data.
 function getCaseManagerEntryData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -151,6 +159,7 @@ function getCaseManagerEntryData() {
   });
 }
 
+// I collect and return case manager entry data.
 function getCaseManagerEntryData_(staff) {
   return {
     subjects: activeRows_('Subjects'),
@@ -160,6 +169,7 @@ function getCaseManagerEntryData_(staff) {
   };
 }
 
+// I collect and return case manager people data.
 function getCaseManagerPeopleData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -167,6 +177,7 @@ function getCaseManagerPeopleData() {
   });
 }
 
+// I collect and return case manager people data.
 function getCaseManagerPeopleData_(staff) {
   const staffRows = activeRows_('Staff');
   const isAdmin = toBoolean_(staff.IsAdmin);
@@ -187,9 +198,11 @@ function getCaseManagerPeopleData_(staff) {
   };
 }
 
+// I collect and return case manager workspace data.
 function getCaseManagerWorkspaceData(force) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => ({
       generatedAt: new Date().toISOString(),
       overview: getCaseManagerOverviewData_(staff),
@@ -211,6 +224,7 @@ function getCaseManagerWorkspaceData(force) {
   });
 }
 
+// I keep the health check rule in one place so it is used consistently.
 function healthCheck() {
   return {
     ok: true,
@@ -220,10 +234,12 @@ function healthCheck() {
   };
 }
 
+// I collect and return default logo data uri.
 function getDefaultLogoDataUri() {
   return DEFAULT_LOGO_DATA_URI;
 }
 
+// I return only the staff fields that are safe and useful in the browser.
 function publicStaff_(staff) {
   return {
     id: staff.Id,
@@ -239,16 +255,16 @@ function publicStaff_(staff) {
   };
 }
 
+// I read the active Google Workspace account so V.O.I.C.E.S knows who is using the app.
 function getCurrentUserEmail_() {
-  const email = voicesSessionEmail_
-    ? normalizeEmail_(voicesSessionEmail_)
-    : normalizeEmail_(Session.getActiveUser().getEmail());
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
   if (!email) {
     throw new Error('Google Workspace identity was not available. Deploy the web app for your Workspace domain and require sign-in.');
   }
   return email;
 }
 
+// I require an active Staff row before allowing any protected server work.
 function requireAuthorizedStaff_(email) {
   const staff = findOne_('Staff', row =>
     normalizeEmail_(row.Email) === normalizeEmail_(email) && toBoolean_(row.Active)
@@ -259,6 +275,7 @@ function requireAuthorizedStaff_(email) {
   return staff;
 }
 
+// I require and verify case manager.
 function requireCaseManager_() {
   const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
   if (staff.Role !== VOICES.ROLES.CASE_MANAGER && !toBoolean_(staff.IsAdmin)) {
@@ -267,6 +284,7 @@ function requireCaseManager_() {
   return staff;
 }
 
+// I require and verify admin.
 function requireAdmin_() {
   const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
   if (!toBoolean_(staff.IsAdmin)) {
@@ -275,46 +293,55 @@ function requireAdmin_() {
   return staff;
 }
 
+// I clean and standardize email.
 function normalizeEmail_(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+// I keep the to boolean rule in one place so it is used consistently.
 function toBoolean_(value) {
   return value === true || String(value).toLowerCase() === 'true' || String(value) === '1';
 }
 
+// I keep the to number rule in one place so it is used consistently.
 function toNumber_(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : (fallback || 0);
 }
 
+// I keep the optional number rule in one place so it is used consistently.
 function optionalNumber_(value) {
   if (value === '' || value === null || value === undefined) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// I keep the uuid rule in one place so it is used consistently.
 function uuid_() {
   return Utilities.getUuid();
 }
 
+// I format date.
 function formatDate_(value) {
   if (!value) return '';
   const date = value instanceof Date ? value : new Date(value);
   return Utilities.formatDate(date, VOICES.TIME_ZONE, 'yyyy-MM-dd');
 }
 
+// I format date time.
 function formatDateTime_(value) {
   if (!value) return '';
   const date = value instanceof Date ? value : new Date(value);
   return Utilities.formatDate(date, VOICES.TIME_ZONE, "yyyy-MM-dd'T'HH:mm:ss");
 }
 
+// I read and organize date.
 function parseDate_(dateText) {
   const parts = String(dateText).split('-').map(Number);
   return new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
 }
 
+// I keep the date in range rule in one place so it is used consistently.
 function dateInRange_(dateText, start, end) {
   const date = parseDate_(dateText).getTime();
   const startTime = start ? parseDate_(formatDate_(start)).getTime() : -Infinity;
@@ -322,11 +349,13 @@ function dateInRange_(dateText, start, end) {
   return date >= startTime && date <= endTime;
 }
 
+// I clean unsafe or unexpected values from text.
 function sanitizeText_(value, maxLength) {
   const clean = String(value == null ? '' : value).trim();
   return clean.slice(0, maxLength || 2000);
 }
 
+// I stop the action unless I can confirm required.
 function assertRequired_(payload, fields) {
   fields.forEach(field => {
     if (payload[field] === undefined || payload[field] === null || payload[field] === '') {

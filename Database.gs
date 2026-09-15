@@ -1,3 +1,16 @@
+/**
+ * I keep all Google Sheets structure and low-level data work in this file.
+ *
+ * SHEET_SCHEMAS is the master list of tabs and columns. The setup and upgrade
+ * functions safely prepare an existing workbook. The remaining helpers read,
+ * cache, add, update, replace, or remove rows so the service files do not need
+ * to repeat spreadsheet details.
+ *
+ * I use several cache layers because Google Sheets calls are slow. A cache is
+ * always invalidated after a related write so users do not keep seeing old
+ * information. Database upgrades are separate from normal web-app startup and
+ * must never be used as a substitute for deploying code.
+ */
 const SHEET_SCHEMAS = Object.freeze({
   Settings: ['Key', 'Value'],
   Staff: ['Id', 'Email', 'FirstName', 'LastName', 'Role', 'IsAdmin', 'Active', 'WeeklyHours'],
@@ -76,6 +89,7 @@ const VOICES_PERSISTENT_RESPONSE_GROUPS = Object.freeze({
   'schedule-builder': 'schedule'
 });
 
+// I reuse rows during one server request so the same sheet is not read repeatedly.
 function withRowsCache_(callback) {
   const previousCache = VOICES_ROWS_CACHE;
   const previousDatabase = VOICES_DATABASE_CACHE;
@@ -92,11 +106,13 @@ function withRowsCache_(callback) {
   }
 }
 
+// I collect and return app data version.
 function getAppDataVersion_() {
   return PropertiesService.getScriptProperties()
     .getProperty('VOICES_APP_DATA_VERSION') || '1';
 }
 
+// I clear old cached copies of app data cache.
 function invalidateAppDataCache_(scope) {
   const next = String(new Date().getTime()) + '-' + uuid_();
   const properties = PropertiesService.getScriptProperties();
@@ -112,6 +128,7 @@ function invalidateAppDataCache_(scope) {
   return next;
 }
 
+// I keep the cached response rule in one place so it is used consistently.
 function cachedResponse_(namespace, keyParts, producer, ttlSeconds, forceRefresh) {
   const cache = CacheService.getScriptCache();
   const suffix = (keyParts || [])
@@ -172,6 +189,7 @@ function cachedResponse_(namespace, keyParts, producer, ttlSeconds, forceRefresh
   return result;
 }
 
+// I write response cache.
 function writeResponseCache_(cache, cacheKey, serialized, ttlSeconds) {
   try {
     const chunks = [];
@@ -186,6 +204,7 @@ function writeResponseCache_(cache, cacheKey, serialized, ttlSeconds) {
   }
 }
 
+// I read persistent response.
 function readPersistentResponse_(namespace, keyParts) {
   const descriptor = persistentResponseDescriptor_(namespace, keyParts);
   if (!descriptor) return { hit: false };
@@ -210,6 +229,7 @@ function readPersistentResponse_(namespace, keyParts) {
   }
 }
 
+// I write persistent response.
 function writePersistentResponse_(namespace, keyParts, serialized, overwrite) {
   const descriptor = persistentResponseDescriptor_(namespace, keyParts);
   if (!descriptor) return;
@@ -261,6 +281,7 @@ function writePersistentResponse_(namespace, keyParts, serialized, overwrite) {
   }
 }
 
+// I keep the persistent response descriptor rule in one place so it is used consistently.
 function persistentResponseDescriptor_(namespace, keyParts) {
   const group = VOICES_PERSISTENT_RESPONSE_GROUPS[namespace];
   if (!group) return null;
@@ -282,6 +303,7 @@ function persistentResponseDescriptor_(namespace, keyParts) {
   };
 }
 
+// I keep the persistent response folder rule in one place so it is used consistently.
 function persistentResponseFolder_() {
   const properties = PropertiesService.getScriptProperties();
   const folderId = properties.getProperty('VOICES_READ_MODEL_FOLDER_ID');
@@ -300,6 +322,7 @@ function persistentResponseFolder_() {
   return folder;
 }
 
+// I keep the sha256 hex rule in one place so it is used consistently.
 function sha256Hex_(value) {
   return Utilities.computeDigest(
     Utilities.DigestAlgorithm.SHA_256,
@@ -309,6 +332,7 @@ function sha256Hex_(value) {
   ).join('');
 }
 
+// I create the normalized database tabs and formatting for a brand-new approved workbook.
 function setupVoicesDatabase(options) {
   options = options || {};
   const spreadsheet = options.spreadsheetId
@@ -343,14 +367,17 @@ function setupVoicesDatabase(options) {
   };
 }
 
+// I keep the upgrade voices22 database rule in one place so it is used consistently.
 function upgradeVoices22Database() {
   return upgradeVoices23Database();
 }
 
+// I keep the upgrade voices21 database rule in one place so it is used consistently.
 function upgradeVoices21Database() {
   return upgradeVoices22Database();
 }
 
+// I add missing V.O.I.C.E.S 2.3 columns and tabs without erasing existing records.
 function upgradeVoices23Database() {
   return withRowsCache_(() => {
     const spreadsheet = getDatabase_();
@@ -385,6 +412,7 @@ function upgradeVoices23Database() {
   });
 }
 
+// I run database ID.
 function withDatabaseId_(spreadsheetId, callback) {
   if (!spreadsheetId) throw new Error('A spreadsheet id is required.');
   const previousOverride = VOICES_DATABASE_OVERRIDE_ID;
@@ -396,6 +424,7 @@ function withDatabaseId_(spreadsheetId, callback) {
   }
 }
 
+// I open the configured V.O.I.C.E.S spreadsheet and fail clearly when its ID is missing.
 function getDatabase_() {
   if (VOICES_DATABASE_CACHE) return VOICES_DATABASE_CACHE;
   const id = VOICES_DATABASE_OVERRIDE_ID ||
@@ -408,6 +437,7 @@ function getDatabase_() {
   return database;
 }
 
+// I make sure sheet.
 function ensureSheet_(spreadsheet, name, headers) {
   let sheet = spreadsheet.getSheetByName(name);
   if (!sheet) sheet = spreadsheet.insertSheet(name);
@@ -439,6 +469,7 @@ function ensureSheet_(spreadsheet, name, headers) {
   return sheet;
 }
 
+// I keep the migrate voices22 data rule in one place so it is used consistently.
 function migrateVoices22Data_() {
   const goals = rows_('Goals');
   const benchmarks = rows_('Benchmarks');
@@ -485,6 +516,7 @@ function migrateVoices22Data_() {
   appendRows_('BenchmarkSubjects', benchmarkSubjectsToAppend);
 }
 
+// I keep the migrate voices23 data rule in one place so it is used consistently.
 function migrateVoices23Data_() {
   const goals = rows_('Goals');
   const benchmarks = rows_('Benchmarks');
@@ -706,6 +738,7 @@ function migrateVoices23Data_() {
   upsertSetting_('SchemaVersion', '2.3');
 }
 
+// I check the rules for voices23 database.
 function validateVoices23Database_() {
   const goals = rows_('Goals');
   const benchmarks = rows_('Benchmarks');
@@ -746,6 +779,7 @@ function validateVoices23Database_() {
   const invalidEvaluationWindowUnits = benchmarks.filter(row =>
     !normalizeEvaluationWindowUnit_(row.EvaluationWindowUnit)
   ).length;
+  // I keep the duplicate count rule in one place so it is used consistently.
   const duplicateCount = rows => rows.length -
     new Set(rows.map(row => String(row.Id))).size;
   const invalidActivePhaseCounts = goals.filter(goal => {
@@ -778,6 +812,7 @@ function validateVoices23Database_() {
   };
 }
 
+// I format database.
 function formatDatabase_(spreadsheet) {
   Object.keys(SHEET_SCHEMAS).forEach(name => {
     const sheet = spreadsheet.getSheetByName(name);
@@ -792,6 +827,7 @@ function formatDatabase_(spreadsheet) {
   });
 }
 
+// I add repeatable training records for defaults.
 function seedDefaults_() {
   if (rows_('Settings').length === 0) {
     [
@@ -846,12 +882,14 @@ function seedDefaults_() {
   }
 }
 
+// I keep the sheet rule in one place so it is used consistently.
 function sheet_(name) {
   const sheet = getDatabase_().getSheetByName(name);
   if (!sheet) throw new Error('Missing database sheet: ' + name);
   return sheet;
 }
 
+// I keep the rows rule in one place so it is used consistently.
 function rows_(name) {
   if (VOICES_ROWS_CACHE && VOICES_ROWS_CACHE[name]) {
     return VOICES_ROWS_CACHE[name].map(row => Object.assign({}, row));
@@ -880,6 +918,7 @@ function rows_(name) {
   return records;
 }
 
+// I keep the rows by column values rule in one place so it is used consistently.
 function rowsByColumnValues_(name, columnName, values) {
   const selected = new Set((values || []).map(String).filter(Boolean));
   if (!selected.size) return [];
@@ -925,18 +964,22 @@ function rowsByColumnValues_(name, columnName, values) {
     }, []);
 }
 
+// I keep the active rows rule in one place so it is used consistently.
 function activeRows_(name) {
   return rows_(name).filter(row => row.Active === undefined || row.Active === '' || toBoolean_(row.Active));
 }
 
+// I find one.
 function findOne_(name, predicate) {
   return rows_(name).find(predicate) || null;
 }
 
+// I keep the append values rule in one place so it is used consistently.
 function appendValues_(name, values) {
   sheet_(name).appendRow(values);
 }
 
+// I add one normalized row and invalidate every cache that depends on that sheet.
 function appendRow_(name, record) {
   const headers = SHEET_SCHEMAS[name];
   if (!headers) throw new Error('Unknown schema: ' + name);
@@ -946,6 +989,7 @@ function appendRow_(name, record) {
   return record;
 }
 
+// I add several normalized rows in one Sheets call and then invalidate related caches.
 function appendRows_(name, records) {
   if (!records || !records.length) return [];
   const headers = SHEET_SCHEMAS[name];
@@ -959,11 +1003,13 @@ function appendRows_(name, records) {
   return records;
 }
 
+// I combine row patch.
 function mergeRowPatch_(patches, rowNumber, patch) {
   if (!patches[rowNumber]) patches[rowNumber] = {};
   Object.assign(patches[rowNumber], patch);
 }
 
+// I update only matching rows while preserving the sheet schema and unrelated records.
 function updateRows_(name, patches) {
   const rowNumbers = Object.keys(patches || {})
     .map(Number)
@@ -997,6 +1043,7 @@ function updateRows_(name, patches) {
   invalidateRowsCache_(name);
 }
 
+// I update row.
 function updateRow_(name, rowNumber, patch) {
   const headers = SHEET_SCHEMAS[name];
   const sheet = sheet_(name);
@@ -1008,11 +1055,13 @@ function updateRow_(name, rowNumber, patch) {
   invalidateRowsCache_(name);
 }
 
+// I remove row.
 function deleteRow_(name, rowNumber) {
   sheet_(name).deleteRow(rowNumber);
   invalidateRowsCache_(name);
 }
 
+// I replace a controlled set of rows under a lock and leave all other rows unchanged.
 function replaceRows_(name, predicate, replacementRows) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -1023,6 +1072,7 @@ function replaceRows_(name, predicate, replacementRows) {
   }
 }
 
+// I keep the replace rows unlocked rule in one place so it is used consistently.
 function replaceRowsUnlocked_(name, predicate, replacementRows) {
   const keep = rows_(name).filter(row => !predicate(row));
   const all = keep.concat(replacementRows || []);
@@ -1040,6 +1090,7 @@ function replaceRowsUnlocked_(name, predicate, replacementRows) {
   invalidateRowsCache_(name);
 }
 
+// I clear old cached copies of rows cache.
 function invalidateRowsCache_(name) {
   if (VOICES_ROWS_CACHE) delete VOICES_ROWS_CACHE[name];
   if (VOICES_INDEX_CACHE && name === 'BenchmarkSubjects') {
@@ -1050,6 +1101,7 @@ function invalidateRowsCache_(name) {
   }
 }
 
+// I set tings map.
 function settingsMap_() {
   return rows_('Settings').reduce((map, row) => {
     map[row.Key] = row.Value;
@@ -1057,6 +1109,7 @@ function settingsMap_() {
   }, {});
 }
 
+// I add a new record or update the matching setting.
 function upsertSetting_(key, value) {
   const existing = findOne_('Settings', row => row.Key === key);
   if (existing) {
@@ -1068,6 +1121,7 @@ function upsertSetting_(key, value) {
   }
 }
 
+// I validate and save setting.
 function saveSetting(key, value) {
   requireCaseManager_();
   const existing = findOne_('Settings', row => row.Key === key);

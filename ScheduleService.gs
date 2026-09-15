@@ -1,3 +1,17 @@
+/**
+ * I keep weekly schedules, daily assignments, shifts, lunches, and call-off
+ * reconciliation in this file.
+ *
+ * Schedule templates describe period times. A saved day schedule connects
+ * aides to classes or one-to-one students for those periods. I calculate the
+ * hours shown to staff, check for time and availability conflicts, and use a
+ * revision number so one browser cannot silently overwrite newer work.
+ *
+ * When an aide is marked off, I try to preserve existing assignments and find
+ * safe one-to-one replacements. If full coverage is impossible, I still save
+ * the absence and send case managers a clear unresolved-coverage notice.
+ */
+// I collect and return schedule types.
 function getScheduleTypes_() {
   const periods = rows_('SchedulePeriods');
   const assignments = rows_('Assignments');
@@ -15,6 +29,7 @@ function getScheduleTypes_() {
   }));
 }
 
+// I collect and return schedule type summaries.
 function getScheduleTypeSummaries() {
   return withRowsCache_(() => {
     requireCaseManager_();
@@ -22,6 +37,7 @@ function getScheduleTypeSummaries() {
   });
 }
 
+// I collect and return schedule type summaries.
 function getScheduleTypeSummaries_() {
   return activeRows_('ScheduleTypes')
     .map(type => ({
@@ -35,6 +51,7 @@ function getScheduleTypeSummaries_() {
     );
 }
 
+// I return a browser-safe copy of period.
 function publicPeriod_(row) {
   return {
     periodId: row.PeriodId,
@@ -45,11 +62,13 @@ function publicPeriod_(row) {
   };
 }
 
+// I return periods, aides, locations, availability, and assignments needed by the builder.
 function getScheduleBuilderData(dateText, templateId, force) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
     const date = dateText || formatDate_(new Date());
     const selectedTemplateId = String(templateId || '');
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => {
       const scheduleTypes = getScheduleTypes_().map(type =>
         !selectedTemplateId || String(type.id) !== selectedTemplateId
@@ -94,6 +113,7 @@ function getScheduleBuilderData(dateText, templateId, force) {
   });
 }
 
+// I collect and return compact weekly schedule data.
 function getCompactWeeklyScheduleData_(dateText) {
   const weekStart = weekStart_(dateText);
   const cache = CacheService.getScriptCache();
@@ -113,6 +133,7 @@ function getCompactWeeklyScheduleData_(dateText) {
   return result;
 }
 
+// I prepare a smaller, faster copy of weekly schedule.
 function compactWeeklySchedule_(week) {
   return {
     weekStart: week.weekStart,
@@ -130,6 +151,7 @@ function compactWeeklySchedule_(week) {
   };
 }
 
+// I collect and return schedule staffing status.
 function getScheduleStaffingStatus_(dateText) {
   const dayName = dayName_(dateText);
   const timeOff = rows_('TimeOffRequests');
@@ -187,11 +209,13 @@ function getScheduleStaffingStatus_(dateText) {
     });
 }
 
+// I collect and return full schedule.
 function getFullSchedule(dateText, force) {
   return withRowsCache_(() => {
     const email = getCurrentUserEmail_();
     requireAuthorizedStaff_(email);
     const date = dateText || formatDate_(new Date());
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => {
       const schedule = getDaySchedule_(date);
       const staff = activeRows_('Staff').reduce((map, row) => {
@@ -219,6 +243,7 @@ function getFullSchedule(dateText, force) {
   });
 }
 
+// I collect and return weekly schedule data.
 function getWeeklyScheduleData(dateText, force) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -233,11 +258,13 @@ function getWeeklyScheduleData(dateText, force) {
   });
 }
 
+// I collect and return aide week.
 function getAideWeek(dateText, force) {
   return withRowsCache_(() => {
     const email = getCurrentUserEmail_();
     const staff = requireAuthorizedStaff_(email);
     const date = dateText || formatDate_(new Date());
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => {
     const week = getWeeklyScheduleData_(date);
     const aide = week.aides.find(item => normalizeEmail_(item.email) === email) || publicStaff_(staff);
@@ -291,6 +318,7 @@ function getAideWeek(dateText, force) {
   });
 }
 
+// I prepare a no-change preview of weekly hours.
 function previewWeeklyHours(payload) {
   return withRowsCache_(() => {
     requireCaseManager_();
@@ -312,6 +340,7 @@ function previewWeeklyHours(payload) {
   });
 }
 
+// I collect and return weekly schedule data.
 function getWeeklyScheduleData_(dateText) {
   const weekStart = weekStart_(dateText);
   const cache = CacheService.getScriptCache();
@@ -334,6 +363,7 @@ function getWeeklyScheduleData_(dateText) {
   return result;
 }
 
+// I build weekly schedule data.
 function buildWeeklyScheduleData_(dateText) {
   const weekStart = weekStart_(dateText);
   const dates = weekDates_(weekStart);
@@ -349,6 +379,7 @@ function buildWeeklyScheduleData_(dateText) {
   };
 }
 
+// I build weekly schedule indexes.
 function buildWeeklyScheduleIndexes_() {
   const scheduleTypes = activeRows_('ScheduleTypes');
   const defaultType = scheduleTypes.find(row => toBoolean_(row.IsDefault)) || scheduleTypes[0] || null;
@@ -388,6 +419,7 @@ function buildWeeklyScheduleIndexes_() {
   };
 }
 
+// I decide the correct value for weekly schedule day.
 function resolveWeeklyScheduleDay_(dateText, indexes) {
   const daySchedule = indexes.daySchedulesByDate[dateText] || null;
   const dayName = dayName_(dateText);
@@ -433,6 +465,7 @@ function resolveWeeklyScheduleDay_(dateText, indexes) {
   };
 }
 
+// I return a browser-safe copy of draft schedule day.
 function publicDraftScheduleDay_(dateText, periods, assignments, dailyHours) {
   const normalizedPeriods = periods.map((period, index) => ({
     periodId: sanitizeText_(period.periodId || ('CUSTOM_' + (index + 1)), 100),
@@ -478,6 +511,7 @@ function publicDraftScheduleDay_(dateText, periods, assignments, dailyHours) {
   };
 }
 
+// I summarize weekly schedule.
 function summarizeWeeklySchedule_(days, aides) {
   const summaries = aides.map(aide => {
     const byDay = days.map(day => ({
@@ -515,6 +549,7 @@ function summarizeWeeklySchedule_(days, aides) {
   };
 }
 
+// I schedule d hours for aide.
 function scheduledHoursForAide_(day, email) {
   const hours = (day.dailyHours || []).find(item =>
     normalizeEmail_(item.aideEmail) === normalizeEmail_(email)
@@ -526,6 +561,7 @@ function scheduledHoursForAide_(day, email) {
   return roundHours_((end - start - (toNumber_(hours.lunchMinutes) || 0)) / 60);
 }
 
+// I collect and return daily hours for date.
 function getDailyHoursForDate_(dateText) {
   return activeRows_('Staff')
     .filter(row => row.Role === VOICES.ROLES.AIDE)
@@ -533,6 +569,7 @@ function getDailyHoursForDate_(dateText) {
     .filter(Boolean);
 }
 
+// I collect and return effective daily hours.
 function getEffectiveDailyHours_(dateText, email) {
   return getEffectiveDailyHoursFromIndexes_(dateText, email, {
     dailyHours: rows_('AideDailyHours'),
@@ -540,6 +577,7 @@ function getEffectiveDailyHours_(dateText, email) {
   });
 }
 
+// I collect and return effective daily hours from indexes.
 function getEffectiveDailyHoursFromIndexes_(dateText, email, indexes) {
   const normalizedEmail = normalizeEmail_(email);
   const override = (indexes.dailyHours || []).find(row =>
@@ -572,6 +610,7 @@ function getEffectiveDailyHoursFromIndexes_(dateText, email, indexes) {
   });
 }
 
+// I clean and standardize daily hours.
 function normalizeDailyHours_(dateText, item) {
   return {
     date: dateText,
@@ -584,6 +623,7 @@ function normalizeDailyHours_(dateText, item) {
   };
 }
 
+// I keep the shift overlap label rule in one place so it is used consistently.
 function shiftOverlapLabel_(hours, period) {
   if (!hours || !period) return '';
   const start = Math.max(timeToMinutes_(hours.startTime), timeToMinutes_(period.startTime || period.StartTime));
@@ -592,11 +632,13 @@ function shiftOverlapLabel_(hours, period) {
   return minutesToTime_(start) + '–' + minutesToTime_(end);
 }
 
+// I keep the minutes to time rule in one place so it is used consistently.
 function minutesToTime_(minutes) {
   return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' +
     String(minutes % 60).padStart(2, '0');
 }
 
+// I keep the counts as scheduled assignment rule in one place so it is used consistently.
 function countsAsScheduledAssignment_(assignment) {
   if (!assignment) return false;
   const type = assignment.type === undefined ? assignment.Type : assignment.type;
@@ -609,6 +651,7 @@ function countsAsScheduledAssignment_(assignment) {
   return Boolean(classId || studentId || String(duty || '').trim() || String(note || '').trim());
 }
 
+// I return a browser-safe copy of assignment with indexes.
 function publicAssignmentWithIndexes_(row, indexes) {
   const classRow = row.ClassId ? indexes.classes[row.ClassId] : null;
   const student = row.StudentId ? indexes.students[row.StudentId] : null;
@@ -628,6 +671,7 @@ function publicAssignmentWithIndexes_(row, indexes) {
   };
 }
 
+// I collect and return aide conflict from indexes.
 function getAideConflictFromIndexes_(email, dateText, period, indexes) {
   const approvedTimeOff = indexes.timeOff.find(row =>
     normalizeEmail_(row.AideEmail) === normalizeEmail_(email) &&
@@ -658,12 +702,14 @@ function getAideConflictFromIndexes_(email, dateText, period, indexes) {
   return pendingAvailability ? 'Pending availability request' : '';
 }
 
+// I keep the week start rule in one place so it is used consistently.
 function weekStart_(dateText) {
   const date = parseDate_(dateText || formatDate_(new Date()));
   date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
   return formatDate_(date);
 }
 
+// I keep the week dates rule in one place so it is used consistently.
 function weekDates_(weekStart) {
   const start = parseDate_(weekStart);
   return Array.from({ length: 7 }, (_, index) => {
@@ -673,25 +719,30 @@ function weekDates_(weekStart) {
   });
 }
 
+// I schedule weekdays.
 function scheduleWeekdays_() {
   const configured = String(settingsMap_().ScheduleWeekdays ||
     'MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY');
   return configured.split(',').map(item => item.trim().toUpperCase()).filter(Boolean);
 }
 
+// I keep the time to minutes rule in one place so it is used consistently.
 function timeToMinutes_(value) {
   const match = normalizeTime_(value).match(/^(\d{2}):(\d{2})$/);
   return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
 }
 
+// I round hours.
 function roundHours_(value) {
   return Math.round(toNumber_(value) * 100) / 100;
 }
 
+// I collect and return schedule cache version.
 function getScheduleCacheVersion_() {
   return PropertiesService.getScriptProperties().getProperty('VOICES_SCHEDULE_CACHE_VERSION') || '1';
 }
 
+// I clear old cached copies of schedule cache.
 function invalidateScheduleCache_(scope) {
   const properties = PropertiesService.getScriptProperties();
   const next = toNumber_(properties.getProperty('VOICES_SCHEDULE_CACHE_VERSION'), 1) + 1;
@@ -699,6 +750,7 @@ function invalidateScheduleCache_(scope) {
   invalidateAppDataCache_(scope || 'schedule');
 }
 
+// I collect and return all classes.
 function getAllClasses_() {
   const subjects = indexBy_(activeRows_('Subjects'), 'Id');
   return activeRows_('Classes').map(row => ({
@@ -711,6 +763,7 @@ function getAllClasses_() {
   }));
 }
 
+// I validate and save schedule.
 function saveSchedule(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
@@ -874,6 +927,7 @@ function saveSchedule(payload) {
   };
 }
 
+// I validate and save schedule type.
 function saveScheduleType(payload) {
   requireCaseManager_();
   payload = payload || {};
@@ -920,6 +974,7 @@ function saveScheduleType(payload) {
   return { ok: true, id: id };
 }
 
+// I collect and return day schedule.
 function getDaySchedule_(dateText) {
   const daySchedule = rows_('DaySchedules')
     .filter(row => formatDate_(row.Date) === dateText && row.Status === 'ACTIVE')
@@ -950,6 +1005,7 @@ function getDaySchedule_(dateText) {
   };
 }
 
+// I collect and return staff schedule.
 function getStaffSchedule_(email, dateText) {
   const schedule = getDaySchedule_(dateText);
   const teacherClasses = activeRows_('Classes')
@@ -985,6 +1041,7 @@ function getStaffSchedule_(email, dateText) {
   };
 }
 
+// I collect and return current assignment.
 function getCurrentAssignment_(email, date) {
   const dateText = formatDate_(date);
   const timeText = Utilities.formatDate(date, VOICES.TIME_ZONE, 'HH:mm');
@@ -1000,6 +1057,7 @@ function getCurrentAssignment_(email, date) {
   };
 }
 
+// I return a browser-safe copy of assignment.
 function publicAssignment_(row) {
   const classRow = row.ClassId ? findOne_('Classes', item => String(item.Id) === String(row.ClassId)) : null;
   const student = row.StudentId ? findOne_('Students', item => String(item.Id) === String(row.StudentId)) : null;
@@ -1019,6 +1077,7 @@ function publicAssignment_(row) {
   };
 }
 
+// I keep the call off rule in one place so it is used consistently.
 function callOff(payload) {
   payload = payload || {};
   const email = getCurrentUserEmail_();
@@ -1061,6 +1120,7 @@ function callOff(payload) {
   return { ok: true, requestId: request.Id, reconciliation: results };
 }
 
+// I reconcile call off day.
 function reconcileCallOffDay_(absentEmail, dateText) {
   ensureDayScheduleMaterialized_(dateText, absentEmail);
   const originalAssignments = rows_('Assignments').filter(row => formatDate_(row.Date) === dateText);
@@ -1246,6 +1306,7 @@ function reconcileCallOffDay_(absentEmail, dateText) {
   };
 }
 
+// I make sure day schedule materialized.
 function ensureDayScheduleMaterialized_(dateText, createdBy) {
   const existing = rows_('DaySchedules').find(row =>
     formatDate_(row.Date) === dateText && row.Status === 'ACTIVE'
@@ -1293,6 +1354,7 @@ function ensureDayScheduleMaterialized_(dateText, createdBy) {
   return id;
 }
 
+// I match one to one coverage.
 function matchOneToOneCoverage_(requirements, candidateAides) {
   const training = rows_('AideTraining');
   const trainedByStudent = {};
@@ -1317,6 +1379,7 @@ function matchOneToOneCoverage_(requirements, candidateAides) {
     studentToAide[item.studentId] = currentAide;
   });
 
+  // I add scheduling details needed to compare replacement candidates fairly.
   function augment(startStudentId) {
     const queue = [startStudentId];
     const seenStudents = {};
@@ -1362,6 +1425,7 @@ function matchOneToOneCoverage_(requirements, candidateAides) {
   return { ok: unmatched.length === 0, unmatchedStudentIds: unmatched, byStudent: byStudent };
 }
 
+// I keep the call off candidate priority rule in one place so it is used consistently.
 function callOffCandidatePriority_(email, periodAssignments) {
   const assignments = periodAssignments.filter(row => normalizeEmail_(row.AideEmail) === email);
   if (!assignments.length) return 0;
@@ -1371,6 +1435,7 @@ function callOffCandidatePriority_(email, periodAssignments) {
   return 1;
 }
 
+// I check the rules for one to one period plan.
 function validateOneToOnePeriodPlan_(requirements, periodAssignments, absentEmail, candidateAides) {
   const errors = [];
   const training = rows_('AideTraining');
@@ -1416,6 +1481,7 @@ function validateOneToOnePeriodPlan_(requirements, periodAssignments, absentEmai
   return { ok: errors.length === 0, errors: errors };
 }
 
+// I keep the call off displacement message rule in one place so it is used consistently.
 function callOffDisplacementMessage_(displacedAssignments) {
   if (!displacedAssignments.length) return '';
   return ' Classroom coverage changed: ' + displacedAssignments.map(item =>
@@ -1424,6 +1490,7 @@ function callOffDisplacementMessage_(displacedAssignments) {
   ).join('; ') + '.';
 }
 
+// I check whether aide available for period.
 function isAideAvailableForPeriod_(email, dateText, periodId) {
   const normalizedEmail = normalizeEmail_(email);
   const blockingTimeOff = rows_('TimeOffRequests').some(row =>
@@ -1447,6 +1514,7 @@ function isAideAvailableForPeriod_(email, dateText, periodId) {
   return Boolean(hours && shiftOverlapLabel_(hours, period));
 }
 
+// I collect and return unavailable aides for date.
 function getUnavailableAidesForDate_(dateText) {
   return getScheduleStaffingStatus_(dateText)
     .filter(item =>
@@ -1463,6 +1531,7 @@ function getUnavailableAidesForDate_(dateText) {
     }));
 }
 
+// I collect and return aide conflict.
 function getAideConflict_(email, dateText, period) {
   const approvedTimeOff = rows_('TimeOffRequests').find(row =>
     normalizeEmail_(row.AideEmail) === normalizeEmail_(email) &&
@@ -1493,6 +1562,7 @@ function getAideConflict_(email, dateText, period) {
   return pendingAvailability ? 'Pending availability request' : '';
 }
 
+// I collect and return unassigned one to ones.
 function getUnassignedOneToOnes_(dateText) {
   const schedule = getDaySchedule_(dateText);
   const students = activeRows_('Students').filter(row => toBoolean_(row.IsOneToOne));
@@ -1524,6 +1594,7 @@ function getUnassignedOneToOnes_(dateText) {
   return gaps;
 }
 
+// I check the rules for periods.
 function validatePeriods_(periods) {
   periods.forEach(period => {
     if (!period.StartTime || !period.EndTime || period.StartTime >= period.EndTime) {
@@ -1532,6 +1603,7 @@ function validatePeriods_(periods) {
   });
 }
 
+// I check the rules for unique assignments.
 function validateUniqueAssignments_(assignments) {
   const seen = new Set();
   assignments.forEach(item => {
@@ -1541,6 +1613,7 @@ function validateUniqueAssignments_(assignments) {
   });
 }
 
+// I check the rules for schedule assignments for hours.
 function validateScheduleAssignmentsForHours_(dateText, assignments, periods, dailyHours) {
   const periodIndex = periods.reduce((map, period) => {
     map[String(period.PeriodId)] = period;
@@ -1574,11 +1647,13 @@ function validateScheduleAssignmentsForHours_(dateText, assignments, periods, da
   });
 }
 
+// I check whether one to one student.
 function isOneToOneStudent_(studentId) {
   const student = findOne_('Students', row => String(row.Id) === String(studentId));
   return Boolean(student && toBoolean_(student.IsOneToOne));
 }
 
+// I clean and standardize time.
 function normalizeTime_(value) {
   if (!value) return '';
   if (value instanceof Date) return Utilities.formatDate(value, VOICES.TIME_ZONE, 'HH:mm');
@@ -1587,10 +1662,12 @@ function normalizeTime_(value) {
   return match ? String(match[1]).padStart(2, '0') + ':' + match[2] : text;
 }
 
+// I keep the day name rule in one place so it is used consistently.
 function dayName_(dateText) {
   return Utilities.formatDate(parseDate_(dateText), VOICES.TIME_ZONE, 'EEEE').toUpperCase();
 }
 
+// I list every date in dates.
 function enumerateDates_(startText, endText) {
   const dates = [];
   const current = parseDate_(startText);
@@ -1603,6 +1680,7 @@ function enumerateDates_(startText, endText) {
   return dates;
 }
 
+// I keep one copy of each by.
 function uniqueBy_(items, keyFn) {
   const seen = new Set();
   return items.filter(item => {

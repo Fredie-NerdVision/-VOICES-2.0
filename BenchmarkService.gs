@@ -1,3 +1,16 @@
+/**
+ * I use this file for benchmark lookup and observation entry.
+ *
+ * It decides which classes, students, goals, and active benchmarks a staff
+ * member may use. It validates each observation before saving, protects busy
+ * period-end writes with a script lock, and recognizes a retried batch so the
+ * same observations are not saved twice.
+ *
+ * Unsaved queues are also copied to ObservationDrafts. That server copy works
+ * with the faster browser copy in Index.html, allowing an aide to recover work
+ * after a reload. Corrections keep the original entry for a clear audit trail.
+ */
+// I collect and return classes for staff.
 function getClassesForStaff_(staff) {
   const email = normalizeEmail_(staff.Email);
   const allClasses = activeRows_('Classes');
@@ -25,6 +38,7 @@ function getClassesForStaff_(staff) {
   }));
 }
 
+// I collect and return students for staff.
 function getStudentsForStaff_(staff) {
   const email = normalizeEmail_(staff.Email);
   const isCaseManager = staff.Role === VOICES.ROLES.CASE_MANAGER || toBoolean_(staff.IsAdmin);
@@ -46,6 +60,7 @@ function getStudentsForStaff_(staff) {
   return students.map(publicStudent_);
 }
 
+// I collect and return students for class.
 function getStudentsForClass(classId) {
   const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
   const classRow = findOne_('Classes', row => String(row.Id) === String(classId) && toBoolean_(row.Active));
@@ -61,6 +76,7 @@ function getStudentsForClass(classId) {
     .map(publicStudent_);
 }
 
+// I collect and return benchmark lookup context.
 function getBenchmarkLookupContext_(staffMember, currentAssignment) {
   const staffRows = activeRows_('Staff');
   const staff = staffRows.reduce((map, row) => {
@@ -109,6 +125,7 @@ function getBenchmarkLookupContext_(staffMember, currentAssignment) {
   };
 }
 
+// I return a browser-safe copy of student.
 function publicStudent_(row) {
   return {
     id: row.Id,
@@ -120,6 +137,7 @@ function publicStudent_(row) {
   };
 }
 
+// I collect and return trained students.
 function getTrainedStudents_(email) {
   const ids = new Set(
     rows_('AideTraining')
@@ -131,12 +149,14 @@ function getTrainedStudents_(email) {
     .map(publicStudent_);
 }
 
+// I collect and return current active benchmarks.
 function getCurrentActiveBenchmarks_() {
   const goals = rows_('Goals').filter(isActiveGoal_);
   return effectiveBenchmarkRows_(goals, rows_('Benchmarks'), new Date())
     .filter(benchmark => toBoolean_(benchmark.Active));
 }
 
+// I find valid active benchmarks for the selected staff member, class, and student.
 function lookupBenchmarks(filters, force) {
   return withRowsCache_(() => {
     filters = filters || {};
@@ -159,6 +179,7 @@ function lookupBenchmarks(filters, force) {
     const selected = studentIds.filter(id => enrolled.has(id));
     if (!selected.length) throw new Error('Select at least one student enrolled in this class.');
 
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => {
       const students = indexBy_(activeRows_('Students'), 'Id');
       const subjectId = String(classRow.SubjectId);
@@ -224,6 +245,7 @@ function lookupBenchmarks(filters, force) {
   });
 }
 
+// I build active goal entry comparison index.
 function buildActiveGoalEntryComparisonIndex_(benchmarks, entriesByBenchmark) {
   const goals = {};
   (benchmarks || []).forEach(benchmark => {
@@ -266,6 +288,7 @@ function buildActiveGoalEntryComparisonIndex_(benchmarks, entriesByBenchmark) {
   }, {});
 }
 
+// I validate and save benchmark entry.
 function saveBenchmarkEntry(payload) {
   payload = payload || {};
   const result = saveBenchmarkEntriesBatch({
@@ -282,6 +305,7 @@ function saveBenchmarkEntry(payload) {
   };
 }
 
+// I return the newest recoverable observation queue owned by the signed-in staff member.
 function getObservationDraft() {
   return withRowsCache_(() => {
     const email = getCurrentUserEmail_();
@@ -290,6 +314,7 @@ function getObservationDraft() {
   });
 }
 
+// I collect and return observation draft.
 function getObservationDraft_(email) {
   const cutoff = new Date().getTime() - (30 * 24 * 60 * 60 * 1000);
   const draftRows = rows_('ObservationDrafts')
@@ -326,6 +351,10 @@ function getObservationDraft_(email) {
   };
 }
 
+// I safely replace the signed-in staff member’s server draft with the latest browser
+// queue.
+
+// I safely replace the signed-in staff member’s server draft with the latest browser queue.
 function saveObservationDraft(payload) {
   const email = getCurrentUserEmail_();
   requireAuthorizedStaff_(email);
@@ -380,6 +409,7 @@ function saveObservationDraft(payload) {
   }
 }
 
+// I clear a submitted server draft only when its batch ID matches the completed queue.
 function clearObservationDraft(submissionBatchId) {
   const email = getCurrentUserEmail_();
   requireAuthorizedStaff_(email);
@@ -402,6 +432,7 @@ function clearObservationDraft(submissionBatchId) {
   }
 }
 
+// I clear observation draft unlocked.
 function clearObservationDraftUnlocked_(email, batchId) {
   invalidateRowsCache_('ObservationDrafts');
   replaceRowsUnlocked_(
@@ -413,6 +444,7 @@ function clearObservationDraftUnlocked_(email, batchId) {
   );
 }
 
+// I validate and save a queued observation batch once, even when the browser retries it.
 function saveBenchmarkEntriesBatch(payload) {
   payload = payload || {};
   const email = getCurrentUserEmail_();
@@ -491,6 +523,7 @@ function saveBenchmarkEntriesBatch(payload) {
   }
 }
 
+// I validate a queued batch and show what would be saved without changing the database.
 function previewBenchmarkEntriesBatch(payload) {
   payload = payload || {};
   const staff = requireAuthorizedStaff_(getCurrentUserEmail_());
@@ -520,6 +553,7 @@ function previewBenchmarkEntriesBatch(payload) {
   };
 }
 
+// I check the rules for observation batch.
 function validateObservationBatch_(items, staff, batchId, fingerprint) {
   const errors = [];
   const conflicts = [];
@@ -650,12 +684,15 @@ function validateObservationBatch_(items, staff, batchId, fingerprint) {
   return { ok: true, records: records };
 }
 
+// I collect and return completed observation batch.
 function getCompletedObservationBatch_(batchId) {
   return rows_('BenchmarkEntries')
     .filter(row => String(row.SubmissionBatchId) === String(batchId))
     .sort((a, b) => a._row - b._row);
 }
 
+// I keep the completed observation batch result rule in one place so it is used
+// consistently.
 function completedObservationBatchResult_(batchId, entries, expectedCount, fingerprint) {
   const savedFingerprints = Array.from(new Set(
     entries.map(entry => String(entry.SubmissionFingerprint || '')).filter(Boolean)
@@ -685,6 +722,7 @@ function completedObservationBatchResult_(batchId, entries, expectedCount, finge
   };
 }
 
+// I keep the observation batch fingerprint rule in one place so it is used consistently.
 function observationBatchFingerprint_(items) {
   const normalized = (items || []).map(item => ({
     benchmarkId: String(item && item.benchmarkId || ''),
@@ -703,6 +741,7 @@ function observationBatchFingerprint_(items) {
   ).map(value => ((value + 256) % 256).toString(16).padStart(2, '0')).join('');
 }
 
+// I preserve the original observation and save an auditable correction record.
 function correctBenchmarkEntry(payload) {
   payload = payload || {};
   const staff = requireCaseManager_();
@@ -784,6 +823,7 @@ function correctBenchmarkEntry(payload) {
   }
 }
 
+// I validate and save benchmark.
 function saveBenchmark(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
@@ -898,6 +938,7 @@ function saveBenchmark(payload) {
   return { ok: true, id: record.Id, message: 'Benchmark created.' };
 }
 
+// I remove benchmark.
 function deleteBenchmark(benchmarkId) {
   const staff = requireCaseManager_();
   const benchmark = findOne_('Benchmarks', row => String(row.Id) === String(benchmarkId));
@@ -912,6 +953,7 @@ function deleteBenchmark(benchmarkId) {
   return { ok: true };
 }
 
+// I collect and return benchmark progress.
 function getBenchmarkProgress(benchmarkId, force) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -922,6 +964,7 @@ function getBenchmarkProgress(benchmarkId, force) {
         normalizeEmail_(student.CaseManagerEmail) !== normalizeEmail_(staff.Email)) {
       throw new Error('You can only view progress for your assigned students.');
     }
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => {
       const entries = rows_('BenchmarkEntries')
         .filter(row => String(row.BenchmarkId) === String(benchmarkId))
@@ -962,6 +1005,7 @@ function getBenchmarkProgress(benchmarkId, force) {
   });
 }
 
+// I collect and return critical benchmarks.
 function getCriticalBenchmarks_(staff) {
   const students = indexBy_(activeRows_('Students'), 'Id');
   return getCurrentActiveBenchmarks_()
@@ -974,6 +1018,7 @@ function getCriticalBenchmarks_(staff) {
     .slice(0, 12);
 }
 
+// I return a browser-safe copy of benchmark.
 function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   const subjects = getSubjectIndex_();
   const subjectIds = Array.from(new Set(
@@ -1075,6 +1120,7 @@ function publicBenchmark_(row, student, lastEntry, entryCount, entries) {
   };
 }
 
+// I keep the application benchmark text rule in one place so it is used consistently.
 function applicationBenchmarkText_(value, orderIndex) {
   return String(value || '').replace(
     /^\s*(?:STO|Short\s*[-–—]?\s*Term\s+Objective|Objective|Phase|Benchmark)\s*#?\s*\d+\s*[:\-–—.]?\s*/i,
@@ -1082,12 +1128,14 @@ function applicationBenchmarkText_(value, orderIndex) {
   );
 }
 
+// I check whether use any observation class.
 function canUseAnyObservationClass_(staff) {
   return staff.Role === VOICES.ROLES.AIDE ||
     staff.Role === VOICES.ROLES.CASE_MANAGER ||
     toBoolean_(staff.IsAdmin);
 }
 
+// I stop the action unless I can confirm observation class access.
 function assertObservationClassAccess_(staff, classRow) {
   if (canUseAnyObservationClass_(staff)) return;
   const email = normalizeEmail_(staff.Email);
@@ -1098,6 +1146,7 @@ function assertObservationClassAccess_(staff, classRow) {
   if (!assigned) throw new Error('You are not assigned to this class.');
 }
 
+// I collect and return case manager dashboard.
 function getCaseManagerDashboard_(staff, options) {
   options = options || {};
   const goalData = options.includeGoalCatalog === false
@@ -1128,6 +1177,7 @@ function getCaseManagerDashboard_(staff, options) {
   });
 }
 
+// I keep the benchmark matches subject rule in one place so it is used consistently.
 function benchmarkMatchesSubject_(benchmark, subjectId) {
   const selected = String(subjectId || '');
   if (!selected) return false;
@@ -1135,6 +1185,7 @@ function benchmarkMatchesSubject_(benchmark, subjectId) {
   return getBenchmarkSubjectIds_(benchmark.Id).includes(selected);
 }
 
+// I collect and return case manager todos.
 function getCaseManagerTodos_(staff) {
   const email = normalizeEmail_(staff.Email);
   const isAdmin = toBoolean_(staff.IsAdmin);
@@ -1205,6 +1256,7 @@ function getCaseManagerTodos_(staff) {
   return todos;
 }
 
+// I keep the index by rule in one place so it is used consistently.
 function indexBy_(rows, key) {
   return rows.reduce((map, row) => {
     map[String(row[key])] = row;

@@ -1,3 +1,4 @@
+// I validate the fictional training database and its repeatable safety checks here.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

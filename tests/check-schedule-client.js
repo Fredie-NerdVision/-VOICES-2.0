@@ -1,3 +1,4 @@
+// I protect the browser schedule grid, selectors, and teacher-room choices here.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

@@ -1,3 +1,4 @@
+// I check conflict notices and safe replacement suggestions for schedule builders here.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

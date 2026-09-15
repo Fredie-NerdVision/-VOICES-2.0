@@ -1,3 +1,15 @@
+/**
+ * I keep case-manager and administrator tools in this file.
+ *
+ * This includes school messages, branding, staff and student records, class
+ * rosters, availability and time-off review, bulk subjects/classes, email
+ * notices, and school-quarter dates. Every public action checks the current
+ * user's role again on the server before changing data.
+ *
+ * Roster changes only replace ClassStudents rows for the selected class. They
+ * do not delete a student profile, observation history, goal, or IEP record.
+ */
+// I validate and save daily message.
 function saveDailyMessage(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
@@ -26,6 +38,7 @@ function saveDailyMessage(payload) {
   return { ok: true, id: record.Id };
 }
 
+// I collect and return daily messages.
 function getDailyMessages_(dateText) {
   const staffIndex = staffByEmail_();
   return rows_('Messages')
@@ -34,6 +47,7 @@ function getDailyMessages_(dateText) {
     .map(row => publicMessage_(row, staffIndex));
 }
 
+// I collect and return message management data.
 function getMessageManagementData() {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -41,6 +55,7 @@ function getMessageManagementData() {
   });
 }
 
+// I collect and return message management data.
 function getMessageManagementData_(staff) {
   const today = formatDate_(new Date());
   const staffIndex = staffByEmail_();
@@ -59,6 +74,7 @@ function getMessageManagementData_(staff) {
   return result;
 }
 
+// I collect and return admin catalog data.
 function getAdminCatalogData_() {
   const staff = activeRows_('Staff')
     .filter(row =>
@@ -97,6 +113,7 @@ function getAdminCatalogData_() {
   };
 }
 
+// I validate and save school quarter boundaries.
 function saveSchoolQuarterBoundaries(payload) {
   requireAdmin_();
   const boundaries = Array.isArray(payload && payload.boundaries)
@@ -129,6 +146,7 @@ function saveSchoolQuarterBoundaries(payload) {
   }
 }
 
+// I install the approved automation for missing benchmark observation trigger.
 function installMissingBenchmarkObservationTrigger() {
   requireAdmin_();
   ScriptApp.getProjectTriggers()
@@ -144,11 +162,13 @@ function installMissingBenchmarkObservationTrigger() {
   return { ok: true, handler: 'checkMissingBenchmarkObservations' };
 }
 
+// I prepare a no-change preview of admin catalog batch.
 function previewAdminCatalogBatch(payload) {
   requireAdmin_();
   return validateAdminCatalogBatch_(payload);
 }
 
+// I validate and save admin catalog batch.
 function saveAdminCatalogBatch(payload) {
   requireAdmin_();
   const validation = validateAdminCatalogBatch_(payload);
@@ -218,6 +238,7 @@ function saveAdminCatalogBatch(payload) {
   }
 }
 
+// I check the rules for admin catalog batch.
 function validateAdminCatalogBatch_(payload) {
   payload = payload || {};
   const sourceSubjects = Array.isArray(payload.subjects) ? payload.subjects : [];
@@ -339,10 +360,12 @@ function validateAdminCatalogBatch_(payload) {
   };
 }
 
+// I clean and standardize catalog name.
 function normalizeCatalogName_(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+// I set daily message active.
 function setDailyMessageActive(payload) {
   requireCaseManager_();
   payload = payload || {};
@@ -354,6 +377,7 @@ function setDailyMessageActive(payload) {
   return { ok: true };
 }
 
+// I keep the staff by email rule in one place so it is used consistently.
 function staffByEmail_() {
   return rows_('Staff').reduce((map, row) => {
     map[normalizeEmail_(row.Email)] = row;
@@ -361,6 +385,7 @@ function staffByEmail_() {
   }, {});
 }
 
+// I return a browser-safe copy of message.
 function publicMessage_(row, staffIndex) {
   const creator = staffIndex[normalizeEmail_(row.CreatedBy)];
   const fallback = String(row.CreatedBy || '').split('@')[0];
@@ -379,6 +404,7 @@ function publicMessage_(row, staffIndex) {
   };
 }
 
+// I validate and save branding logo.
 function saveBrandingLogo(payload) {
   requireCaseManager_();
   payload = payload || {};
@@ -412,6 +438,7 @@ function saveBrandingLogo(payload) {
   return { ok: true, logo: dataUriFromFile_(file) };
 }
 
+// I collect and return branding logo.
 function getBrandingLogo_(useDefault) {
   const fileId = PropertiesService.getScriptProperties().getProperty(VOICES.LOGO_FILE_PROPERTY);
   if (!fileId) return useDefault === false ? '' : getDefaultLogoDataUri();
@@ -422,17 +449,20 @@ function getBrandingLogo_(useDefault) {
   }
 }
 
+// I keep the data uri from file rule in one place so it is used consistently.
 function dataUriFromFile_(file) {
   const blob = file.getBlob();
   return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
 }
 
+// I collect and return or create app folder.
 function getOrCreateAppFolder_() {
   const name = 'VOICES 2.2 App Files';
   const folders = DriveApp.getFoldersByName(name);
   return folders.hasNext() ? folders.next() : DriveApp.createFolder(name);
 }
 
+// I collect and return staff request data.
 function getStaffRequestData_() {
   const staff = activeRows_('Staff').reduce((map, row) => {
     map[normalizeEmail_(row.Email)] = row;
@@ -492,6 +522,7 @@ function getStaffRequestData_() {
   };
 }
 
+// I collect and return staff request data.
 function getStaffRequestData() {
   return withRowsCache_(() => {
     requireCaseManager_();
@@ -499,10 +530,12 @@ function getStaffRequestData() {
   });
 }
 
+// I keep the availability day order rule in one place so it is used consistently.
 function availabilityDayOrder_(day) {
   return ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'].indexOf(day);
 }
 
+// I review staff request.
 function reviewStaffRequest(payload) {
   const reviewer = requireCaseManager_();
   payload = payload || {};
@@ -538,6 +571,7 @@ function reviewStaffRequest(payload) {
   return { ok: true };
 }
 
+// I add a new record or update the matching staff.
 function upsertStaff(payload) {
   const actor = requireCaseManager_();
   payload = payload || {};
@@ -589,6 +623,7 @@ function upsertStaff(payload) {
   return { ok: true, id: record.Id };
 }
 
+// I remove staff.
 function deleteStaff(email) {
   const actor = requireCaseManager_();
   const normalizedEmail = normalizeEmail_(email);
@@ -605,6 +640,7 @@ function deleteStaff(email) {
   return { ok: true };
 }
 
+// I add a new record or update the matching student.
 function upsertStudent(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
@@ -642,6 +678,7 @@ function upsertStudent(payload) {
   return { ok: true, id: record.Id };
 }
 
+// I remove student.
 function deleteStudent(studentId) {
   const staff = requireCaseManager_();
   const student = findOne_('Students', row => String(row.Id) === String(studentId));
@@ -655,6 +692,7 @@ function deleteStudent(studentId) {
   return { ok: true };
 }
 
+// I collect and return class roster data.
 function getClassRosterData_(staff) {
   const email = normalizeEmail_(staff.Email);
   const isAdmin = toBoolean_(staff.IsAdmin);
@@ -688,6 +726,8 @@ function getClassRosterData_(staff) {
   };
 }
 
+// I replace one class roster with validated active students without deleting student
+// records.
 function saveClassRoster(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
@@ -748,6 +788,7 @@ function saveClassRoster(payload) {
   }
 }
 
+// I send email.
 function sendEmail_(to, subject, body) {
   const recipients = String(to || '').split(',').map(normalizeEmail_).filter(Boolean);
   if (!recipients.length) return;
@@ -759,6 +800,7 @@ function sendEmail_(to, subject, body) {
   });
 }
 
+// I keep the case manager emails rule in one place so it is used consistently.
 function caseManagerEmails_() {
   const configured = String(settingsMap_().CaseManagerAlertEmails || '')
     .split(',')

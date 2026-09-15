@@ -1,3 +1,4 @@
+// I compile every server file and browser script here before any Apps Script deployment.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

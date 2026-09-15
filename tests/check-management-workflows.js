@@ -1,3 +1,4 @@
+// I protect case-manager and administrator editing workflows from accidental removal here.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

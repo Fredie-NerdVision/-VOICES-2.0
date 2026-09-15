@@ -1,3 +1,4 @@
+// I protect the main V.O.I.C.E.S 2.3 goal, observation, phase, and migration behaviors here.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -36,7 +37,7 @@ if (!database.includes('function upgradeVoices23Database()')) {
   throw new Error('The 2.3 migration entry point is missing.');
 }
 const migrationSource = database.match(
-  /function migrateVoices23Data_\(\) \{([\s\S]*?)\n\}\n\nfunction validateVoices23Database_/
+  /function migrateVoices23Data_\(\) \{([\s\S]*?)\n\}\n(?:\s*\/\/[^\n]*\n)*\s*function validateVoices23Database_/
 );
 if (!migrationSource ||
     (migrationSource[1].match(/rows_\('GoalPhaseHistory'\)/g) || []).length !== 1 ||

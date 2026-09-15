@@ -1,3 +1,4 @@
+// I confirm an empty sheet is cached correctly instead of being read again and again.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');

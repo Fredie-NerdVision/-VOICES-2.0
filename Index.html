@@ -1,9 +1,23 @@
 <!DOCTYPE html>
+<!--
+  I keep the complete browser side of V.O.I.C.E.S in this file.
+
+  The style section controls the Westminster look and responsive layout. The
+  page markup holds the header, work areas, and reusable dialogs. The script
+  section stores temporary browser state, asks Apps Script for data, draws
+  each role's workspace, validates forms, protects unsaved observations, and
+  locks the screen after 30 minutes without activity.
+
+  This page never trusts itself to authorize access. Every important read or
+  write goes through google.script.run, and the Apps Script server checks the
+  signed-in Google Workspace account and Staff permissions again.
+-->
 <html>
 <head>
   <base target="_top">
   <meta charset="utf-8">
   <style>
+    /* I define shared colors, spacing, shadows, and sizes once here. */
     :root {
       color-scheme: dark;
       --bg: #08090b;
@@ -468,7 +482,8 @@
     }
   </style>
 </head>
-<body data-app-url="<?= appUrl ?>" data-account-selection-token="<?= accountSelectionToken ?>" data-kiosk-login-url="<?= kioskLoginUrl ?>" data-kiosk-enrollment="<?= kioskEnrollment ?>" data-kiosk-session-token="<?= kioskSessionToken ?>" data-kiosk-session-error="<?= kioskSessionError ?>">
+<body data-app-url="<?= appUrl ?>" data-account-selection-token="<?= accountSelectionToken ?>">
+  <!-- I keep the app covered until a school account is checked successfully. -->
   <div id="loading" class="loading">
     <div class="loading-inner">
       <img id="loadingLogo" class="loading-logo" src="<?!= defaultLogo ?>" alt="V.O.I.C.E.S logo">
@@ -483,6 +498,7 @@
     </div>
   </div>
 
+  <!-- I replace the contents of these work areas when the user changes tabs. -->
   <main class="shell">
     <header class="topbar">
       <div class="brand">
@@ -512,6 +528,7 @@
     <div class="busy-card"><span class="spinner"></span><div><strong id="busyMessage">Working…</strong><div class="muted small">Please wait. Controls are temporarily locked.</div></div></div>
   </div>
 
+  <!-- I reuse these dialogs for forms that should stay focused and accessible. -->
   <dialog id="callOffDialog">
     <div class="card-header">
       <div><div class="eyebrow">Staff absence</div><h2>Call off</h2></div>
@@ -664,6 +681,11 @@
   </dialog>
 
   <script>
+    /*
+     * I keep browser-only behavior below. The state object is temporary: it
+     * remembers the open tab, loaded data, drafts, and editing choices while
+     * this page is open. Permanent records are always saved by server calls.
+     */
     const state = {
       data: null,
       selectedTab: 'overview',
@@ -705,10 +727,6 @@
     const OBSERVATION_DRAFT_STORAGE_VERSION = 1;
     const IDLE_LOCK_MS = 30 * 60 * 1000;
     const IDLE_WARNING_MS = 28 * 60 * 1000;
-    const KIOSK_DEVICE_KEY = 'voices-kiosk-device';
-    const KIOSK_SESSION_KEY = 'voices-kiosk-session';
-    const KIOSK_SESSION_REFRESH_MS = 10 * 60 * 1000;
-    let kioskSessionRefreshedAt = 0;
     let observationDraftTimer = null;
     let observationDraftRetryCount = 0;
     let idleWarningTimer = null;
@@ -722,23 +740,13 @@
       event.returnValue = '';
     });
 
+    // I connect the page controls, restore safe local state, and wait for the user to enter
+    // the workspace.
     async function init() {
       bindStaticForms();
       renderAvailabilityDays();
-      enrollKioskDevice_();
-      const kioskHandoff = consumeKioskSessionHandoff_();
-      renderAccessActions_();
-      document.getElementById('continueWithGoogle').addEventListener('click', () => {
-        if (isKioskDevice_() && !kioskSession_()) {
-          startKioskLogin_();
-          return;
-        }
-        if (isKioskDevice_()) {
-          enterWorkspace_();
-          return;
-        }
-        chooseGoogleAccount_();
-      });
+      document.getElementById('switchGoogleAccount').href = accountChooserUrl_();
+      document.getElementById('continueWithGoogle').addEventListener('click', chooseGoogleAccount_);
       document.getElementById('lockApp').addEventListener('click', () => lockWorkspace_(false));
       document.getElementById('globalRefresh').addEventListener('click', async () => {
         try {
@@ -765,18 +773,7 @@
       });
       const accountSelectionToken = String(document.body.dataset.accountSelectionToken || '');
       const consumedTokenKey = 'voices-account-selection:' + accountSelectionToken;
-      if (kioskHandoff.error) {
-        document.getElementById('accessStatus').textContent = kioskHandoff.error;
-      } else if (isKioskDevice_()) {
-        if (kioskHandoff.completed && kioskSession_()) {
-          document.getElementById('accessStatus').innerHTML =
-            'Verifying your school Google account<span class="loading-dots"></span>';
-          enterWorkspace_();
-        } else {
-          clearKioskSession_();
-          renderAccessActions_();
-        }
-      } else if (accountSelectionToken && !sessionStorage.getItem(consumedTokenKey)) {
+      if (accountSelectionToken && !sessionStorage.getItem(consumedTokenKey)) {
         sessionStorage.setItem(consumedTokenKey, '1');
         document.getElementById('accessStatus').innerHTML =
           'Verifying the selected Workspace account<span class="loading-dots"></span>';
@@ -784,95 +781,8 @@
       }
     }
 
-    function isKioskDevice_() {
-      try {
-        return localStorage.getItem(KIOSK_DEVICE_KEY) === '1' && Boolean(kioskLoginUrl_());
-      } catch (error) {
-        return false;
-      }
-    }
-
-    function kioskLoginUrl_() {
-      return String(document.body.dataset.kioskLoginUrl || '');
-    }
-
-    function enrollKioskDevice_() {
-      const requested = String(document.body.dataset.kioskEnrollment || '').toLowerCase();
-      try {
-        if (requested === '1' || requested === 'true' || requested === 'on') {
-          localStorage.setItem(KIOSK_DEVICE_KEY, '1');
-        } else if (requested === '0' || requested === 'false' || requested === 'off') {
-          localStorage.removeItem(KIOSK_DEVICE_KEY);
-          clearKioskSession_();
-        }
-      } catch (error) { /* private browsing */ }
-    }
-
-    function kioskSession_() {
-      try {
-        return sessionStorage.getItem(KIOSK_SESSION_KEY) || '';
-      } catch (error) {
-        return '';
-      }
-    }
-
-    function setKioskSession_(token) {
-      try {
-        sessionStorage.setItem(KIOSK_SESSION_KEY, token);
-        kioskSessionRefreshedAt = Date.now();
-      } catch (error) { /* private browsing */ }
-    }
-
-    function clearKioskSession_() {
-      try { sessionStorage.removeItem(KIOSK_SESSION_KEY); } catch (error) { /* ignore */ }
-      kioskSessionRefreshedAt = 0;
-    }
-
-    function startKioskLogin_() {
-      const url = kioskLoginUrl_();
-      if (!url) {
-        toast('Shared-device sign-in is not configured for this deployment.', true);
-        return;
-      }
-      clearKioskSession_();
-      window.top.location.href = url;
-    }
-
-    function consumeKioskSessionHandoff_() {
-      const token = String(document.body.dataset.kioskSessionToken || '');
-      const failure = String(document.body.dataset.kioskSessionError || '');
-      if (!token && !failure) return { completed: false, error: '' };
-      try {
-        localStorage.setItem(KIOSK_DEVICE_KEY, '1');
-      } catch (error) { /* private browsing */ }
-      if (token) setKioskSession_(token);
-      if (window.google && google.script && google.script.history) {
-        google.script.history.replace({}, {}, '');
-      }
-      return { completed: Boolean(token), error: failure || '' };
-    }
-
-    function renderAccessActions_() {
-      const switcher = document.getElementById('switchGoogleAccount');
-      const primary = document.getElementById('continueWithGoogle');
-      if (isKioskDevice_()) {
-        primary.textContent = kioskSession_()
-          ? 'Resume V.O.I.C.E.S'
-          : 'Sign in with your school Google account';
-        document.getElementById('accessDescription').textContent =
-          'This is a shared device. Sign in with your own school Google account; only V.O.I.C.E.S access is granted.';
-        switcher.textContent = 'Use a different school account';
-        switcher.href = '#';
-        switcher.removeAttribute('target');
-        switcher.onclick = event => {
-          event.preventDefault();
-          startKioskLogin_();
-        };
-        return;
-      }
-      switcher.href = accountChooserUrl_();
-    }
-
+    // I build the normal Google account chooser return path used before Workspace
+    // verification.
     function accountChooserUrl_() {
       const configuredUrl = String(document.body.dataset.appUrl || '');
       const appUrl = configuredUrl.startsWith('http')
@@ -885,10 +795,12 @@
         encodeURIComponent(returnUrl);
     }
 
+    // I preserve unsaved observations, then send the browser to Google’s account chooser.
     function chooseGoogleAccount_() {
       window.top.location.href = accountChooserUrl_();
     }
 
+    // I ask the server to identify the active Workspace account and load its allowed role.
     async function enterWorkspace_() {
       const button = document.getElementById('continueWithGoogle');
       button.disabled = true;
@@ -922,10 +834,10 @@
       }
     }
 
+    // I keep the record user activity rule in one place so it is used consistently.
     function recordUserActivity_() {
       if (!state.data || state.isLocked) return;
       state.lastActivityAt = Date.now();
-      maybeRefreshKioskSession_();
       window.clearTimeout(idleWarningTimer);
       window.clearTimeout(idleLockTimer);
       idleWarningTimer = window.setTimeout(() => {
@@ -934,11 +846,12 @@
       idleLockTimer = window.setTimeout(() => lockWorkspace_(true), IDLE_LOCK_MS);
     }
 
+    // I preserve queued observations, hide private information, and return to the entry
+    // screen.
     function lockWorkspace_(automatic) {
       if (!state.data || state.isLocked) return;
       if (state.observationQueue.length) persistObservationQueue_();
       state.isLocked = true;
-      if (isKioskDevice_()) clearKioskSession_();
       window.clearTimeout(idleWarningTimer);
       window.clearTimeout(idleLockTimer);
       document.querySelectorAll('dialog[open]').forEach(dialog => closeDialog(dialog.id));
@@ -951,14 +864,10 @@
       document.getElementById('continueWithGoogle').textContent = 'Resume V.O.I.C.E.S';
       document.getElementById('accessStatus').textContent =
         'Choose the next user’s Google account. Google asks for a password only when needed.';
-      renderAccessActions_();
-      if (isKioskDevice_()) {
-        document.getElementById('accessStatus').textContent =
-          'Sign in with your own school Google account to resume.';
-      }
       document.getElementById('loading').classList.remove('done');
     }
 
+    // I draw aide.
     function renderAide() {
       const root = document.getElementById('aideView');
       root.classList.remove('hidden');
@@ -1032,6 +941,7 @@
       bindAideEvents();
     }
 
+    // I draw case manager.
     function renderCaseManager() {
       const root = document.getElementById('caseManagerView');
       if (!state.data.caseManager) {
@@ -1060,6 +970,7 @@
       renderCaseManagerTab();
     }
 
+    // I draw case manager tab.
     async function renderCaseManagerTab() {
       const content = document.getElementById('cmContent');
       const tab = state.selectedTab;
@@ -1092,6 +1003,7 @@
       if (tab === 'admin') renderAdmin(content);
     }
 
+    // I make sure case manager tab data.
     async function ensureCaseManagerTabData(tab, force) {
       if (!force && state.caseManagerDataLoaded[tab]) return;
       if (!force) {
@@ -1127,6 +1039,7 @@
       state.caseManagerDataLoaded[tab] = true;
     }
 
+    // I load case manager workspace.
     async function loadCaseManagerWorkspace(force) {
       if (!force && state.caseManagerWorkspacePromise) {
         return state.caseManagerWorkspacePromise;
@@ -1179,6 +1092,7 @@
       return request;
     }
 
+    // I draw data entry.
     function renderDataEntry(root) {
       root.innerHTML = `
         <article class="card">
@@ -1188,6 +1102,7 @@
       bindBenchmarkLookup();
     }
 
+    // I draw overview.
     function renderOverview(root) {
       const cm = state.data.caseManager;
       const messages = safeArray(state.data.dailyMessages);
@@ -1241,6 +1156,7 @@
       if (state.goalStudentId) loadGoalWorkspace(state.goalStudentId);
     }
 
+    // I draw case manager todos.
     function renderCaseManagerTodos() {
       const items = safeArray(state.data && state.data.caseManager && state.data.caseManager.toDos);
       const count = document.getElementById('caseManagerTodoCount');
@@ -1254,6 +1170,7 @@
         </div>`).join('') : '<div class="empty">Nothing needs attention.</div>';
     }
 
+    // I draw schedule shell.
     function renderScheduleShell(root) {
       root.innerHTML = `
         <article class="card">
@@ -1281,6 +1198,7 @@
       loadScheduleTypeSummaries();
     }
 
+    // I load schedule type summaries.
     async function loadScheduleTypeSummaries(force) {
       const select = document.getElementById('scheduleTemplate');
       if (!select) return;
@@ -1303,6 +1221,7 @@
       }
     }
 
+    // I keep the shift schedule date rule in one place so it is used consistently.
     function shiftScheduleDate(days) {
       const input = document.getElementById('scheduleDate');
       const date = new Date((input.value || state.data.today) + 'T12:00:00');
@@ -1312,6 +1231,7 @@
       loadScheduleBuilder();
     }
 
+    // I load schedule builder.
     async function loadScheduleBuilder(force) {
       force = force === true;
       const date = document.getElementById('scheduleDate').value;
@@ -1356,6 +1276,7 @@
       }
     }
 
+    // I keep the request schedule data rule in one place so it is used consistently.
     function requestScheduleData(date, templateId, force) {
       const cacheKey = date + '|' + templateId;
       if (!force && state.scheduleDataCache[cacheKey]) {
@@ -1381,6 +1302,7 @@
       return request;
     }
 
+    // I keep the prewarm default schedule rule in one place so it is used consistently.
     function prewarmDefaultSchedule() {
       if (!state.data || state.data.view !== 'CASE_MANAGER') return;
       const defaultType = safeArray(state.data.caseManager.scheduleTypes)
@@ -1390,6 +1312,7 @@
         .catch(() => {});
     }
 
+    // I draw schedule workspace.
     function renderScheduleWorkspace() {
       const data = state.scheduleData;
       const workspace = document.getElementById('scheduleWorkspace');
@@ -1444,6 +1367,7 @@
       document.getElementById('saveScheduleType').addEventListener('click', saveCurrentAsScheduleType);
     }
 
+    // I clean and standardize week data.
     function normalizeWeekData(value) {
       value = value && typeof value === 'object' ? value : {};
       value.days = safeArray(value.days).map(day => Object.assign({}, day || {}, {
@@ -1461,6 +1385,7 @@
       return value;
     }
 
+    // I draw schedule week bar.
     function renderScheduleWeekBar(week, activeDate) {
       return `<div class="week-bar">${safeArray(week.days).map(day => {
         const totalHours = safeArray(week.summary.aides).reduce((total, aide) => {
@@ -1476,6 +1401,7 @@
       }).join('')}</div>`;
     }
 
+    // I connect page controls for schedule week days.
     function bindScheduleWeekDays() {
       document.querySelectorAll('[data-schedule-day]').forEach(button => button.addEventListener('click', () => {
         document.getElementById('scheduleDate').value = button.dataset.scheduleDay;
@@ -1484,6 +1410,7 @@
       }));
     }
 
+    // I draw capacity summary.
     function renderCapacitySummary(summary) {
       summary = summary || {};
       const aides = safeArray(summary.aides);
@@ -1502,10 +1429,12 @@
         }).join('')}</div>`;
     }
 
+    // I schedule source label.
     function scheduleSourceLabel(value) {
       return value === 'DAY' ? 'Saved day' : value === 'TEMPLATE' ? 'Template' : value === 'DRAFT' ? 'Unsaved' : 'No schedule';
     }
 
+    // I format short date.
     function formatShortDate(value) {
       const date = new Date(String(value || '') + 'T12:00:00');
       return Number.isNaN(date.getTime())
@@ -1513,14 +1442,17 @@
         : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     }
 
+    // I format date range.
     function formatDateRange(start, end) {
       return `${formatShortDate(start)}–${formatShortDate(end)}`;
     }
 
+    // I round client hours.
     function roundClientHours(value) {
       return Math.round(Number(value || 0) * 100) / 100;
     }
 
+    // I schedule draft changed.
     function scheduleDraftChanged() {
       if (!state.scheduleData || !document.getElementById('scheduleTable')) return;
       state.scheduleData.schedule.assignments = collectScheduleAssignments();
@@ -1535,6 +1467,7 @@
       }
     }
 
+    // I validate and submit schedule changes.
     async function submitScheduleChanges_() {
       const summary = await previewScheduleWeek();
       if (!summary) return;
@@ -1546,6 +1479,7 @@
       toast('Draft recalculated. The schedule has not been saved.');
     }
 
+    // I prepare a no-change preview of schedule week.
     async function previewScheduleWeek() {
       if (!state.scheduleData || !document.getElementById('scheduleTable')) return null;
       const payload = currentSchedulePayload();
@@ -1566,6 +1500,7 @@
       }
     }
 
+    // I draw schedule table.
     function renderScheduleTable() {
       const data = state.scheduleData;
       const table = document.getElementById('scheduleTable');
@@ -1634,6 +1569,7 @@
       updateScheduleHeaderHours_();
     }
 
+    // I set up schedule grid navigation.
     function setupScheduleGridNavigation(scrollLeft) {
       const table = document.getElementById('scheduleTable');
       const tableWrap = document.getElementById('scheduleTableWrap');
@@ -1661,11 +1597,13 @@
         syncing = false;
       };
 
+      // I keep the scroll distance rule in one place so it is used consistently.
       const scrollDistance = () => Math.max(320, Math.round(tableWrap.clientWidth * .7));
       if (leftButton) leftButton.onclick = () => tableWrap.scrollBy({ left: -scrollDistance(), behavior: 'smooth' });
       if (rightButton) rightButton.onclick = () => tableWrap.scrollBy({ left: scrollDistance(), behavior: 'smooth' });
     }
 
+    // I draw schedule cell.
     function renderScheduleCell(period, aide) {
       const assignment = state.scheduleData.schedule.assignments.find(item =>
         String(item.periodId) === String(period.periodId) && normalizeEmail(item.aideEmail) === normalizeEmail(aide.email)
@@ -1689,6 +1627,7 @@
       </td>`;
     }
 
+    // I schedule select markup.
     function scheduleSelectMarkup_(field, items, emptyLabel, selectedId, blocked) {
       const selected = safeArray(items).find(item =>
         String(item.id) === String(selectedId || '')
@@ -1699,11 +1638,13 @@
       </select>`;
     }
 
+    // I schedule class option key.
     function scheduleClassOptionKey_(item) {
       const name = String(item && item.name || '').trim().toLowerCase();
       return name || 'class:' + String(item && item.id || '');
     }
 
+    // I schedule class options for period.
     function scheduleClassOptionsForPeriod_(periodId, selectedId) {
       const grouped = safeArray(state.scheduleData && state.scheduleData.classes)
         .reduce((index, item) => {
@@ -1720,6 +1661,7 @@
       }).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
     }
 
+    // I add the supporting details needed by schedule options.
     function hydrateScheduleOptions_(select) {
       if (!select || select.dataset.optionsLoaded === 'true') return;
       const selected = select.value;
@@ -1734,6 +1676,7 @@
       select.dataset.optionsLoaded = 'true';
     }
 
+    // I set schedule select value.
     function setScheduleSelectValue_(select, value) {
       if (!select) return;
       let nextValue = value || '';
@@ -1749,6 +1692,7 @@
       select.value = nextValue;
     }
 
+    // I draw schedule aide header.
     function renderScheduleAideHeader(aide) {
       const status = scheduleCellStatus(aide.email, null);
       const shift = scheduleHoursForAide_(aide.email);
@@ -1764,6 +1708,7 @@
         <div class="schedule-header-hours" data-aide-hours="${escapeAttr(aide.email)}">${scheduleHeaderHoursMarkup_(hours)}</div>${availability}${badge}<button class="btn danger small-btn schedule-aide-off" type="button" data-mark-aide-off="${escapeAttr(aide.email)}" aria-label="Mark ${escapeAttr(aide.displayName)} off for all periods">Mark off</button></th>`;
     }
 
+    // I keep the mark schedule aide off rule in one place so it is used consistently.
     async function markScheduleAideOff_(email) {
       const aide = safeArray(state.scheduleData && state.scheduleData.aides)
         .find(item => normalizeEmail(item.email) === normalizeEmail(email));
@@ -1783,6 +1728,7 @@
       toast(`${displayName} is marked OFF for every period in this draft.`);
     }
 
+    // I reload schedule cell status indicators.
     function refreshScheduleCellStatusIndicators_() {
       document.querySelectorAll('.schedule-cell').forEach(cell => {
         const period = safeArray(state.scheduleData.schedule.periods)
@@ -1805,6 +1751,7 @@
       });
     }
 
+    // I update schedule header hours.
     function updateScheduleHeaderHours_() {
       if (!state.scheduleData) return;
       document.querySelectorAll('[data-aide-hours]').forEach(element => {
@@ -1814,11 +1761,13 @@
       });
     }
 
+    // I schedule header hours markup.
     function scheduleHeaderHoursMarkup_(hours) {
       const capacity = hours.capacityHours == null ? '' : `/${roundClientHours(hours.capacityHours)}`;
       return `Day ${roundClientHours(hours.dailyHours)} hrs · Week ${roundClientHours(hours.weeklyHours)}${capacity} hrs${hours.lunchDeducted ? '<div class="muted">0.5 hr lunch deducted</div>' : ''}`;
     }
 
+    // I schedule hours for aide.
     function scheduleHoursForAide_(email, create) {
       let hours = safeArray(state.scheduleData && state.scheduleData.dailyHours)
         .find(item => normalizeEmail(item.aideEmail) === normalizeEmail(email));
@@ -1829,12 +1778,14 @@
       return hours || {};
     }
 
+    // I schedule lunch is in period.
     function scheduleLunchIsInPeriod_(email, period) {
       const lunch = scheduleTimeToMinutes_(scheduleHoursForAide_(email).lunchStartTime);
       return lunch >= scheduleTimeToMinutes_(period.startTime) &&
         lunch < scheduleTimeToMinutes_(period.endTime);
     }
 
+    // I collect schedule daily hours.
     function collectScheduleDailyHours_() {
       const values = safeArray(state.scheduleData.dailyHours).map(item => ({...item}));
       document.querySelectorAll('[data-shift-field]').forEach(input => {
@@ -1861,6 +1812,7 @@
       return values.filter(item => item.startTime || item.endTime);
     }
 
+    // I schedule live hours for aide.
     function scheduleLiveHoursForAide_(email) {
       const shift = scheduleHoursForAide_(email);
       const start = scheduleTimeToMinutes_(shift.startTime);
@@ -1886,6 +1838,7 @@
       };
     }
 
+    // I schedule time to minutes.
     function scheduleTimeToMinutes_(value) {
       const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
       if (!match) return -1;
@@ -1896,6 +1849,7 @@
         : -1;
     }
 
+    // I schedule cell status.
     function scheduleCellStatus(email, period) {
       const staffing = safeArray(state.scheduleData && state.scheduleData.staffingStatus)
         .find(item => normalizeEmail(item.email) === normalizeEmail(email)) || {};
@@ -1944,11 +1898,13 @@
       };
     }
 
+    // I schedule minutes to time.
     function scheduleMinutesToTime_(minutes) {
       return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' +
         String(minutes % 60).padStart(2, '0');
     }
 
+    // I draw schedule coverage assistant.
     function renderScheduleCoverageAssistant() {
       const root = document.getElementById('scheduleCoverageAssistant');
       const count = document.getElementById('scheduleCoverageCount');
@@ -2021,6 +1977,7 @@
       );
     }
 
+    // I draw schedule coverage issue.
     function renderScheduleCoverageIssue_(issue, assignments) {
       const candidates = scheduleReplacementCandidates_(issue, assignments).slice(0, 3);
       return `<div class="coverage-assistant-item blocked">
@@ -2036,6 +1993,7 @@
       </div>`;
     }
 
+    // I schedule replacement candidates.
     function scheduleReplacementCandidates_(issue, assignments) {
       const training = safeArray(state.scheduleData.training);
       const period = safeArray(state.scheduleData.schedule.periods)
@@ -2075,6 +2033,7 @@
         );
     }
 
+    // I apply schedule replacement.
     function applyScheduleReplacement_(button) {
       const periodId = button.dataset.periodId;
       const sourceEmail = button.dataset.sourceEmail;
@@ -2107,6 +2066,7 @@
       scheduleDraftChanged();
     }
 
+    // I validate and save schedule from grid.
     async function saveScheduleFromGrid() {
       const payload = currentSchedulePayload();
       try {
@@ -2133,6 +2093,7 @@
       } catch (error) { toast(error.message, true); }
     }
 
+    // I keep the current schedule payload rule in one place so it is used consistently.
     function currentSchedulePayload() {
       return {
         id: state.scheduleData.schedule.id,
@@ -2147,6 +2108,7 @@
       };
     }
 
+    // I schedule assignment counts.
     function scheduleAssignmentCounts_(item) {
       if (!item) return false;
       if (String(item.type || '').toUpperCase() === 'OFF') return false;
@@ -2155,6 +2117,7 @@
         String(item.duty || '').trim() || String(item.note || '').trim());
     }
 
+    // I validate and save current as schedule type.
     async function saveCurrentAsScheduleType() {
       const decision = await requestDialog({
         title: 'Save schedule type',
@@ -2197,6 +2160,7 @@
       } catch (error) { toast(error.message, true); }
     }
 
+    // I collect schedule assignments.
     function collectScheduleAssignments() {
       return Array.from(document.querySelectorAll('.schedule-cell')).map(cell => {
         const values = {};
@@ -2214,6 +2178,7 @@
       }).filter(Boolean);
     }
 
+    // I draw benchmark manager.
     function renderBenchmarkManager(root) {
       if (!state.goalCatalogLoaded) {
         root.innerHTML = '<article class="card empty">Loading goal management data…</article>';
@@ -2353,6 +2318,7 @@
       }));
     }
 
+    // I validate and save goal form.
     async function saveGoalForm(event) {
       event.preventDefault();
       const form = event.currentTarget;
@@ -2406,6 +2372,7 @@
       } catch (error) { toast(error.message, true); }
     }
 
+    // I read and organize goal objectives client.
     function parseGoalObjectivesClient(value) {
       const text = String(value || '').trim();
       if (!text) return [];
@@ -2495,6 +2462,7 @@
       });
     }
 
+    // I draw goal objective preview.
     function renderGoalObjectivePreview(form) {
       const root = document.getElementById('objectivePreview');
       if (!root) return;
@@ -2549,6 +2517,7 @@
       }
     }
 
+    // I reload goal manager data.
     async function refreshGoalManagerData(studentId, force) {
       const selectedStudentId = studentId === undefined
         ? state.benchmarkStudentId
@@ -2572,6 +2541,7 @@
       renderBenchmarkManager(document.getElementById('cmContent'));
     }
 
+    // I draw IEP.
     async function renderIeps(root) {
       root.innerHTML = '<article class="card empty">Loading IEPs…</article>';
       try {
@@ -2616,6 +2586,7 @@
       }
     }
 
+    // I draw people.
     function renderPeople(root) {
       const cm = state.data.caseManager;
       const staff = safeArray(cm.staff);
@@ -2768,6 +2739,7 @@
       }));
     }
 
+    // I draw requests.
     function renderRequests(root) {
       const data = state.data.caseManager.requests || {};
       const pending = safeArray(data.pending);
@@ -2816,6 +2788,7 @@
       }));
     }
 
+    // I draw admin.
     function renderAdmin(root) {
       const management = state.data.caseManager.messages || { messages: [], activeToday: [] };
       const messages = safeArray(management.messages);
@@ -2924,12 +2897,14 @@
       document.getElementById('logoForm').addEventListener('submit', uploadLogo);
     }
 
+    // I read and organize optional tabular rows.
     function parseOptionalTabularRows_(elementId, columns) {
       const value = document.getElementById(elementId).value;
       if (!String(value || '').trim()) return [];
       return parseTabularRows_(value, columns);
     }
 
+    // I prepare a no-change preview of admin catalog.
     async function previewAdminCatalog_() {
       const root = document.getElementById('adminCatalogPreview');
       const saveButton = document.getElementById('saveAdminCatalog');
@@ -2966,6 +2941,7 @@
       }
     }
 
+    // I validate and save admin catalog.
     async function saveAdminCatalog_() {
       const preview = state.adminCatalogPreview;
       if (!preview ||
@@ -3005,6 +2981,7 @@
       }
     }
 
+    // I validate and save quarter boundaries.
     async function saveQuarterBoundaries_(event) {
       event.preventDefault();
       const form = event.currentTarget;
@@ -3021,6 +2998,7 @@
       }
     }
 
+    // I reload message management data.
     async function refreshMessageManagementData() {
       const data = await serverQuiet('getMessageManagementData');
       state.data.caseManager.messages = data;
@@ -3028,6 +3006,7 @@
       renderAdmin(document.getElementById('cmContent'));
     }
 
+    // I keep the upload logo rule in one place so it is used consistently.
     async function uploadLogo(event) {
       event.preventDefault();
       const file = event.currentTarget.elements.logo.files[0];
@@ -3044,12 +3023,14 @@
       } catch (error) { toast(error.message, true); }
     }
 
+    // I connect page controls for aide events.
     function bindAideEvents() {
       bindBenchmarkLookup();
       document.getElementById('clockButton').addEventListener('click', toggleClock);
       document.getElementById('fullScheduleButton').addEventListener('click', showWeeklySchedule);
     }
 
+    // I keep the benchmark lookup markup rule in one place so it is used consistently.
     function benchmarkLookupMarkup() {
       const context = state.data && state.data.benchmarkLookup ? state.data.benchmarkLookup : {};
       const classes = Array.isArray(context.classes) ? context.classes : [];
@@ -3072,6 +3053,7 @@
         </div>`;
     }
 
+    // I connect page controls for benchmark lookup.
     function bindBenchmarkLookup() {
       const teacher = document.getElementById('lookupTeacher');
       const period = document.getElementById('lookupPeriod');
@@ -3085,6 +3067,7 @@
       populateLookupPeriods(state.lookupClassId);
     }
 
+    // I keep the populate lookup periods rule in one place so it is used consistently.
     function populateLookupPeriods(preferredClassId) {
       const context = state.data.benchmarkLookup || {};
       const teacher = document.getElementById('lookupTeacher');
@@ -3098,6 +3081,7 @@
       renderLookupStudents();
     }
 
+    // I draw lookup students.
     function renderLookupStudents() {
       const context = state.data.benchmarkLookup || {};
       const classId = document.getElementById('lookupPeriod')?.value || '';
@@ -3124,6 +3108,7 @@
         : (context.currentClassId ? 'Manual override from your current assignment.' : 'No current assignment was found; choose a class manually.');
     }
 
+    // I find valid active benchmarks for the selected staff member, class, and student.
     async function lookupBenchmarks() {
       const classId = document.getElementById('lookupPeriod')?.value || '';
       const studentIds = Array.from(document.querySelectorAll('#lookupStudents input:checked')).map(input => input.value);
@@ -3134,6 +3119,7 @@
       } catch (error) { toast(error.message, true); }
     }
 
+    // I draw benchmark results.
     function renderBenchmarkResults() {
       const root = document.getElementById('benchmarkResults');
       if (!root) return;
@@ -3210,6 +3196,7 @@
       }));
     }
 
+    // I keep the adjust observation counter rule in one place so it is used consistently.
     function adjustObservationCounter(form, field, delta) {
       if (!form) return;
       const correct = form.elements.correct;
@@ -3225,6 +3212,7 @@
       }
     }
 
+    // I check the rules for observation values.
     function validateObservationValues_(payload) {
       if (!Number.isInteger(payload.correct) || !Number.isInteger(payload.attempts) ||
           payload.correct < 0 || payload.attempts <= 0 || payload.correct > payload.attempts) {
@@ -3243,6 +3231,7 @@
       return '';
     }
 
+    // I draw observation queue.
     function renderObservationQueue() {
       const root = document.getElementById('observationQueuePanel');
       if (!root) return;
@@ -3290,6 +3279,7 @@
       document.getElementById('saveObservationQueue')?.addEventListener('click', submitObservationQueue);
     }
 
+    // I open observation queue editor.
     function openObservationQueueEditor_(localId) {
       const item = state.observationQueue.find(entry => entry.localId === localId);
       if (!item) return;
@@ -3306,6 +3296,7 @@
       openDialog('observationQueueEditDialog');
     }
 
+    // I validate and save observation queue edit.
     function saveObservationQueueEdit_(event) {
       event.preventDefault();
       const payload = formObject(event.currentTarget);
@@ -3335,6 +3326,7 @@
       toast('Queued observation updated.');
     }
 
+    // I keep the download observation queue rule in one place so it is used consistently.
     function downloadObservationQueue_() {
       if (!state.observationQueue.length) return;
       const fields = [
@@ -3347,6 +3339,7 @@
         ['PromptCount', 'actualPromptCount'],
         ['Notes', 'notes']
       ];
+      // I escape one CSV value so spreadsheet programs read the downloaded queue correctly.
       const encode = value => String(value == null ? '' : value)
         .replace(/[\t\r\n]+/g, ' ');
       const rows = [
@@ -3363,6 +3356,7 @@
       URL.revokeObjectURL(link.href);
     }
 
+    // I validate and submit observation queue.
     async function submitObservationQueue() {
       if (!state.observationQueue.length) return;
       const entries = state.observationQueue.map(item => {
@@ -3422,17 +3416,21 @@
       }
     }
 
+    // I create a browser-side unique ID for retry-safe unsaved observations.
     function clientUuid() {
       return globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
         ? globalThis.crypto.randomUUID()
         : 'batch-' + Date.now() + '-' + Math.random().toString(16).slice(2);
     }
 
+    // I keep the observation queue storage key rule in one place so it is used
+    // consistently.
     function observationQueueStorageKey_() {
       const email = state.data && state.data.user ? String(state.data.user.email || '') : '';
       return email ? 'voices-observation-draft:' + email.toLowerCase() : '';
     }
 
+    // I clean and standardize observation draft entries.
     function normalizeObservationDraftEntries_(entries) {
       return safeArray(entries).slice(0, 200).filter(item =>
         item && typeof item === 'object' && !Array.isArray(item) &&
@@ -3457,6 +3455,8 @@
       }));
     }
 
+    // I combine the quick browser draft with the newest server draft without duplicating
+    // entries.
     function restoreObservationQueue_() {
       const storageKey = observationQueueStorageKey_();
       let localDraft = null;
@@ -3507,6 +3507,7 @@
       });
     }
 
+    // I write observation queue to session.
     function writeObservationQueueToSession_() {
       const storageKey = observationQueueStorageKey_();
       if (!storageKey || !state.observationQueue.length || !state.observationBatchId) return;
@@ -3522,6 +3523,7 @@
       }
     }
 
+    // I keep the persist observation queue rule in one place so it is used consistently.
     function persistObservationQueue_() {
       if (!state.observationQueue.length || !state.observationBatchId) return;
       state.observationDraftRevision += 1;
@@ -3531,11 +3533,13 @@
       scheduleObservationDraftSync_(1200);
     }
 
+    // I debounce draft saving so quick queue edits stay fast and do not flood Apps Script.
     function scheduleObservationDraftSync_(delay) {
       window.clearTimeout(observationDraftTimer);
       observationDraftTimer = window.setTimeout(syncObservationDraft_, delay);
     }
 
+    // I copy the current unsaved queue to the server and retry temporary failures safely.
     async function syncObservationDraft_() {
       if (!state.observationQueue.length || !state.observationBatchId) return;
       const revision = state.observationDraftRevision;
@@ -3567,6 +3571,7 @@
       }
     }
 
+    // I clear observation queue persistence.
     function clearObservationQueuePersistence_(batchId) {
       window.clearTimeout(observationDraftTimer);
       observationDraftTimer = null;
@@ -3581,6 +3586,10 @@
       if (batchId) clearObservationDraftWithRetry_(batchId, 0);
     }
 
+    // I clear a completed server draft and retry temporary errors without blocking
+    // success.
+
+    // I clear a completed server draft and retry temporary errors without blocking success.
     function clearObservationDraftWithRetry_(batchId, attempt) {
       serverQuiet('clearObservationDraft', batchId).then(result => {
         if (!result || !result.ok) throw new Error('Draft cleanup was busy.');
@@ -3594,9 +3603,11 @@
       });
     }
 
+    // I read and organize tabular rows.
     function parseTabularRows_(text, columns) {
       const lines = String(text || '').split(/\r?\n/).filter(line => line.trim());
       if (lines.length < 2) throw new Error('Include a header row and at least one data row.');
+      // I clean one draft entry before comparing browser and server copies.
       const normalize = value => String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
       const headers = lines[0].split('\t').map(normalize);
       const indexes = {};
@@ -3615,6 +3626,7 @@
       });
     }
 
+    // I read and organize bulk observation rows.
     function parseBulkObservationRows_() {
       return parseTabularRows_(document.getElementById('bulkObservationText').value, [
         { header: 'BenchmarkId', key: 'benchmarkId', required: true },
@@ -3633,6 +3645,7 @@
       }));
     }
 
+    // I prepare a no-change preview of bulk observations.
     async function previewBulkObservations_() {
       const root = document.getElementById('bulkObservationPreview');
       const queueButton = document.getElementById('queueBulkObservations');
@@ -3662,6 +3675,7 @@
       }
     }
 
+    // I queue bulk observations.
     function queueBulkObservations_() {
       const preview = state.bulkObservationPreview;
       if (!preview || preview.source !== document.getElementById('bulkObservationText').value) {
@@ -3683,6 +3697,7 @@
       toast(`${preview.rows.length} observations added to the queue.`);
     }
 
+    // I read and organize bulk goal rows.
     function parseBulkGoalRows_() {
       return parseTabularRows_(document.getElementById('bulkGoalText').value, [
         { header: 'GoalKey', key: 'goalKey', required: true },
@@ -3712,6 +3727,7 @@
       }));
     }
 
+    // I prepare a no-change preview of bulk goals.
     async function previewBulkGoals_() {
       const root = document.getElementById('bulkGoalPreview');
       const saveButton = document.getElementById('saveBulkGoals');
@@ -3738,6 +3754,7 @@
       }
     }
 
+    // I validate and save bulk goals.
     async function saveBulkGoals_() {
       const preview = state.bulkGoalPreview;
       if (!preview || preview.source !== document.getElementById('bulkGoalText').value) {
@@ -3774,6 +3791,7 @@
       }
     }
 
+    // I switch clock.
     async function toggleClock() {
       const isClockedIn = Boolean(state.data.aide.openTimeEntry);
       try {
@@ -3783,6 +3801,7 @@
       } catch (error) { toast(error.message, true); }
     }
 
+    // I show weekly schedule.
     async function showWeeklySchedule() {
       try {
         state.aideWeekDate = state.aideWeekDate || state.data.today;
@@ -3832,6 +3851,7 @@
       } catch (error) { toast(error.message, true); }
     }
 
+    // I keep the shift aide week rule in one place so it is used consistently.
     function shiftAideWeek(days) {
       const date = new Date((state.aideWeekDate || state.data.today) + 'T12:00:00');
       date.setDate(date.getDate() + days);
@@ -3839,6 +3859,7 @@
       showWeeklySchedule();
     }
 
+    // I load all aides schedule.
     async function loadAllAidesSchedule() {
       const input = document.getElementById('allAidesScheduleDate');
       if (!input || !input.value) return;
@@ -3860,6 +3881,7 @@
       } catch (error) { toast(error.message, true); }
     }
 
+    // I connect page controls for static forms.
     function bindStaticForms() {
       document.getElementById('refreshFullSchedule').addEventListener('click', showWeeklySchedule);
       document.getElementById('previewBulkObservations').addEventListener('click', previewBulkObservations_);
@@ -3923,6 +3945,7 @@
       });
     }
 
+    // I draw availability days.
     function renderAvailabilityDays() {
       const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
       document.getElementById('availabilityDays').innerHTML = days.map(day => `
@@ -3935,6 +3958,7 @@
       }));
     }
 
+    // I draw critical list.
     function renderCriticalList(items) {
       items = safeArray(items);
       return `<div class="list">${items.length ? items.map(item => `
@@ -3942,6 +3966,7 @@
         : '<div class="empty">No benchmarks are marked critical.</div>'}</div>`;
     }
 
+    // I draw time entries.
     function renderTimeEntries(pay) {
       pay = pay || { entries: [], daysOff: [] };
       pay.entries = safeArray(pay.entries);
@@ -3953,6 +3978,7 @@
       </div>`;
     }
 
+    // I draw progress chart.
     function renderProgressChart(progress, rootId) {
       const root = document.getElementById(rootId || 'progressChart');
       if (!root) return;
@@ -3984,7 +4010,9 @@
       const maxValue = metric === 'ACCURACY'
         ? 100
         : Math.max(1, ...values.map(Number), Number(target || 0));
+      // I convert one chart position into its horizontal SVG coordinate.
       const x = index => points.length === 1 ? (left + width - right) / 2 : left + index * ((width - left - right) / (points.length - 1));
+      // I convert one chart value into its vertical SVG coordinate.
       const y = value => plotBottom - (Number(value || 0) / maxValue) * (plotBottom - top);
       const line = points.map((point, index) => {
         const value = metric === 'PROMPT'
@@ -4021,6 +4049,7 @@
       </svg>`;
     }
 
+    // I load goal workspace.
     async function loadGoalWorkspace(studentId, force) {
       const workspace = document.getElementById('goalWorkspace');
       if (!workspace || !studentId) return;
@@ -4036,6 +4065,7 @@
       }
     }
 
+    // I draw goal workspace data.
     function renderGoalWorkspaceData(data) {
       const currentGoals = safeArray(data && data.goals);
       const otherGoals = safeArray(data && data.otherGoals);
@@ -4055,6 +4085,7 @@
       const activeEntryAverage = activeEntryCounts.length
         ? activeEntryCounts.reduce((total, count) => total + count, 0) / activeEntryCounts.length
         : 0;
+      // I build the short mastery-status label shown beside a progress chart.
       const masteryChip = benchmark => {
         const mastery = benchmark && benchmark.mastery;
         if (!mastery || !mastery.available) {
@@ -4196,6 +4227,7 @@
       );
     }
 
+    // I open goal progress report.
     function openGoalProgressReport(data, options) {
       options = options || {};
       const content = document.getElementById('goalReportContent');
@@ -4238,6 +4270,7 @@
       openDialog('goalReportDialog');
     }
 
+    // I draw goal progress chart.
     function renderGoalProgressChart(goals, chart, legend, options) {
       options = options || {};
       const showHistory = Boolean(options.showHistory);
@@ -4304,12 +4337,14 @@
       const maxTime = Math.max(...allPoints.map(point => point.time));
       const width = 980, height = 390, left = 48, right = 24, top = 72, bottom = 62;
       const plotBottom = height - bottom;
+      // I convert one chart position into its horizontal SVG coordinate.
       const x = time => minTime === maxTime
         ? (left + width - right) / 2
         : left + ((time - minTime) / (maxTime - minTime)) * (width - left - right);
       const dateTicks = Array.from({ length: 5 }, (_, index) =>
         minTime + (maxTime - minTime) * (index / 4)
       );
+      // I choose the progress metric that matches the benchmark archetype.
       const metricKey = archetype => archetype === 'PROMPT_FADE'
         ? 'PROMPT'
         : archetype === 'FREQUENCY_QUOTA' ? 'FREQUENCY' : 'ACCURACY';
@@ -4327,6 +4362,7 @@
             metricKey(point.goalArchetype || 'DISCRETE_TRIAL') === panel.key
           )
         })).filter(item => item.points.length);
+        // I read the chart value for the selected progress metric.
         const valueFor = point => panel.key === 'PROMPT'
           ? point.actualPromptCount
           : panel.key === 'FREQUENCY' ? point.frequencyQuotaProgress : point.percent;
@@ -4351,6 +4387,7 @@
         const maxValue = panel.key === 'ACCURACY'
           ? 100
           : Math.max(1, ...values, ...targetValues);
+        // I convert one chart value into its vertical SVG coordinate.
         const y = value => plotBottom -
           (Number(value || 0) / maxValue) * (plotBottom - top);
         const ticks = panel.key === 'ACCURACY'
@@ -4423,6 +4460,7 @@
       }).join('');
     }
 
+    // I show benchmark history.
     async function showBenchmarkHistory(benchmarkId) {
       const dialog = document.getElementById('benchmarkHistoryDialog');
       const content = document.getElementById('benchmarkHistoryContent');
@@ -4449,6 +4487,7 @@
       }
     }
 
+    // I reload bootstrap.
     async function refreshBootstrap(tab) {
       if (tab && state.data && state.data.view === 'CASE_MANAGER') {
         state.caseManagerDataLoaded = {};
@@ -4489,6 +4528,7 @@
       }
     }
 
+    // I connect page controls for refresh buttons.
     function bindRefreshButtons(root) {
       (root || document).querySelectorAll('[data-refresh]').forEach(button => {
         if (button.dataset.refreshBound) return;
@@ -4526,18 +4566,20 @@
       });
     }
 
+    // I turn a browser form into a plain object that can be validated or sent to Apps
+    // Script.
     function formObject(form) {
       return Object.fromEntries(new FormData(form).entries());
     }
 
+    // I call one Apps Script function, show failures consistently, and resolve the browser
+    // promise.
     function server(functionName, ...args) {
       beginBusy(operationLabel(functionName));
       return new Promise((resolve, reject) => {
         try {
-          callServer_(
-            functionName,
-            args,
-            result => {
+          google.script.run
+            .withSuccessHandler(result => {
               endBusy();
               if (result === null || result === undefined) {
                 reject(new Error('No response was returned. Refresh this view and try again.'));
@@ -4546,13 +4588,12 @@
               recordUserActivity_();
               invalidateClientReadModels(functionName);
               resolve(result);
-            },
-            error => {
+            })
+            .withFailureHandler(error => {
               endBusy();
-              handleSessionFailure_(error);
               reject(new Error(safeErrorMessage(error)));
-            }
-          );
+            })
+            [functionName](...args);
         } catch (error) {
           endBusy();
           reject(new Error(safeErrorMessage(error)));
@@ -4560,38 +4601,7 @@
       });
     }
 
-    function callServer_(functionName, args, onSuccess, onFailure) {
-      const runner = google.script.run
-        .withSuccessHandler(onSuccess)
-        .withFailureHandler(onFailure);
-      const session = isKioskDevice_() ? kioskSession_() : '';
-      if (session) {
-        runner.voicesAuthedCall(session, functionName, args);
-        return;
-      }
-      runner[functionName](...args);
-    }
-
-    function handleSessionFailure_(error) {
-      if (!isKioskDevice_()) return;
-      if (!/session/i.test(safeErrorMessage(error))) return;
-      clearKioskSession_();
-      renderAccessActions_();
-    }
-
-    function maybeRefreshKioskSession_() {
-      const session = isKioskDevice_() ? kioskSession_() : '';
-      if (!session) return;
-      if (Date.now() - kioskSessionRefreshedAt < KIOSK_SESSION_REFRESH_MS) return;
-      kioskSessionRefreshedAt = Date.now();
-      google.script.run
-        .withSuccessHandler(result => {
-          if (result && result.token) setKioskSession_(result.token);
-        })
-        .withFailureHandler(() => { /* the next protected call reports the failure */ })
-        .refreshVoicesSession(session);
-    }
-
+    // I clear old cached copies of client read models.
     function invalidateClientReadModels(functionName) {
       const scheduleMutations = new Set([
         'callOff',
@@ -4647,24 +4657,21 @@
       }
     }
 
+    // I keep the server quiet rule in one place so it is used consistently.
     function serverQuiet(functionName, ...args) {
       return new Promise((resolve, reject) => {
         try {
-          callServer_(
-            functionName,
-            args,
-            resolve,
-            error => {
-              handleSessionFailure_(error);
-              reject(new Error(safeErrorMessage(error)));
-            }
-          );
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(error => reject(new Error(safeErrorMessage(error))))
+            [functionName](...args);
         } catch (error) {
           reject(new Error(safeErrorMessage(error)));
         }
       });
     }
 
+    // I keep the begin busy rule in one place so it is used consistently.
     function beginBusy(message) {
       state.pendingOperations += 1;
       const overlay = document.getElementById('busyOverlay');
@@ -4677,6 +4684,7 @@
       document.body.setAttribute('aria-busy', 'true');
     }
 
+    // I keep the end busy rule in one place so it is used consistently.
     function endBusy() {
       state.pendingOperations = Math.max(0, state.pendingOperations - 1);
       if (state.pendingOperations) return;
@@ -4686,6 +4694,7 @@
       document.body.removeAttribute('aria-busy');
     }
 
+    // I keep the operation label rule in one place so it is used consistently.
     function operationLabel(functionName) {
       const labels = {
         getAppBootstrap: 'Refreshing app data…',
@@ -4724,10 +4733,12 @@
       return labels[functionName] || 'Working with the database…';
     }
 
+    // I build the selectable choices used by the current custom dialog.
     function options(items, valueKey, labelKey, selected) {
       return safeArray(items).map(item => `<option value="${escapeAttr(item && item[valueKey])}" ${String(item && item[valueKey]) === String(selected || '') ? 'selected' : ''}>${escapeHtml(item && item[labelKey])}</option>`).join('');
     }
 
+    // I keep the toast rule in one place so it is used consistently.
     function toast(message, isError) {
       const element = document.getElementById('toast');
       element.textContent = safeErrorMessage(message);
@@ -4736,22 +4747,22 @@
       toast.timer = window.setTimeout(() => element.className = 'toast', 5000);
     }
 
+    // I show fatal.
     function showFatal(error) {
       const root = document.getElementById('fatalError');
       root.classList.remove('hidden');
-      const kiosk = isKioskDevice_();
-      const chooser = kiosk ? kioskLoginUrl_() : accountChooserUrl_();
-      const guidance = kiosk
-        ? 'This shared device signs each user in to V.O.I.C.E.S directly. Sign in with your own school Google account.'
-        : 'Google Apps Script cannot reliably select among multiple signed-in accounts. Choose your hbuhsd.edu account below, or open this page in a private window signed into only that account.';
+      const chooser = accountChooserUrl_();
       root.innerHTML = `<div class="eyebrow">Unable to initialize</div><h2>V.O.I.C.E.S 2.0 could not open</h2><p>${escapeHtml(safeErrorMessage(error))}</p>
-        <p class="muted">${escapeHtml(guidance)}</p>
+        <p class="muted">Google Apps Script cannot reliably select among multiple signed-in accounts. Choose your hbuhsd.edu account below, or open this page in a private window signed into only that account.</p>
         <div class="toolbar"><a class="btn primary" href="${escapeAttr(chooser)}">Choose school Google account</a></div>
         <p class="muted small">If the school account is already active, ask a case manager or the Apps Script owner to confirm deployment access and the Staff whitelist.</p>`;
     }
 
+    // I use an empty list when a server response does not contain a valid list.
     function safeArray(value) { return Array.isArray(value) ? value : []; }
+    // I clean and standardize email.
     function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
+    // I clean and standardize bootstrap.
     function normalizeBootstrap(value) {
       if (!value || typeof value !== 'object' || !value.user || !value.view) {
         throw new Error('The database returned an incomplete response.');
@@ -4795,17 +4806,20 @@
       }
       return value;
     }
+    // I keep the safe error message rule in one place so it is used consistently.
     function safeErrorMessage(value) {
       if (value && typeof value === 'object' && value.message) return String(value.message);
       const text = String(value == null ? '' : value).trim();
       return text && text !== '[object Object]' ? text : 'Something went wrong. Refresh this view and try again.';
     }
+    // I format chart date.
     function formatChartDate(value) {
       const text = String(value || '');
       const date = new Date(text);
       if (Number.isNaN(date.getTime())) return text.slice(0, 10);
       return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     }
+    // I format entry date time.
     function formatEntryDateTime(value) {
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return String(value || '');
@@ -4815,6 +4829,7 @@
       });
     }
 
+    // I keep the request dialog rule in one place so it is used consistently.
     function requestDialog(options) {
       options = options || {};
       const dialog = document.getElementById('appDecisionDialog');
@@ -4842,6 +4857,7 @@
       cancel.hidden = options.cancellable === false;
       return new Promise(resolve => {
         let settled = false;
+        // I set tle.
         const settle = confirmed => {
           if (settled) return;
           settled = true;
@@ -4862,11 +4878,13 @@
       });
     }
 
+    // I keep the confirm dialog rule in one place so it is used consistently.
     async function confirmDialog(options) {
       const result = await requestDialog(options);
       return result.confirmed;
     }
 
+    // I show accessible dialog.
     function showAccessibleDialog_(dialog, options) {
       if (!dialog) return;
       options = options || {};
@@ -4890,6 +4908,7 @@
         element.setAttribute('aria-hidden', 'true');
         if ('inert' in element) element.inert = true;
       });
+      // I keep keyboard focus inside the open dialog for safer keyboard navigation.
       const trap = event => {
         if (event.key === 'Escape') {
           event.preventDefault();
@@ -4918,6 +4937,7 @@
       };
       dialog._dialogTrap = trap;
       dialog.addEventListener('keydown', trap);
+      // I close the current dialog and return its cancellation result.
       const cancelHandler = event => {
         event.preventDefault();
         if (options.cancellable !== false && dialog._onAccessibleCancel) dialog._onAccessibleCancel();
@@ -4932,6 +4952,7 @@
       }
     }
 
+    // I close accessible dialog.
     function closeAccessibleDialog_(dialog) {
       if (!dialog) return;
       if (dialog._dialogTrap) dialog.removeEventListener('keydown', dialog._dialogTrap);
@@ -4959,13 +4980,16 @@
       if (returnFocus && typeof returnFocus.focus === 'function') returnFocus.focus();
     }
 
+    // I open dialog.
     function openDialog(id) {
       const dialog = document.getElementById(id);
       const today = state.data ? state.data.today : '';
       dialog.querySelectorAll('input[type="date"]').forEach(input => { if (!input.value) input.value = today; });
       showAccessibleDialog_(dialog, { cancellable: true });
     }
+    // I close dialog.
     function closeDialog(id) { closeAccessibleDialog_(document.getElementById(id)); }
+    // I keep the file as data URL rule in one place so it is used consistently.
     function fileAsDataUrl(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -4974,19 +4998,24 @@
         reader.readAsDataURL(file);
       });
     }
+    // I keep the entry comparison badge class rule in one place so it is used consistently.
     function entryComparisonBadgeClass(count, average, active) {
       if (!active) return '';
       if (count >= average) return 'status-approved';
       if (count >= average * 0.5) return 'status-pending';
       return 'critical';
     }
+    // I keep the role label rule in one place so it is used consistently.
     function roleLabel(role) { return titleCase(String(role).replace('_', ' ')); }
+    // I turn stored all-capital labels into easier-to-read words.
     function titleCase(value) { return String(value).toLowerCase().replace(/\b\w/g, char => char.toUpperCase()); }
+    // I safely escape HTML.
     function escapeHtml(value) {
       return String(value == null ? '' : value)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
     }
+    // I safely escape attr.
     function escapeAttr(value) { return escapeHtml(value); }
   </script>
 </body>

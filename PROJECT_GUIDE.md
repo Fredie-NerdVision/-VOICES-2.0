@@ -85,7 +85,16 @@ Case managers can manage assigned students, goals, schedules, staff requests, me
 
 Deactivating a staff or student row revokes active access without deleting historical records.
 
-The branded entry screen does not implement a separate password database. It starts the server-side Workspace identity and whitelist check. After 30 minutes without meaningful pointer, keyboard, touch, or foreground server activity, the browser locks the application screen and requires another bootstrap authorization check to resume. This is an application lock, not a Google sign-out. Account switching uses Google's account chooser.
+The branded entry screen does not implement a separate password database. It starts the server-side Workspace identity and whitelist check. After 30 minutes without meaningful pointer, keyboard, touch, or foreground server activity, the browser locks the application screen and requires another bootstrap authorization check to resume. This is an application lock, not a Google sign-out. Account switching uses Google's normal account chooser, which may reuse an account that is already signed in.
+
+There is no kiosk enrollment, separate OAuth client, V.O.I.C.E.S credential store, or server-signed browser session. Identity always follows this path:
+
+```text
+Active Google Workspace account
+→ Session.getActiveUser().getEmail()
+→ active Staff whitelist row
+→ role-aware workspace
+```
 
 The app should be deployed:
 
@@ -109,7 +118,7 @@ Emails are sent from the deployment owner's account under the display name `V.O.
 | `GoalService.gs` | Flexible goal/phase parsing, phase chronology, mastery, analytics, progress reports |
 | `ScheduleService.gs` | Schedule types, date-specific shifts/lunches, revisions, weekly calculations, conflicts, replacement matching, call-offs |
 | `TimeService.gs` | Clock in/out, pay-period summaries, time-off and availability submissions |
-| `AdminService.gs` | Staff/student CRUD, request review, message management, notifications |
+| `AdminService.gs` | Staff/student CRUD, class-roster editing, relevance tags, request review, messages, notifications |
 | `IEPService.gs` | Google Docs IEP generation and Drive sharing |
 | `DemoData.gs` | Isolated deterministic training database generation and validation |
 | `DefaultLogo.gs` | Embedded default Westminster mascot |
@@ -167,7 +176,7 @@ The canonical database remains one spreadsheet workbook with normalized tabs. Sp
 4. returns branding, messages, critical goals, subjects, classes, students, and current assignment;
 5. adds either case-manager management data or the aide's schedule, training, time entry, and pay-period data.
 
-Data is cached only for the current server invocation to reduce repeated Sheet reads without creating stale cross-request state.
+Rows are reused during each server invocation. Larger student and schedule responses also use versioned `CacheService` entries and chunked persistent read models so repeat visits stay fast. Related writes increase the appropriate version or invalidate the affected model before another request can reuse it.
 
 The browser displays an operation overlay and prevents competing clicks while an RPC request is running. Targeted refresh actions reload only the necessary dashboard data. A two-minute warning precedes the 30-minute inactivity lock; resume revalidates Workspace identity and preserves any durable observation draft.
 
@@ -426,7 +435,7 @@ Updating the existing deployment preserves its `/exec` URL. Creating a new deplo
 - Do not commit `.clasp.json`, OAuth tokens, or credentials.
 - Keep Fredie the aide separate from any owner/admin identity.
 - Treat Kaitlin's weekly capacity as 29 hours.
-- Keep the Workspace access gate focused on identity and lock/resume; do not turn it into the canceled first-login walkthrough.
+- Keep the Workspace access gate focused on Google identity, Staff authorization, and lock/resume.
 - Keep critical status and subject relevance at the goal level.
 - Preserve existing IDs/history and allow zero or any number of phases per goal.
 - Never infer missing historical prompt metadata.

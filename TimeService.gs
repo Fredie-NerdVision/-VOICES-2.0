@@ -1,3 +1,11 @@
+/**
+ * I keep aide time and availability requests in this file.
+ *
+ * Aides can clock in or out, review a pay-period summary, submit time off, and
+ * share recurring availability. The server always uses the signed-in account
+ * for personal actions so one aide cannot submit time under another name.
+ */
+// I start a time entry for the signed-in aide only when no open entry already exists.
 function clockIn(note) {
   const email = getCurrentUserEmail_();
   const staff = requireAuthorizedStaff_(email);
@@ -19,6 +27,7 @@ function clockIn(note) {
   return { ok: true, entry: publicTimeEntry_(entry) };
 }
 
+// I close the signed-in aide’s open time entry and calculate the worked duration.
 function clockOut(note) {
   const email = getCurrentUserEmail_();
   requireAuthorizedStaff_(email);
@@ -38,6 +47,7 @@ function clockOut(note) {
   return { ok: true, hours: hours };
 }
 
+// I collect and return open time entry.
 function getOpenTimeEntry_(email) {
   const row = findOne_('TimeEntries', item =>
     normalizeEmail_(item.AideEmail) === normalizeEmail_(email) && !item.ClockOut
@@ -45,6 +55,7 @@ function getOpenTimeEntry_(email) {
   return row ? publicTimeEntry_(row) : null;
 }
 
+// I return a browser-safe copy of time entry.
 function publicTimeEntry_(row) {
   return {
     id: row.Id,
@@ -57,6 +68,7 @@ function publicTimeEntry_(row) {
   };
 }
 
+// I collect and return pay period summary.
 function getPayPeriodSummary(email, anchorDate) {
   const currentEmail = getCurrentUserEmail_();
   const staff = requireAuthorizedStaff_(currentEmail);
@@ -69,6 +81,7 @@ function getPayPeriodSummary(email, anchorDate) {
   return getPayPeriodSummary_(targetEmail, anchorDate ? new Date(anchorDate) : new Date());
 }
 
+// I collect and return pay period summary.
 function getPayPeriodSummary_(email, anchorDate) {
   const range = payPeriodRange_(anchorDate);
   const entries = rows_('TimeEntries')
@@ -99,6 +112,7 @@ function getPayPeriodSummary_(email, anchorDate) {
   };
 }
 
+// I keep the pay period range rule in one place so it is used consistently.
 function payPeriodRange_(anchorDate) {
   const day = toNumber_(settingsMap_().PayPeriodStartDay, 10);
   const anchor = new Date(anchorDate);
@@ -114,6 +128,7 @@ function payPeriodRange_(anchorDate) {
   return { start: start, end: end };
 }
 
+// I validate and submit time off request.
 function submitTimeOffRequest(payload) {
   payload = payload || {};
   const email = getCurrentUserEmail_();
@@ -143,6 +158,7 @@ function submitTimeOffRequest(payload) {
   return { ok: true, id: record.Id };
 }
 
+// I validate and submit availability.
 function submitAvailability(payload) {
   payload = payload || {};
   const email = getCurrentUserEmail_();

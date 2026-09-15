@@ -1,3 +1,4 @@
+// I check weekly hours, shifts, lunches, and schedule totals with isolated sample data here.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

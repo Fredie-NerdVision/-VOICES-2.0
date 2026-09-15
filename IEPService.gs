@@ -1,8 +1,24 @@
+/**
+ * I use this file to list IEP records and create an IEP progress document.
+ *
+ * Only the student's assigned case manager or an administrator may use these
+ * actions. The document is created with Google Docs, stored in Drive, shared
+ * with the case manager, and then recorded in the IEPs sheet.
+ */
+// I collect and return IEP for current case manager.
 function getIepsForCurrentCaseManager() {
   const staff = requireCaseManager_();
   return getIepsForCurrentCaseManager_(staff);
 }
 
+/**
+ * I use this file to list IEP records and create an IEP progress document.
+ *
+ * Only the student's assigned case manager or an administrator may use these
+ * actions. The document is created with Google Docs, stored in Drive, shared
+ * with the case manager, and then recorded in the IEPs sheet.
+ */
+// I collect and return IEP for current case manager.
 function getIepsForCurrentCaseManager_(staff) {
   const email = normalizeEmail_(staff.Email);
   const students = indexBy_(activeRows_('Students'), 'Id');
@@ -21,6 +37,7 @@ function getIepsForCurrentCaseManager_(staff) {
     }));
 }
 
+// I create a Google Docs progress report and save its Drive link in the IEP record.
 function generateIep(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
@@ -165,6 +182,7 @@ function generateIep(payload) {
   return { ok: true, id: record.Id, fileUrl: record.FileUrl };
 }
 
+// I collect and return or create IEP folder.
 function getOrCreateIepFolder_() {
   const parent = getOrCreateAppFolder_();
   const folders = parent.getFoldersByName('IEPs');

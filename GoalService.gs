@@ -1,13 +1,29 @@
+/**
+ * I keep annual goals, benchmark phases, mastery rules, and progress reports
+ * in this file.
+ *
+ * A goal may contain several ordered benchmarks. I can read plain-language
+ * objectives, prepare a review, save the goal, decide which phase is active,
+ * and calculate progress from the observation history. Mastery can use
+ * accuracy, prompt fading, task expansion, or frequency rules over different
+ * time windows.
+ *
+ * Date-driven activation and phase history are kept here so reports can judge
+ * an older observation using the benchmark that was active on that date.
+ */
+// I clean and standardize goal archetype.
 function normalizeGoalArchetype_(value) {
   const archetype = String(value || '').trim().toUpperCase();
   return VOICES.GOAL_ARCHETYPES.includes(archetype) ? archetype : '';
 }
 
+// I clean and standardize evaluation window unit.
 function normalizeEvaluationWindowUnit_(value) {
   const unit = String(value || '').trim().toUpperCase();
   return VOICES.EVALUATION_WINDOW_UNITS.includes(unit) ? unit : '';
 }
 
+// I infer the most likely benchmark archetype.
 function inferBenchmarkArchetype_(text) {
   const value = String(text || '');
   if (/\b(?:school days?|grading periods?|per quarter|quarterly|yearly attendance|daily checklist)\b/i.test(value)) {
@@ -22,6 +38,7 @@ function inferBenchmarkArchetype_(text) {
   return 'DISCRETE_TRIAL';
 }
 
+// I infer the most likely evaluation window unit.
 function inferEvaluationWindowUnit_(text, archetype) {
   const value = String(text || '');
   if (/\b(?:two|2)[ -]?weeks?\b|\bbiweekly\b/i.test(value)) return 'TWO_WEEK';
@@ -33,6 +50,7 @@ function inferEvaluationWindowUnit_(text, archetype) {
   return 'SESSION';
 }
 
+// I read and organize goal objectives.
 function parseGoalObjectives_(value) {
   const text = sanitizeText_(value, 20000);
   if (!text) return [];
@@ -54,6 +72,7 @@ function parseGoalObjectives_(value) {
   });
 }
 
+// I read and organize objective record.
 function parseObjectiveRecord_(objective, index) {
   if (!objective) {
     throw new Error('Benchmark ' + (index + 1) + ' has no task description.');
@@ -117,6 +136,7 @@ function parseObjectiveRecord_(objective, index) {
   };
 }
 
+// I pull the useful details from objective ratios.
 function extractObjectiveRatios_(text) {
   const regex = /(\d+)\s*(?:\/|out\s+of)\s*(\d+)/gi;
   const ratios = [];
@@ -132,6 +152,7 @@ function extractObjectiveRatios_(text) {
   return ratios;
 }
 
+// I read and organize prompt level.
 function parsePromptLevel_(text) {
   const value = String(text || '');
   if (/\bindependent(?:ly)?\b/i.test(value)) return 'Independent';
@@ -142,6 +163,7 @@ function parsePromptLevel_(text) {
   return '';
 }
 
+// I read and organize prompt count.
 function parsePromptCount_(text, promptLevel) {
   if (promptLevel === 'Independent') return 0;
   const matches = Array.from(String(text || '').matchAll(
@@ -152,6 +174,7 @@ function parsePromptCount_(text, promptLevel) {
   return Number(match[2] || match[1]);
 }
 
+// I prepare a no-change preview of goal phases.
 function previewGoalPhases(payload) {
   requireCaseManager_();
   payload = payload || {};
@@ -161,6 +184,7 @@ function previewGoalPhases(payload) {
   };
 }
 
+// I create goal.
 function createGoal(payload) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -341,6 +365,7 @@ function createGoal(payload) {
   });
 }
 
+// I update goal subjects.
 function updateGoalSubjects(payload) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -409,6 +434,7 @@ function updateGoalSubjects(payload) {
   });
 }
 
+// I prepare a no-change preview of bulk goals.
 function previewBulkGoals(payload) {
   const staff = requireCaseManager_();
   payload = payload || {};
@@ -511,6 +537,7 @@ function previewBulkGoals(payload) {
   };
 }
 
+// I validate and save bulk goals.
 function saveBulkGoals(payload) {
   payload = payload || {};
   const preview = previewBulkGoals(payload);
@@ -548,6 +575,7 @@ function saveBulkGoals(payload) {
   };
 }
 
+// I keep the goal import fingerprint rule in one place so it is used consistently.
 function goalImportFingerprint_(goal) {
   return Utilities.computeDigest(
     Utilities.DigestAlgorithm.SHA_256,
@@ -555,6 +583,7 @@ function goalImportFingerprint_(goal) {
   ).map(value => ((value + 256) % 256).toString(16).padStart(2, '0')).join('');
 }
 
+// I clean and standardize goal phase.
 function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
   phase = phase || {};
   const taskDemand = sanitizeText_(
@@ -645,6 +674,7 @@ function normalizeGoalPhase_(phase, index, defaultStartDate, defaultDueDate) {
   };
 }
 
+// I clean and standardize goal status.
 function normalizeGoalStatus_(value, phaseCount) {
   let status = String(value || (phaseCount ? 'ACTIVE' : 'DRAFT')).toUpperCase();
   if (!['DRAFT', 'ACTIVE', 'COMPLETED', 'INACTIVE'].includes(status)) {
@@ -654,14 +684,17 @@ function normalizeGoalStatus_(value, phaseCount) {
   return status;
 }
 
+// I keep the goal status rule in one place so it is used consistently.
 function goalStatus_(row) {
   return String(row.Status || (toBoolean_(row.Active) ? 'ACTIVE' : 'INACTIVE')).toUpperCase();
 }
 
+// I check whether active goal.
 function isActiveGoal_(row) {
   return goalStatus_(row) === 'ACTIVE' && toBoolean_(row.Active);
 }
 
+// I keep the goal workspace section rule in one place so it is used consistently.
 function goalWorkspaceSection_(goal, date) {
   const currentDate = formatDate_(date || new Date());
   if (!isActiveGoal_(goal) || goalStatus_(goal) === 'COMPLETED') return 'HISTORY';
@@ -672,6 +705,7 @@ function goalWorkspaceSection_(goal, date) {
   return 'CURRENT';
 }
 
+// I clean and standardize prompt level.
 function normalizePromptLevel_(value) {
   if (!value) return '';
   const matched = VOICES.PROMPT_LEVELS.find(level =>
@@ -681,6 +715,7 @@ function normalizePromptLevel_(value) {
   return matched;
 }
 
+// I keep the optional integer rule in one place so it is used consistently.
 function optionalInteger_(value) {
   if (value === '' || value === null || value === undefined) return null;
   const number = Number(value);
@@ -690,6 +725,7 @@ function optionalInteger_(value) {
   return number;
 }
 
+// I undo partial changes from goal creation.
 function rollbackGoalCreation_(goalId, benchmarkIds) {
   const ids = new Set(benchmarkIds.map(String));
   rows_('GoalPhaseHistory')
@@ -710,10 +746,12 @@ function rollbackGoalCreation_(goalId, benchmarkIds) {
     .forEach(row => deleteRow_('Goals', row._row));
 }
 
+// I collect and return goal manager data.
 function getGoalManagerData(studentId, force) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
     const selectedStudentId = String(studentId || '');
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => getGoalManagerData_(staff, selectedStudentId);
     return cachedResponse_(
       'goal-manager',
@@ -725,6 +763,7 @@ function getGoalManagerData(studentId, force) {
   });
 }
 
+// I collect and return goal manager data.
 function getGoalManagerData_(staff, studentId, includeAllStudents) {
   const selectedStudentId = String(studentId || '');
   if (!selectedStudentId && !includeAllStudents) {
@@ -800,11 +839,13 @@ function getGoalManagerData_(staff, studentId, includeAllStudents) {
   };
 }
 
+// I collect and return student goal workspace.
 function getStudentGoalWorkspace(studentId, options) {
   return withRowsCache_(() => {
     options = options || {};
     const staff = requireCaseManager_();
     const student = requireManagedStudent_(staff, studentId);
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => {
     const asOfDate = formatDate_(options.endDate || new Date());
     const availableGoals = rows_('Goals')
@@ -985,6 +1026,7 @@ function getStudentGoalWorkspace(studentId, options) {
   });
 }
 
+// I summarize goal entries.
 function summarizeGoalEntries_(entries, benchmarks) {
   if (!entries.length) {
     return {
@@ -1009,6 +1051,7 @@ function summarizeGoalEntries_(entries, benchmarks) {
   const lastThree = currentEntries.slice(-3);
   const lastThreeTrials = lastThree.reduce((sum, row) => sum + toNumber_(row.Attempts), 0);
   const lastThreeSuccesses = lastThree.reduce((sum, row) => sum + toNumber_(row.Correct), 0);
+  // I index benchmarks by ID so reports can join observations without repeated searches.
   const benchmarkIndex = (benchmarks || []).reduce((map, benchmark) => {
     map[benchmark.Id] = benchmark;
     return map;
@@ -1054,6 +1097,7 @@ function summarizeGoalEntries_(entries, benchmarks) {
   };
 }
 
+// I build goal progress statements.
 function buildGoalProgressStatements_(student, entries, benchmarkIndex) {
   const groups = entries.reduce((map, entry) => {
     const benchmark = benchmarkIndex[entry.BenchmarkId];
@@ -1113,6 +1157,7 @@ function buildGoalProgressStatements_(student, entries, benchmarkIndex) {
   });
 }
 
+// I collect and return goal progress report.
 function getGoalProgressReport(payload) {
   payload = payload || {};
   assertRequired_(payload, ['studentId']);
@@ -1132,6 +1177,7 @@ function getGoalProgressReport(payload) {
   };
 }
 
+// I collect and return school quarter boundaries.
 function getSchoolQuarterBoundaries_() {
   const raw = settingsMap_().SchoolQuarterBoundaries || '[]';
   try {
@@ -1144,6 +1190,7 @@ function getSchoolQuarterBoundaries_() {
   }
 }
 
+// I keep the next school quarter boundary rule in one place so it is used consistently.
 function nextSchoolQuarterBoundary_(date) {
   const current = formatDate_(date);
   const next = getSchoolQuarterBoundaries_().find(boundary => boundary > current);
@@ -1153,8 +1200,10 @@ function nextSchoolQuarterBoundary_(date) {
   return next;
 }
 
+// I select date driven benchmark.
 function selectDateDrivenBenchmark_(benchmarks, date) {
   const current = formatDate_(date);
+  // I put benchmark phases into their intended sequence before choosing the active one.
   const ordered = (benchmarks || []).slice().sort((a, b) =>
     String(formatDate_(a.DueDate || a.dueDate) || '9999-12-31')
       .localeCompare(String(formatDate_(b.DueDate || b.dueDate) || '9999-12-31')) ||
@@ -1170,12 +1219,15 @@ function selectDateDrivenBenchmark_(benchmarks, date) {
   return null;
 }
 
+// I keep the goal uses date driven benchmarks rule in one place so it is used consistently.
 function goalUsesDateDrivenBenchmarks_(goal) {
   return String(goal && goal.BenchmarkActivationMode || '').toUpperCase() === 'DATE';
 }
 
+// I determine the date-appropriate benchmark rows.
 function effectiveBenchmarkRows_(goals, benchmarks, date) {
   const goalIndex = indexBy_(goals || [], 'Id');
+  // I group benchmark rows by goal so each goal is evaluated only with its own phases.
   const benchmarksByGoal = (benchmarks || []).reduce((map, benchmark) => {
     const goalId = String(benchmark.GoalId || '');
     if (!map[goalId]) map[goalId] = [];
@@ -1203,6 +1255,7 @@ function effectiveBenchmarkRows_(goals, benchmarks, date) {
   });
 }
 
+// I collect and return manual benchmark override.
 function getManualBenchmarkOverride_(goalId, date) {
   const current = formatDate_(date);
   return rows_('GoalPhaseHistory')
@@ -1218,6 +1271,7 @@ function getManualBenchmarkOverride_(goalId, date) {
     )[0] || null;
 }
 
+// I collect and return effective goal benchmark.
 function getEffectiveGoalBenchmark_(goal, benchmarks, date) {
   if (!goalUsesDateDrivenBenchmarks_(goal)) return null;
   const override = getManualBenchmarkOverride_(goal.Id, date);
@@ -1227,6 +1281,7 @@ function getEffectiveGoalBenchmark_(goal, benchmarks, date) {
   return selectDateDrivenBenchmark_(benchmarks, date);
 }
 
+// I build date driven benchmark history.
 function buildDateDrivenBenchmarkHistory_(goal, benchmarks, throughDate) {
   const endDate = formatDate_(throughDate || new Date());
   const dates = new Set([formatDate_(goal.StartDate), endDate].filter(Boolean));
@@ -1277,6 +1332,7 @@ function buildDateDrivenBenchmarkHistory_(goal, benchmarks, throughDate) {
   return timeline;
 }
 
+// I keep the browser and server copies aligned for date driven goal.
 function syncDateDrivenGoal_(goal, date, changedBy) {
   if (!isActiveGoal_(goal) || !goalUsesDateDrivenBenchmarks_(goal)) return null;
   const currentDate = formatDate_(date);
@@ -1344,6 +1400,7 @@ function syncDateDrivenGoal_(goal, date, changedBy) {
   return desired;
 }
 
+// I reconcile date driven benchmarks.
 function reconcileDateDrivenBenchmarks_(date, changedBy) {
   const currentDate = formatDate_(date || new Date());
   rows_('Goals')
@@ -1352,6 +1409,7 @@ function reconcileDateDrivenBenchmarks_(date, changedBy) {
     .forEach(goal => syncDateDrivenGoal_(goal, currentDate, changedBy));
 }
 
+// I reconcile date driven benchmarks.
 function reconcileDateDrivenBenchmarks() {
   requireAdmin_();
   return withRowsCache_(() => {
@@ -1369,6 +1427,7 @@ function reconcileDateDrivenBenchmarks() {
   });
 }
 
+// I collect and return current benchmark activation date.
 function getCurrentBenchmarkActivationDate_(goalId, benchmarkId, date) {
   const current = formatDate_(date);
   const history = rows_('GoalPhaseHistory')
@@ -1385,6 +1444,7 @@ function getCurrentBenchmarkActivationDate_(goalId, benchmarkId, date) {
   return history.length ? formatDate_(history[0].ActivatedAt) : '';
 }
 
+// I check missing benchmark observations.
 function checkMissingBenchmarkObservations() {
   return withRowsCache_(() => {
     const lock = LockService.getScriptLock();
@@ -1500,6 +1560,7 @@ function checkMissingBenchmarkObservations() {
   });
 }
 
+// I set active goal benchmark.
 function setActiveGoalBenchmark(payload) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -1629,10 +1690,12 @@ function setActiveGoalBenchmark(payload) {
   });
 }
 
+// I activate goal phase.
 function activateGoalPhase(payload) {
   return setActiveGoalBenchmark(payload);
 }
 
+// I collect and return goal phase history.
 function getGoalPhaseHistory_(goalId) {
   return rows_('GoalPhaseHistory')
     .filter(row => String(row.GoalId) === String(goalId))
@@ -1642,6 +1705,7 @@ function getGoalPhaseHistory_(goalId) {
     );
 }
 
+// I collect and return phase for observation date.
 function getPhaseForObservationDate_(goalId, observationDate) {
   const date = formatDate_(observationDate);
   const goal = findOne_('Goals', row => String(row.Id) === String(goalId));
@@ -1676,10 +1740,12 @@ function getPhaseForObservationDate_(goalId, observationDate) {
     )[0] || null;
 }
 
+// I keep the prompt level rank rule in one place so it is used consistently.
 function promptLevelRank_(value) {
   return VOICES.PROMPT_LEVELS.indexOf(normalizePromptLevel_(value));
 }
 
+// I keep the benchmark mastery config rule in one place so it is used consistently.
 function benchmarkMasteryConfig_(benchmark) {
   const sourceText = benchmark.Description || benchmark.TaskDemandDescription ||
     benchmark.Skill || '';
@@ -1732,6 +1798,7 @@ function benchmarkMasteryConfig_(benchmark) {
   };
 }
 
+// I combine observations for mastery entries.
 function aggregateMasteryEntries_(entries) {
   const promptLevels = entries
     .map(row => normalizePromptLevel_(row.ActualPromptLevel))
@@ -1752,6 +1819,7 @@ function aggregateMasteryEntries_(entries) {
   };
 }
 
+// I combine observations for meets benchmark target.
 function aggregateMeetsBenchmarkTarget_(aggregate, config, includeConsistency) {
   const checks = [];
   if (config.targetAccuracy !== null) {
@@ -1774,6 +1842,7 @@ function aggregateMeetsBenchmarkTarget_(aggregate, config, includeConsistency) {
   return checks.length ? checks.every(Boolean) : null;
 }
 
+// I keep the entry meets benchmark target rule in one place so it is used consistently.
 function entryMeetsBenchmarkTarget_(entry, benchmark) {
   const config = benchmarkMasteryConfig_(benchmark);
   if (!config.available) {
@@ -1786,6 +1855,7 @@ function entryMeetsBenchmarkTarget_(entry, benchmark) {
   );
 }
 
+// I keep the grading period key rule in one place so it is used consistently.
 function gradingPeriodKey_(date) {
   const value = formatDate_(date);
   const boundaries = getSchoolQuarterBoundaries_();
@@ -1799,6 +1869,7 @@ function gradingPeriodKey_(date) {
   return parsed.getFullYear() + '-Q' + (quarter + 1);
 }
 
+// I keep the mastery window key rule in one place so it is used consistently.
 function masteryWindowKey_(entry, benchmark, config, firstDate) {
   const date = formatDate_(entry.ObservationDate || entry.Timestamp);
   if (config.evaluationWindowUnit === 'TWO_WEEK') {
@@ -1816,6 +1887,7 @@ function masteryWindowKey_(entry, benchmark, config, firstDate) {
   return config.evaluationWindowUnit + '|' + date;
 }
 
+// I build mastery windows.
 function buildMasteryWindows_(benchmark, entries, config) {
   const activeEntries = entries
     .filter(row => String(row.Status || 'ACTIVE').toUpperCase() === 'ACTIVE')
@@ -1842,6 +1914,7 @@ function buildMasteryWindows_(benchmark, entries, config) {
   })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+// I keep the frequency window aggregate rule in one place so it is used consistently.
 function frequencyWindowAggregate_(window) {
   const entries = window.entries || [];
   const binaryEntries = entries.length && entries.every(row =>
@@ -1867,6 +1940,7 @@ function frequencyWindowAggregate_(window) {
   };
 }
 
+// I keep the evaluate mastery windows rule in one place so it is used consistently.
 function evaluateMasteryWindows_(windows, config) {
   if (config.archetype !== 'FREQUENCY_QUOTA') {
     return windows.map(window =>
@@ -1897,6 +1971,7 @@ function evaluateMasteryWindows_(windows, config) {
   });
 }
 
+// I build frequency chart value index.
 function buildFrequencyChartValueIndex_(benchmark, entries) {
   const config = benchmarkMasteryConfig_(benchmark);
   if (config.archetype !== 'FREQUENCY_QUOTA' || !entries.length) return {};
@@ -1926,6 +2001,7 @@ function buildFrequencyChartValueIndex_(benchmark, entries) {
   }, {});
 }
 
+// I summarize benchmark mastery.
 function summarizeBenchmarkMastery_(benchmark, entries) {
   const config = benchmarkMasteryConfig_(benchmark);
   if (!config.available) {
@@ -1958,6 +2034,7 @@ function summarizeBenchmarkMastery_(benchmark, entries) {
   };
 }
 
+// I keep the compare observation entries rule in one place so it is used consistently.
 function compareObservationEntries_(a, b) {
   return String(a.ObservationDate || formatDate_(a.Timestamp))
     .localeCompare(String(b.ObservationDate || formatDate_(b.Timestamp))) ||
@@ -1965,6 +2042,7 @@ function compareObservationEntries_(a, b) {
     String(a.Id).localeCompare(String(b.Id));
 }
 
+// I set goal critical.
 function setGoalCritical(payload) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -1985,6 +2063,7 @@ function setGoalCritical(payload) {
   });
 }
 
+// I keep the deactivate goal rule in one place so it is used consistently.
 function deactivateGoal(goalId) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -2015,6 +2094,7 @@ function deactivateGoal(goalId) {
   });
 }
 
+// I collect and return benchmark entry details.
 function getBenchmarkEntryDetails(benchmarkId, force) {
   return withRowsCache_(() => {
     const staff = requireCaseManager_();
@@ -2023,6 +2103,7 @@ function getBenchmarkEntryDetails(benchmarkId, force) {
     );
     if (!benchmark) throw new Error('Benchmark was not found.');
     const student = requireManagedStudent_(staff, benchmark.StudentId);
+    // I prepare this response only when a current cached copy is not available.
     const producer = () => {
     const staffIndex = rows_('Staff').reduce((map, row) => {
       map[normalizeEmail_(row.Email)] = publicStaff_(row);
@@ -2066,6 +2147,7 @@ function getBenchmarkEntryDetails(benchmarkId, force) {
   });
 }
 
+// I return a browser-safe copy of goal.
 function publicGoal_(row, student, benchmarks) {
   const goalBenchmarks = Array.isArray(benchmarks) ? benchmarks : [];
   const subjects = getSubjectIndex_();
@@ -2094,6 +2176,7 @@ function publicGoal_(row, student, benchmarks) {
   };
 }
 
+// I keep the managed students rule in one place so it is used consistently.
 function managedStudents_(staff) {
   const email = normalizeEmail_(staff.Email);
   const students = activeRows_('Students');
@@ -2104,6 +2187,7 @@ function managedStudents_(staff) {
     );
 }
 
+// I require and verify managed student.
 function requireManagedStudent_(staff, studentId) {
   const student = findOne_('Students', row =>
     String(row.Id) === String(studentId) && toBoolean_(row.Active)
@@ -2116,6 +2200,7 @@ function requireManagedStudent_(staff, studentId) {
   return student;
 }
 
+// I collect and return benchmark subject ID.
 function getBenchmarkSubjectIds_(benchmarkId) {
   if (VOICES_INDEX_CACHE && !VOICES_INDEX_CACHE.benchmarkSubjects) {
     VOICES_INDEX_CACHE.benchmarkSubjects = rows_('BenchmarkSubjects').reduce((map, row) => {
@@ -2133,6 +2218,7 @@ function getBenchmarkSubjectIds_(benchmarkId) {
     .map(row => String(row.SubjectId));
 }
 
+// I collect and return subject index.
 function getSubjectIndex_() {
   if (VOICES_INDEX_CACHE && !VOICES_INDEX_CACHE.subjects) {
     VOICES_INDEX_CACHE.subjects = indexBy_(activeRows_('Subjects'), 'Id');

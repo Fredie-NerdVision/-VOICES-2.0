@@ -6,8 +6,13 @@ Release 2.3 adds flexible goal phases, raw-trial and prompt-condition observatio
 
 Read [PROJECT_GUIDE.md](PROJECT_GUIDE.md) for the complete architecture, data model, workflows, resource map, setup, testing, and deployment procedures.
 
-For a dedicated shared tablet, follow [SHARED_DEVICE_LOGIN.md](SHARED_DEVICE_LOGIN.md)
-to configure the server-verified Google sign-in without changing normal phone access.
+## Identity and entry
+
+V.O.I.C.E.S uses the Google Workspace account already active in the browser. The server reads that account with `Session.getActiveUser().getEmail()` and then requires an active matching row in the `Staff` sheet.
+
+The branded entry screen is not a separate username/password system. **Choose another Google account** opens Google's normal account chooser, but Google may reuse an account that is already signed in. The 30-minute idle lock covers private information and rechecks access; it does not sign the browser out of Google.
+
+The web app should remain domain-restricted and deployed to execute as the owner. No kiosk enrollment, OAuth client, V.O.I.C.E.S password, or signed app session is required.
 
 ## Local validation
 
